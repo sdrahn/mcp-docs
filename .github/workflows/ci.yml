@@ -35,8 +35,12 @@ jobs:
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
     steps:
+      # rpmlint imports python's packaging module, which Leap 16's rpmlint
+      # only recommends.
       - name: Install tools
-        run: zypper -n --gpg-auto-import-keys in --no-recommends git tar gzip rpm-build rpmlint
+        run: >
+          zypper -n --gpg-auto-import-keys in --no-recommends
+          git tar gzip rpm-build rpmlint 'python3dist(packaging)'
       - uses: actions/checkout@v4
       - name: Install build dependencies (from the spec, as OBS does)
         run: |
