@@ -36,6 +36,7 @@ type match struct {
 	Path         []string `json:"path,omitempty"`
 	SectionLine  int      `json:"sectionLine,omitempty"`
 	SectionLines int      `json:"sectionLines,omitempty"`
+	SectionBytes int64    `json:"sectionBytes,omitempty"`
 }
 
 var queryArgs = map[string]any{
@@ -64,7 +65,7 @@ func searchTool() tool {
 			"matches": map[string]any{"type": "array", "items": obj(map[string]any{
 				"doc": strType, "line": intType, "text": strType, "version": strType, "section": strType,
 				"path": map[string]any{"type": "array", "items": strType}, "sectionLine": intType,
-				"sectionLines": intType}, "doc", "line", "text")},
+				"sectionLines": intType, "sectionBytes": intType}, "doc", "line", "text")},
 			"truncated": map[string]any{"type": "boolean"}}, "matches", "truncated"),
 		run: search}
 }
@@ -264,7 +265,7 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 			m.Version = e.Version
 			if sec >= 0 {
 				sh := o.Headings[sec]
-				m.Section, m.Path, m.SectionLine, m.SectionLines = sh.ID, o.Path(sec), sh.Line, sh.Lines
+				m.Section, m.Path, m.SectionLine, m.SectionLines, m.SectionBytes = sh.ID, o.Path(sec), sh.Line, sh.Lines, sh.Bytes
 			}
 			if sec != section {
 				if sec >= 0 {

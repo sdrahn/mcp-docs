@@ -10,10 +10,15 @@ It generalises the `gateway-docs` server of
 27 and 28: `search_text`, `outline_file`, ranged reads) to any set of
 documents.
 
-Status: steps 1 (the core) and 2 (collection files, metadata,
-resources) are implemented; packaging, ranked search and long list
-items are to come.
-See [docs/architecture.md](docs/architecture.md).
+Status: steps 1 to 3 are implemented: the core, collection files and
+metadata, and packaging for openSUSE Tumbleweed, openSUSE Leap 16 and
+SLES 16 ([packaging/suse](packaging/suse/README.md)); ranked search and
+long list items are to come. See
+[docs/architecture.md](docs/architecture.md).
+
+How to write documentation that agents read cheaply, through mcp-docs
+or anything that reads by section:
+[docs/writing-docs.md](docs/writing-docs.md).
 
 ## Running it
 
@@ -79,28 +84,27 @@ refused.
 
 ### Behind mcp-gateway
 
-To serve the gateway's documentation with mcp-docs, replace the
-command of `gateway-docs` (`/etc/mcp-gateway/servers.d/gateway-docs.yaml`):
+mcp-gateway (from the release after 0.18.0) ships a definition of its
+`gateway-docs` server on mcp-docs, for the administrator to enable:
 
-```yaml
-command: ["/usr/bin/mcp-docs", "--fs-compat", "--collection",
-  "mcp-gateway=/usr/share/mcp-gateway/docs:The documentation of mcp-gateway, for the installed version"]
+```sh
+zypper in mcp-docs
+cp /usr/share/mcp-gateway/profiles/gateway-docs-mcp-docs.yaml /etc/mcp-gateway/servers.d/gateway-docs.yaml
 ```
 
-With `--fs-compat`, the existing role `gateway-docs-reader` and its
-instructions keep working; the new tools are offered beside them.
-
-On a system with SELinux enforcing, the gateway's policy must also
-allow `/usr/bin/mcp-docs` as an entry point of `mcpsrv_docs_t`: today
-the domain's only entry point is `mcp-server-fs` (`mcpsrv_fs_exec_t`).
-mcp-docs executes itself once more to apply Landlock to all of its
-threads, so the domain also needs `can_exec` on its type. That policy
-change belongs in mcp-gateway (plan step 3).
+With `--fs-compat`, the existing role `gateway-docs-reader` and the
+agents' habits keep working; the new tools are offered beside them.
+`mcp-gateway-selinux` labels `/usr/bin/mcp-docs` as the entry point of
+the server's domain `mcpsrv_docs_t`. mcp-gateway also installs its
+documentation as the collection `mcp-gateway`, for agents that run
+mcp-docs themselves.
 
 ## Development
 
 ```sh
 make check   # gofmt, go vet, go test -race
+make eval    # what answers cost on a fixed corpus (internal/eval)
+make build && make install DESTDIR=/tmp/root
 ```
 
 ## The workflow it teaches

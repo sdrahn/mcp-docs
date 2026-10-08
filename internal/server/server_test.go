@@ -344,7 +344,7 @@ func TestSearch(t *testing.T) {
 	}
 	ms := r.Structured["matches"].([]any)
 	if m := ms[0].(map[string]any); len(ms) != 3 || m["section"] != "configure" || m["line"].(float64) != 8 ||
-		m["sectionLine"].(float64) != 7 || m["version"] != e.Version {
+		m["sectionLine"].(float64) != 7 || m["sectionBytes"].(float64) != 71 || m["version"] != e.Version {
 		t.Errorf("structured: %v", ms)
 	}
 

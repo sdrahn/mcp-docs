@@ -214,6 +214,9 @@ func (s *Server) Instructions() string {
 		}
 		if k.Description != "" {
 			fmt.Fprintf(&b, ": %s", k.Description)
+			if !strings.HasSuffix(k.Description, ".") {
+				b.WriteString(".")
+			}
 		}
 		if d, ok := s.Cat.Index(k); ok {
 			fmt.Fprintf(&b, " Index: %s.", d.Address())

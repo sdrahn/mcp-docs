@@ -6,10 +6,61 @@ permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Sources only (no binaries, nothing over 1 MiB)
+        run: tools/check-tree
       - run: make check build
+      # What answers cost on the fixed corpus, as the job's summary; the
+      # test fails when an answer misses its section or its budget.
+      - name: Cost evaluation
+        run: EVAL_REPORT="$GITHUB_STEP_SUMMARY" make eval
+
+  # The package as OBS builds it, on the distributions it is for. Leap 16
+  # is built from the SLES 16 sources (same compiler, Go and rpm); SLES 16
+  # itself is an OBS build target (packaging/suse/README.md).
+  opensuse:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: tumbleweed
+            image: registry.opensuse.org/opensuse/tumbleweed:latest
+          - distro: leap16
+            image: registry.opensuse.org/opensuse/leap:16.0
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install tools
+        run: zypper -n --gpg-auto-import-keys in --no-recommends git tar gzip rpm-build rpmlint
+      - uses: actions/checkout@v4
+      - name: Install build dependencies (from the spec, as OBS does)
+        run: |
+          rpmspec -q --buildrequires packaging/suse/mcp-docs.spec | tee /tmp/buildrequires
+          xargs -d '\n' zypper -n --gpg-auto-import-keys in --no-recommends </tmp/buildrequires
+      - name: Prepare sources (tarball and vendor.tar.gz, as the OBS services do)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          version=$(rpmspec -q --srpm --qf '%{version}' packaging/suse/mcp-docs.spec)
+          echo "version=$version" >>"$GITHUB_ENV"
+          mkdir -p ~/rpmbuild/SOURCES
+          git archive --prefix="mcp-docs-$version/" -o ~/rpmbuild/SOURCES/mcp-docs-$version.tar.gz HEAD
+          go mod vendor
+          tar czf ~/rpmbuild/SOURCES/vendor.tar.gz vendor
+          rm -rf vendor
+      - name: rpmbuild
+        # openSUSE's default topdir is /usr/src/packages.
+        run: rpmbuild -ba --define "_topdir $HOME/rpmbuild" packaging/suse/mcp-docs.spec
+      - name: rpmlint
+        # On OBS the .changes file provides the changelog; here it is empty.
+        run: |
+          echo 'addFilter("no-changelogname-tag")' >/tmp/rpmlintrc
+          rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/*/*.rpm ~/rpmbuild/SRPMS/*.rpm
+      - name: Install and smoke-test
+        run: |
+          rpm -ivh ~/rpmbuild/RPMS/*/mcp-docs-[0-9]*.rpm
+          packaging/suse/smoke-test.sh "$version"

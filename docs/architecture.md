@@ -12,7 +12,7 @@ gateway's own documentation (that project's `docs/architecture.md`,
 roadmap steps 27 and 28) into a server for any set of Markdown
 documents.
 
-Status: steps 1 and 2 of the plan (section 11) are implemented; the
+Status: steps 1 to 3 of the plan (section 11) are implemented; the
 rest is design. Figures in the examples are from mcp-gateway's docs; elided ones
 are marked `…`.
 
@@ -438,11 +438,22 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    `description`, `tags`) and first-paragraph descriptions in
    `list_docs`; the instructions per collection; resources with paging
    and a section template; the prompt `answer_from_docs`.
-3. **Packaging and adoption**: an RPM (`mcp-docs`) with the
-   `collections.d` convention documented for other packages; a
-   collection file for mcp-gateway's docs; mcp-gateway's `gateway-docs`
-   definition switched to `mcp-docs --fs-compat`, then to the new tool
-   names; the cost evaluation in CI.
+3. **Packaging and adoption** (done): an RPM (`packaging/suse`) for
+   openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16, built, rpmlinted,
+   installed and smoke-tested in Tumbleweed and Leap 16 containers in
+   CI (SLES 16 as an OBS target: Leap 16 is built from its sources), a
+   release workflow and `_service` as mcp-gateway's; the
+   `collections.d` convention documented for other packages; the cost
+   evaluation (`internal/eval`, §10) on a snapshot of mcp-gateway's
+   documentation, in CI with its table as the job summary; a guide to
+   writing documentation for agents (`docs/writing-docs.md`). In
+   mcp-gateway: its documentation as a collection, `/usr/bin/mcp-docs`
+   labelled as the entry point of `mcpsrv_docs_t`, the doctor's checks,
+   and a `gateway-docs` definition on `mcp-docs --fs-compat` that the
+   administrator enables. Deviation: the definition is not the default
+   yet; making it so needs mcp-docs in the distributions the gateway
+   is built for, and then a `Requires` of `mcp-gateway-fs-server`.
+   Moving the gateway's instructions to the new tool names follows.
 4. **Ranked search**: `find_sections` (BM25 over sections).
 5. **Long list items as sections**: mcp-gateway keeps its roadmap and
    decisions as list items under one heading (about 34 KB and 22 KB), so

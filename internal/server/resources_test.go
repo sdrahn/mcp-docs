@@ -57,8 +57,8 @@ func TestDescriptionsAndInstructions(t *testing.T) {
 
 	ins := s.Instructions()
 	for _, want := range []string{
-		"- app (The App): the app docs Index: app/README.md. The configuration is not here: ask app-admin.\n",
-		"- bare: the bare docs No index: list_docs lists its documents.\n",
+		"- app (The App): the app docs. Index: app/README.md. The configuration is not here: ask app-admin.\n",
+		"- bare: the bare docs. No index: list_docs lists its documents.\n",
 	} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instructions lack %q:\n%s", want, ins)
