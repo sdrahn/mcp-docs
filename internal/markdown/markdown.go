@@ -22,6 +22,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 )
 
 // OffsetEvery is the distance in lines between two stored line offsets.
@@ -62,6 +64,47 @@ type Outline struct {
 	// FrontMatter is the number of lines of the front matter block (0:
 	// none).
 	FrontMatter int
+	// Meta is what the front matter says of the document.
+	Meta Meta
+	// Summary is the document's first paragraph, links reduced to their
+	// text, cut to SummaryLength.
+	Summary string
+}
+
+// Meta are the front matter fields mcp-docs reads; others are ignored.
+type Meta struct {
+	Title       string   `yaml:"title"`
+	Description string   `yaml:"description"`
+	Tags        []string `yaml:"tags"`
+}
+
+// SummaryLength bounds a summary.
+const SummaryLength = 200
+
+// Title is the document's title: its front matter's, else its first
+// level-1 heading, else its first heading ("" without any).
+func (o *Outline) Title() string {
+	if o.Meta.Title != "" {
+		return o.Meta.Title
+	}
+	for _, h := range o.Headings {
+		if h.Level == 1 {
+			return h.Title
+		}
+	}
+	if len(o.Headings) > 0 {
+		return o.Headings[0].Title
+	}
+	return ""
+}
+
+// Description is the document's description: its front matter's, else
+// its first paragraph.
+func (o *Outline) Description() string {
+	if o.Meta.Description != "" {
+		return cutWords(strings.Join(strings.Fields(o.Meta.Description), " "), SummaryLength)
+	}
+	return o.Summary
 }
 
 var (
@@ -99,6 +142,7 @@ func Scan(ctx context.Context, r io.Reader) (*Outline, error) {
 						sc.skip(p)
 					}
 					sc.out.FrontMatter = len(pending)
+					sc.out.Meta = parseMeta(pending[1 : len(pending)-1])
 					pending, inFront = nil, false
 				} else if len(pending) > maxFrontMatter {
 					sc.replay(pending)
@@ -117,7 +161,37 @@ func Scan(ctx context.Context, r io.Reader) (*Outline, error) {
 	}
 	sc.replay(pending) // an unclosed front matter block is text
 	sc.end(1)
+	sc.endParagraph()
 	return sc.out, nil
+}
+
+// parseMeta reads the fields of a front matter block; a block that is
+// not YAML, or fields of other types, give nothing.
+func parseMeta(lines []string) Meta {
+	var raw map[string]any
+	if yaml.Unmarshal([]byte(strings.Join(lines, "")), &raw) != nil {
+		return Meta{}
+	}
+	var m Meta
+	if t, ok := raw["title"].(string); ok {
+		m.Title = strings.TrimSpace(t)
+	}
+	if d, ok := raw["description"].(string); ok {
+		m.Description = strings.TrimSpace(d)
+	}
+	switch t := raw["tags"].(type) {
+	case []any:
+		for _, x := range t {
+			if s, ok := x.(string); ok {
+				m.Tags = append(m.Tags, s)
+			}
+		}
+	case string:
+		for _, x := range strings.FieldsFunc(t, func(r rune) bool { return r == ',' || r == ' ' }) {
+			m.Tags = append(m.Tags, x)
+		}
+	}
+	return m
 }
 
 type scanner struct {
@@ -127,6 +201,52 @@ type scanner struct {
 	n      int    // lines read
 	offset int64
 	ids    map[string]int
+	// The first paragraph: its lines so far, and whether it ended.
+	para     []string
+	paraDone bool
+}
+
+// paragraph takes a line of text outside code and headings towards the
+// summary: the first paragraph is the first run of text lines, ended by
+// a blank line, a heading or a fence. Indented code, tables, HTML,
+// images and rules do not start one.
+func (sc *scanner) paragraph(l string) {
+	if sc.paraDone {
+		return
+	}
+	t := strings.TrimSpace(l)
+	switch {
+	case t == "":
+		sc.endParagraph()
+	case len(sc.para) == 0 && (strings.HasPrefix(l, "    ") || strings.HasPrefix(l, "\t") || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "<") ||
+		strings.HasPrefix(t, "![") || strings.HasPrefix(t, "[![") || strings.Trim(t, "-=*_ ") == ""):
+	default:
+		sc.para = append(sc.para, t)
+	}
+}
+
+func (sc *scanner) endParagraph() {
+	if sc.paraDone || len(sc.para) == 0 {
+		return
+	}
+	sc.paraDone = true
+	t := link.ReplaceAllString(strings.Join(sc.para, " "), "$1")
+	sc.out.Summary = cutWords(t, SummaryLength)
+}
+
+// cutWords cuts a text to at most n bytes, at a space when there is one.
+func cutWords(t string, n int) string {
+	if len(t) <= n {
+		return t
+	}
+	i := n
+	for i > 0 && !utf8.RuneStart(t[i]) {
+		i--
+	}
+	if j := strings.LastIndexByte(t[:i], ' '); j > n/2 {
+		i = j
+	}
+	return strings.TrimRight(t[:i], " ,.;:") + " …"
 }
 
 func (sc *scanner) replay(lines []string) {
@@ -160,8 +280,13 @@ func (sc *scanner) line(line string) {
 		}
 	case m != nil:
 		sc.fence = m[1]
+		sc.endParagraph()
 	default:
-		if level, title, id := ParseHeading(l); level > 0 {
+		level, title, id := ParseHeading(l)
+		if level == 0 {
+			sc.paragraph(l)
+		} else {
+			sc.endParagraph()
 			sc.end(level) // the sections it ends close on the line before
 			h := Heading{Level: level, Title: title, Line: sc.n + 1, start: sc.offset, Parent: -1}
 			if len(sc.open) > 0 {

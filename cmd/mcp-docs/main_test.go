@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,5 +31,31 @@ func TestParseCollections(t *testing.T) {
 	}
 	if _, err := parseCollections(nil, []string{"x=" + a, "x=" + b}); err == nil || !strings.Contains(err.Error(), "twice") {
 		t.Errorf("duplicate: %v", err)
+	}
+}
+
+// Collection files, then the command line, which replaces a file's
+// collection of the same name; a file whose root is missing is left out.
+func TestLoadCollections(t *testing.T) {
+	dir, a, b := t.TempDir(), t.TempDir(), t.TempDir()
+	for name, content := range map[string]string{
+		"one.yaml":     "title: One\nroot: " + a + "\ndescription: first\nindex: guide.md\n",
+		"two.yaml":     "root: " + a + "\n",
+		"missing.yaml": "root: " + a + "/missing\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cs, problems, err := loadCollections([]string{dir}, nil, []string{"two=" + b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs) != 2 || cs[0].Name != "one" || cs[0].Title != "One" || cs[0].IndexName != "guide.md" ||
+		cs[1].Name != "two" || cs[1].Path != b {
+		t.Errorf("%+v %+v", cs[0], cs[1])
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "missing.yaml: root") {
+		t.Errorf("problems: %v", problems)
 	}
 }

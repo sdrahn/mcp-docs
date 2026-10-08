@@ -12,8 +12,8 @@ gateway's own documentation (that project's `docs/architecture.md`,
 roadmap steps 27 and 28) into a server for any set of Markdown
 documents.
 
-Status: step 1 of the plan (section 11) is implemented; the rest is
-design. Figures in the examples are from mcp-gateway's docs; elided ones
+Status: steps 1 and 2 of the plan (section 11) are implemented; the
+rest is design. Figures in the examples are from mcp-gateway's docs; elided ones
 are marked `…`.
 
 ## 1. The problem
@@ -167,7 +167,17 @@ same name (the `/usr` then `/etc` order of mcp-gateway's `servers.d`):
    `--config-dirs` is given.
 
 A collection without `index` gets one generated: its documents with
-their titles and descriptions (§4.3), at most `--max-entries`.
+their titles and descriptions (§4.3), at most `--max-entries`. (As
+built, the generated index is `list_docs` of the collection, which the
+instructions name for a collection without an index document.)
+
+`also` documents are opened by the absolute paths the file gives, not
+through the collection's `os.Root` (which the Landlock rule for a single
+file would not let the server open); an agent names them by their base
+names only, and one hides a file of the same name at the collection's
+root. The disabling empty file works by file name: an empty
+`/etc/…/gateway.yaml` disables what `/usr/…/gateway.yaml` defined,
+whatever `name` it gave.
 
 ### 4.3 Document metadata
 
@@ -422,8 +432,12 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    from disk on each search, which is fast enough for documentation of
    a few MB; the catalog is walked on each listing or search, so no
    `--rescan-interval` is needed.
-2. **Catalog**: `collections.d` in `/usr` and `/etc`, front matter and
-   metadata, `list_docs`, generated indexes, resources and the prompt.
+2. **Catalog** (done): `collections.d` in `/usr` and `/etc` (and
+   `--config-dirs`), with title, index, include and exclude patterns,
+   `also` documents and instructions; front matter (`title`,
+   `description`, `tags`) and first-paragraph descriptions in
+   `list_docs`; the instructions per collection; resources with paging
+   and a section template; the prompt `answer_from_docs`.
 3. **Packaging and adoption**: an RPM (`mcp-docs`) with the
    `collections.d` convention documented for other packages; a
    collection file for mcp-gateway's docs; mcp-gateway's `gateway-docs`

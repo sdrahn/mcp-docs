@@ -5,7 +5,9 @@
 //
 // Every file operation goes through the collection's os.Root, so a
 // symbolic link that leads out of a collection is refused by the kernel,
-// not only by a check of the path as a string.
+// not only by a check of the path as a string. The exception are a
+// collection's also documents, opened by the absolute paths its
+// configuration gives; an agent names them only by their base names.
 package catalog
 
 import (
@@ -25,14 +27,28 @@ import (
 	"syscall"
 	"unicode/utf8"
 
+	"github.com/sdrahn/mcp-docs/internal/glob"
 	"github.com/sdrahn/mcp-docs/internal/markdown"
 )
 
 // Collection is a named directory of documents.
 type Collection struct {
 	Name        string
+	Title       string
 	Path        string // absolute, cleaned
 	Description string
+	// Instructions are added to the server's instructions.
+	Instructions string
+	// IndexName is the index document, relative to Path; "": the first
+	// of IndexNames there is.
+	IndexName string
+	// Include and Exclude are glob patterns of paths relative to Path
+	// (internal/glob): a document is one that Include matches (empty:
+	// all) and Exclude does not; an excluded directory is not entered.
+	Include, Exclude []string
+	// Also are single documents elsewhere (absolute paths), named by
+	// their base names in the collection.
+	Also []string
 
 	once sync.Once
 	root *os.Root
@@ -65,7 +81,49 @@ func (d Doc) Address() string {
 }
 
 // Full is the document's absolute path.
-func (d Doc) Full() string { return filepath.Join(d.Coll.Path, filepath.FromSlash(d.Rel)) }
+func (d Doc) Full() string {
+	if a := d.Coll.also(d.Rel); a != "" {
+		return a
+	}
+	return filepath.Join(d.Coll.Path, filepath.FromSlash(d.Rel))
+}
+
+// also returns the absolute path of the also document named rel, or "".
+func (k *Collection) also(rel string) string {
+	for _, a := range k.Also {
+		if filepath.Base(a) == rel {
+			return a
+		}
+	}
+	return ""
+}
+
+// member reports whether rel, below the collection's directory, is
+// part of the collection by its patterns.
+func (k *Collection) member(rel string, dir bool) bool {
+	if rel == "." {
+		return true
+	}
+	// An excluded directory excludes what is below it.
+	parts := strings.Split(rel, "/")
+	for i := range parts {
+		prefix := strings.Join(parts[:i+1], "/")
+		for _, p := range k.Exclude {
+			if glob.Match(p, prefix) {
+				return false
+			}
+		}
+	}
+	if dir || len(k.Include) == 0 {
+		return true
+	}
+	for _, p := range k.Include {
+		if glob.Match(p, rel) {
+			return true
+		}
+	}
+	return false
+}
 
 // Catalog is the collections and the cache of their documents' outlines.
 type Catalog struct {
@@ -101,13 +159,14 @@ func (c *Catalog) IsDoc(name string) bool {
 
 // Index returns the collection's index document, if it has one.
 func (c *Catalog) Index(k *Collection) (Doc, bool) {
-	root, err := k.open()
-	if err != nil {
-		return Doc{}, false
+	names := IndexNames
+	if k.IndexName != "" {
+		names = []string{filepath.ToSlash(filepath.Clean(k.IndexName))}
 	}
-	for _, n := range IndexNames {
-		if fi, err := root.Stat(n); err == nil && fi.Mode().IsRegular() {
-			return Doc{Coll: k, Rel: n}, true
+	for _, n := range names {
+		d := Doc{Coll: k, Rel: n}
+		if fi, err := c.Stat(d); err == nil && fi.Mode().IsRegular() {
+			return d, true
 		}
 	}
 	return Doc{}, false
@@ -133,6 +192,13 @@ func (c *Catalog) Resolve(addr string, filePaths bool) (Doc, string, error) {
 	}
 	if filepath.IsAbs(addr) {
 		p := filepath.Clean(addr)
+		for _, k := range c.Collections {
+			for _, a := range k.Also {
+				if a == p {
+					return Doc{Coll: k, Rel: filepath.Base(a)}, section, nil
+				}
+			}
+		}
 		var best *Collection
 		for _, k := range c.Collections {
 			if (p == k.Path || strings.HasPrefix(p, k.Path+"/") || k.Path == "/") && (best == nil || len(k.Path) > len(best.Path)) {
@@ -170,11 +236,7 @@ func (c *Catalog) Resolve(addr string, filePaths bool) (Doc, string, error) {
 }
 
 func (c *Catalog) exists(d Doc) bool {
-	root, err := d.Coll.open()
-	if err != nil {
-		return false
-	}
-	_, err = root.Stat(d.Rel)
+	_, err := c.Stat(d)
 	return err == nil
 }
 
@@ -186,8 +248,16 @@ func (c *Catalog) paths() []string {
 	return out
 }
 
-// Stat returns what the document or directory is.
+// Stat returns what the document or directory is; what the collection's
+// patterns leave out is not there.
 func (c *Catalog) Stat(d Doc) (fs.FileInfo, error) {
+	if a := d.Coll.also(d.Rel); a != "" {
+		fi, err := os.Stat(a)
+		if err != nil {
+			return nil, Explain(d, err)
+		}
+		return fi, nil
+	}
 	root, err := d.Coll.open()
 	if err != nil {
 		return nil, Explain(d, err)
@@ -196,7 +266,39 @@ func (c *Catalog) Stat(d Doc) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, Explain(d, err)
 	}
+	if !d.Coll.member(d.Rel, fi.IsDir()) {
+		return nil, notMember(d)
+	}
 	return fi, nil
+}
+
+func notMember(d Doc) error {
+	return fmt.Errorf("%s: not part of the collection %s", d.Address(), d.Coll.Name)
+}
+
+// open opens a document: an also document by its path (fixed by the
+// configuration), any other through the collection's os.Root.
+func (c *Catalog) open(d Doc) (*os.File, error) {
+	if a := d.Coll.also(d.Rel); a != "" {
+		f, err := os.Open(a)
+		if err != nil {
+			return nil, Explain(d, err)
+		}
+		return f, nil
+	}
+	root, err := d.Coll.open()
+	if err != nil {
+		return nil, Explain(d, err)
+	}
+	f, err := root.Open(d.Rel)
+	if err != nil {
+		return nil, Explain(d, err)
+	}
+	if fi, err := f.Stat(); err == nil && !d.Coll.member(d.Rel, fi.IsDir()) {
+		_ = f.Close()
+		return nil, notMember(d)
+	}
+	return f, nil
 }
 
 // Entry is what is known of a document's version.
@@ -211,13 +313,9 @@ type Entry struct {
 // Load returns the document's outline, scanning it unless the cached
 // one is of the same version.
 func (c *Catalog) Load(ctx context.Context, d Doc) (*Entry, error) {
-	root, err := d.Coll.open()
+	f, err := c.open(d)
 	if err != nil {
-		return nil, Explain(d, err)
-	}
-	f, err := root.Open(d.Rel)
-	if err != nil {
-		return nil, Explain(d, err)
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
@@ -269,13 +367,9 @@ func (c *Catalog) Lines(d Doc, e *Entry, from, to int) ([]string, error) {
 	if from < 1 || to < from {
 		return nil, nil
 	}
-	root, err := d.Coll.open()
+	f, err := c.open(d)
 	if err != nil {
-		return nil, Explain(d, err)
-	}
-	f, err := root.Open(d.Rel)
-	if err != nil {
-		return nil, Explain(d, err)
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	if fi, err := f.Stat(); err != nil {
@@ -310,13 +404,9 @@ func (c *Catalog) Lines(d Doc, e *Entry, from, to int) ([]string, error) {
 // ReadAll reads a whole document of at most max bytes; a larger one is
 // errTooLarge.
 func (c *Catalog) ReadAll(d Doc, max int64) ([]byte, error) {
-	root, err := d.Coll.open()
+	f, err := c.open(d)
 	if err != nil {
-		return nil, Explain(d, err)
-	}
-	f, err := root.Open(d.Rel)
-	if err != nil {
-		return nil, Explain(d, err)
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, max+1))
@@ -334,13 +424,23 @@ var ErrTooLarge = errors.New("too large")
 
 // Walk calls fn for the documents and directories below d (a directory
 // or a document), in lexical order, skipping hidden directories and
-// btrfs .snapshots, and what skip (if set) leaves out, not following
-// symbolic links. fn returns false to stop.
+// btrfs .snapshots, what the collection's patterns and skip (if set)
+// leave out, not following symbolic links; then, from the collection's
+// directory, its also documents. fn returns false to stop.
 func (c *Catalog) Walk(ctx context.Context, d Doc, skip func(Doc) bool, fn func(Doc, fs.DirEntry) bool) error {
+	if a := d.Coll.also(d.Rel); a != "" {
+		fi, err := os.Stat(a)
+		if err != nil {
+			return Explain(d, err)
+		}
+		fn(d, fs.FileInfoToDirEntry(fi))
+		return nil
+	}
 	root, err := d.Coll.open()
 	if err != nil {
 		return Explain(d, err)
 	}
+	stopped := false
 	err = fs.WalkDir(root.FS(), d.Rel, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			if p == d.Rel {
@@ -357,22 +457,39 @@ func (c *Catalog) Walk(ctx context.Context, d Doc, skip func(Doc) bool, fn func(
 		if p == d.Rel && e.IsDir() {
 			return nil
 		}
-		if skip != nil && skip(Doc{Coll: d.Coll, Rel: p}) {
+		if !e.IsDir() && !(e.Type().IsRegular() && c.IsDoc(e.Name())) {
+			return nil
+		}
+		if !d.Coll.member(p, e.IsDir()) || (skip != nil && skip(Doc{Coll: d.Coll, Rel: p})) {
 			if e.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if !e.IsDir() && !(e.Type().IsRegular() && c.IsDoc(e.Name())) {
-			return nil
-		}
 		if !fn(Doc{Coll: d.Coll, Rel: p}, e) {
+			stopped = true
 			return fs.SkipAll
 		}
 		return nil
 	})
 	if err != nil {
 		return Explain(d, err)
+	}
+	if d.Rel != "." || stopped {
+		return nil
+	}
+	for _, a := range d.Coll.Also {
+		ad := Doc{Coll: d.Coll, Rel: filepath.Base(a)}
+		if skip != nil && skip(ad) {
+			continue
+		}
+		fi, err := os.Stat(a)
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if !fn(ad, fs.FileInfoToDirEntry(fi)) {
+			return nil
+		}
 	}
 	return nil
 }

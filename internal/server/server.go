@@ -150,7 +150,7 @@ func (s *Server) Handle(ctx context.Context, method string, params json.RawMessa
 		_ = json.Unmarshal(params, &p)
 		return map[string]any{
 			"protocolVersion": mcpserver.Negotiate(p.ProtocolVersion),
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "resources": map[string]any{}, "prompts": map[string]any{}},
 			"serverInfo":      map[string]any{"name": Name, "title": "Documentation", "version": s.Version},
 			"instructions":    s.Instructions(),
 		}, nil
@@ -167,6 +167,33 @@ func (s *Server) Handle(ctx context.Context, method string, params json.RawMessa
 			return nil, &mcpserver.Error{Code: mcpserver.CodeInvalidParams, Message: "invalid params"}
 		}
 		return s.call(ctx, p.Name, p.Arguments)
+	case "resources/list":
+		var p struct {
+			Cursor string `json:"cursor"`
+		}
+		_ = json.Unmarshal(params, &p)
+		return s.resourceList(ctx, p.Cursor)
+	case "resources/templates/list":
+		return map[string]any{"resourceTemplates": resourceTemplates()}, nil
+	case "resources/read":
+		var p struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.URI == "" {
+			return nil, &mcpserver.Error{Code: mcpserver.CodeInvalidParams, Message: "invalid params"}
+		}
+		return s.readResource(ctx, p.URI)
+	case "prompts/list":
+		return map[string]any{"prompts": prompts()}, nil
+	case "prompts/get":
+		var p struct {
+			Name      string            `json:"name"`
+			Arguments map[string]string `json:"arguments"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &mcpserver.Error{Code: mcpserver.CodeInvalidParams, Message: "invalid params"}
+		}
+		return s.getPrompt(p.Name, p.Arguments)
 	}
 	return nil, &mcpserver.Error{Code: mcpserver.CodeMethodNotFound, Message: "method not found"}
 }
@@ -182,14 +209,22 @@ func (s *Server) Instructions() string {
 	example := ""
 	for _, k := range s.Cat.Collections {
 		fmt.Fprintf(&b, "- %s", k.Name)
+		if k.Title != "" {
+			fmt.Fprintf(&b, " (%s)", k.Title)
+		}
 		if k.Description != "" {
 			fmt.Fprintf(&b, ": %s", k.Description)
 		}
 		if d, ok := s.Cat.Index(k); ok {
-			fmt.Fprintf(&b, " (index: %s)", d.Address())
+			fmt.Fprintf(&b, " Index: %s.", d.Address())
 			if example == "" {
 				example = d.Address()
 			}
+		} else {
+			b.WriteString(" No index: list_docs lists its documents.")
+		}
+		if k.Instructions != "" {
+			b.WriteString(" " + strings.Join(strings.Fields(k.Instructions), " "))
 		}
 		b.WriteString("\n")
 	}
@@ -199,7 +234,7 @@ func (s *Server) Instructions() string {
 	fmt.Fprintf(&b, "\nA document is named collection/path (%s), a section document#id (ids are the headings' "+
 		"anchors, as links in the documents have them).\n\n", example)
 	b.WriteString("Read only the part you need:\n" +
-		"- which document: read the collection's index (read_lines), or list_docs;\n" +
+		"- which document: read the collection's index (read_lines), or list_docs (titles and descriptions);\n" +
 		"- a precise term (a setting, an error message, a name): search, then read_section with the section " +
 		"of the match (or read_lines around its line);\n" +
 		"- a broad question: outline the document (maxLevel 2 for a large one), then read_section of the one " +

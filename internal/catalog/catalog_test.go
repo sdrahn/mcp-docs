@@ -1,8 +1,11 @@
 package catalog
 
 import (
+	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +79,68 @@ func TestIsBinary(t *testing.T) {
 		if IsBinary([]byte(s)) != want {
 			t.Errorf("IsBinary(%q) != %v", s, want)
 		}
+	}
+}
+
+// Include and exclude patterns decide what is a document; an also
+// document is named by its base name; an index may be named.
+func TestPatternsAlsoIndex(t *testing.T) {
+	root, elsewhere := t.TempDir(), t.TempDir()
+	for _, p := range []string{"README.md", "guide/a.md", "guide/drafts/d.md", "api/x.md", "skip.md"} {
+		mk(t, filepath.Join(root, p))
+	}
+	mk(t, filepath.Join(elsewhere, "CHANGELOG.md"))
+	k := &Collection{Name: "k", Path: root, Include: []string{"README.md", "guide/**"}, Exclude: []string{"drafts"},
+		Also: []string{filepath.Join(elsewhere, "CHANGELOG.md")}, IndexName: "guide/a.md"}
+	c := New([]*Collection{k}, []string{".md"}, 100)
+
+	var got []string
+	if err := c.Walk(context.Background(), Doc{Coll: k, Rel: "."}, nil, func(d Doc, e fs.DirEntry) bool {
+		if !e.IsDir() {
+			got = append(got, d.Rel)
+		}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "README.md guide/a.md CHANGELOG.md" {
+		t.Errorf("walk: %v", got)
+	}
+	for _, rel := range []string{"api/x.md", "skip.md", "guide/drafts/d.md", "guide/drafts"} {
+		if _, err := c.Stat(Doc{Coll: k, Rel: rel}); err == nil || !strings.Contains(err.Error(), "not part of the collection") {
+			t.Errorf("%s: %v", rel, err)
+		}
+		if _, err := c.Load(context.Background(), Doc{Coll: k, Rel: rel}); err == nil {
+			t.Errorf("%s loaded", rel)
+		}
+	}
+	d, _, err := c.Resolve("k/CHANGELOG.md", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, err := c.Load(context.Background(), d); err != nil || e.Outline.Title() != "CHANGELOG" ||
+		d.Full() != filepath.Join(elsewhere, "CHANGELOG.md") {
+		t.Errorf("also: %v %v", d.Full(), err)
+	}
+	if d, _, err := c.Resolve(filepath.Join(elsewhere, "CHANGELOG.md"), false); err != nil || d.Rel != "CHANGELOG.md" {
+		t.Errorf("also by its path: %+v %v", d, err)
+	}
+	if idx, ok := c.Index(k); !ok || idx.Rel != "guide/a.md" {
+		t.Errorf("index: %+v %v", idx, ok)
+	}
+	k.IndexName = "missing.md"
+	if _, ok := c.Index(k); ok {
+		t.Error("a missing index found")
+	}
+}
+
+func mk(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := strings.TrimSuffix(filepath.Base(p), ".md")
+	if err := os.WriteFile(p, []byte("# "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

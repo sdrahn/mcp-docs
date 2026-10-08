@@ -186,3 +186,35 @@ func TestScanCancelled(t *testing.T) {
 		t.Error("a cancelled scan succeeded")
 	}
 }
+
+// A document's title and description: from its front matter, else its
+// first level-1 heading and first paragraph.
+func TestMeta(t *testing.T) {
+	o := scan(t, "---\ntitle: \"Front title\"\ndescription: >\n  Folded\n  text.\ntags: [a, b]\nother: 1\n---\n# Heading\nPara.\n")
+	if o.Title() != "Front title" || o.Description() != "Folded text." || !reflect.DeepEqual(o.Meta.Tags, []string{"a", "b"}) {
+		t.Errorf("front matter: %q %q %v", o.Title(), o.Description(), o.Meta)
+	}
+	o = scan(t, "---\ntags: x, y\n---\n")
+	if !reflect.DeepEqual(o.Meta.Tags, []string{"x", "y"}) {
+		t.Errorf("tags as a string: %v", o.Meta.Tags)
+	}
+	if o := scan(t, "---\n: not yaml [\n---\n# T\n"); o.Meta.Title != "" || o.Title() != "T" || o.FrontMatter != 3 {
+		t.Errorf("bad front matter: %+v", o)
+	}
+
+	o = scan(t, "[![badge](b.svg)](x)\n\n## Sub first\n```\ncode para\n```\n    indented\n| a | b |\n\n"+
+		"First [para](link.md) of\n  the document.\nNot this.\n\nNor this.\n# Title\n")
+	if o.Title() != "Title" || o.Description() != "First para of the document. Not this." {
+		t.Errorf("summary: %q %q", o.Title(), o.Description())
+	}
+	if o := scan(t, "## Only h2\ntext"); o.Title() != "Only h2" || o.Description() != "text" {
+		t.Errorf("no h1: %q %q", o.Title(), o.Description())
+	}
+	long := "# T\n" + strings.Repeat("word ", 100) + "\n"
+	if d := scan(t, long).Description(); len(d) > SummaryLength+4 || !strings.HasSuffix(d, "word …") {
+		t.Errorf("long: %d %q", len(d), d)
+	}
+	if o := scan(t, "# T\n"); o.Description() != "" {
+		t.Errorf("no paragraph: %q", o.Description())
+	}
+}

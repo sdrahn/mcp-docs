@@ -1,18 +1,18 @@
-// Ported from mcp-gateway's cmd/mcp-server-fs/glob.go.
-
-package server
+// Package glob matches slash-separated paths against glob patterns, as
+// mcp-gateway's mcp-server-fs does (ported from its glob.go).
+package glob
 
 import (
 	"path"
 	"strings"
 )
 
-// globMatch matches a slash-separated relative path against a glob
+// Match matches a slash-separated relative path against a glob
 // pattern: "*", "?" and "[...]" within one path component (path.Match),
 // "**" for any number of components. A pattern without a slash matches
 // the last component, at any depth ("*.go" finds every Go file), as find
 // -name does; agents use both forms.
-func globMatch(pattern, name string) bool {
+func Match(pattern, name string) bool {
 	if !strings.Contains(pattern, "/") {
 		ok, _ := path.Match(pattern, path.Base(name))
 		return ok
@@ -47,8 +47,8 @@ func matchParts(pat, name []string) bool {
 	return len(name) == 0
 }
 
-// validGlob reports whether pattern is well formed.
-func validGlob(pattern string) bool {
+// Valid reports whether pattern is well formed.
+func Valid(pattern string) bool {
 	for _, part := range strings.Split(pattern, "/") {
 		if part == "**" {
 			continue

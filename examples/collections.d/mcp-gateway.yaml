@@ -1,0 +1,21 @@
+# A collection file, as a package installs it in
+# /usr/share/mcp-docs/collections.d/ (docs/architecture.md, §4.2).
+# The administrator replaces it with a file of the same name in
+# /etc/mcp-docs/collections.d/; an empty file there disables it.
+title: mcp-gateway documentation
+root: /usr/share/mcp-gateway/docs
+description: >
+  The MCP gateway this server runs behind, for the installed version:
+  user guide (13 chapters), architecture and decisions, changelog.
+# The document to read first (default: README.md or index.md).
+index: README.md
+# Which files are documents, relative to root (default: every .md).
+# include: ["**/*.md"]
+exclude: ["user-guide/README.md"]
+# Single documents elsewhere, named by their base names
+# (mcp-gateway/CHANGELOG.md).
+also: ["/usr/share/doc/packages/mcp-gateway/CHANGELOG.md"]
+# Added to the server's instructions.
+instructions: >
+  The configuration on this machine is not here: the gateway-admin
+  server shows it (show_config) and checks it (check_config, doctor).

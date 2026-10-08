@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
+	"github.com/sdrahn/mcp-docs/internal/glob"
 )
 
 // With --fs-compat the server also offers mcp-server-fs's reading tools
@@ -181,7 +182,7 @@ func excluder(start catalog.Doc, patterns []string) func(catalog.Doc) bool {
 	return func(d catalog.Doc) bool {
 		rel := relTo(start, d)
 		for _, p := range patterns {
-			if globMatch(p, rel) {
+			if glob.Match(p, rel) {
 				return true
 			}
 		}
@@ -231,13 +232,13 @@ func searchFiles(s *Server, ctx context.Context, args json.RawMessage) (*result,
 	if err != nil {
 		return nil, err
 	}
-	if !validGlob(a.Pattern) {
+	if !glob.Valid(a.Pattern) {
 		return nil, fmt.Errorf("pattern: %q is not a valid glob pattern", a.Pattern)
 	}
 	matches := []string{}
 	truncated := false
 	err = s.Cat.Walk(ctx, d, excluder(d, a.ExcludePatterns), func(doc catalog.Doc, _ fs.DirEntry) bool {
-		if !globMatch(a.Pattern, relTo(d, doc)) {
+		if !glob.Match(a.Pattern, relTo(d, doc)) {
 			return true
 		}
 		if len(matches) >= s.Cat.MaxEntries {

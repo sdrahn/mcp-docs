@@ -26,30 +26,17 @@ func (s *Server) load(ctx context.Context, addr string) (catalog.Doc, string, *c
 	return d, section, e, err
 }
 
-// title is a document's title: its first level-1 heading, else its
-// first heading.
-func title(o *markdown.Outline) string {
-	for _, h := range o.Headings {
-		if h.Level == 1 {
-			return h.Title
-		}
-	}
-	if len(o.Headings) > 0 {
-		return o.Headings[0].Title
-	}
-	return ""
-}
-
 // --- list_docs ---------------------------------------------------------------
 
 func listDocsTool() tool {
-	doc := obj(map[string]any{"doc": strType, "title": strType, "lines": intType, "bytes": intType,
+	doc := obj(map[string]any{"doc": strType, "title": strType, "description": strType, "lines": intType,
+		"bytes": intType, "tags": map[string]any{"type": "array", "items": strType},
 		"index": map[string]any{"type": "boolean"}}, "doc", "title", "lines", "bytes")
-	coll := obj(map[string]any{"name": strType, "description": strType, "path": strType, "index": strType,
-		"documents": intType, "bytes": intType}, "name", "path", "documents", "bytes")
+	coll := obj(map[string]any{"name": strType, "title": strType, "description": strType, "path": strType,
+		"index": strType, "documents": intType, "bytes": intType}, "name", "path", "documents", "bytes")
 	return tool{name: "list_docs", title: "List documents",
 		description: "The collections of documents (without arguments, when there are several), or the documents " +
-			"of a collection or below a path, with their titles and sizes; the collection's index first.",
+			"of a collection or below a path, with their titles, descriptions and sizes; the collection's index first.",
 		input: obj(map[string]any{"collection": str("a collection's name"),
 			"path": str("a directory: collection/path")}),
 		output: obj(map[string]any{
@@ -60,15 +47,18 @@ func listDocsTool() tool {
 }
 
 type docInfo struct {
-	Doc   string `json:"doc"`
-	Title string `json:"title"`
-	Lines int    `json:"lines"`
-	Bytes int64  `json:"bytes"`
-	Index bool   `json:"index,omitempty"`
+	Doc         string   `json:"doc"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Lines       int      `json:"lines"`
+	Bytes       int64    `json:"bytes"`
+	Index       bool     `json:"index,omitempty"`
 }
 
 type collInfo struct {
 	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Path        string `json:"path"`
 	Index       string `json:"index,omitempty"`
@@ -105,7 +95,7 @@ func listDocs(s *Server, ctx context.Context, args json.RawMessage) (*result, er
 	var out strings.Builder
 	colls := []collInfo{}
 	for _, k := range s.Cat.Collections {
-		ci := collInfo{Name: k.Name, Description: k.Description, Path: k.Path}
+		ci := collInfo{Name: k.Name, Title: k.Title, Description: k.Description, Path: k.Path}
 		if d, ok := s.Cat.Index(k); ok {
 			ci.Index = d.Address()
 		}
@@ -126,6 +116,9 @@ func listDocs(s *Server, ctx context.Context, args json.RawMessage) (*result, er
 		}
 		colls = append(colls, ci)
 		fmt.Fprintf(&out, "%s", k.Name)
+		if k.Title != "" {
+			fmt.Fprintf(&out, " (%s)", k.Title)
+		}
 		if k.Description != "" {
 			fmt.Fprintf(&out, ": %s", k.Description)
 		}
@@ -167,7 +160,8 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 		}
 		di := docInfo{Doc: d.Address()}
 		if en, err := s.Cat.Load(ctx, d); err == nil {
-			di.Title, di.Lines, di.Bytes = title(en.Outline), en.Outline.Lines, en.Outline.Bytes
+			o := en.Outline
+			di.Title, di.Description, di.Tags, di.Lines, di.Bytes = o.Title(), o.Description(), o.Meta.Tags, o.Lines, o.Bytes
 		} else if ctx.Err() != nil {
 			return false
 		}
@@ -202,6 +196,9 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 			line += " (index: read it first)"
 		}
 		line += fmt.Sprintf("  [%d lines, %s]\n", d.Lines, size(d.Bytes))
+		if d.Description != "" {
+			line += "      " + d.Description + "\n"
+		}
 		if int64(out.Len()+len(line)) > s.MaxRead-256 {
 			truncated = true
 			break
