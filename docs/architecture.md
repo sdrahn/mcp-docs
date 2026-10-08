@@ -12,8 +12,8 @@ gateway's own documentation (that project's `docs/architecture.md`,
 roadmap steps 27 and 28) into a server for any set of Markdown
 documents.
 
-Status: design. Nothing here is implemented yet; section 11 is the
-plan. Figures in the examples are from mcp-gateway's docs; elided ones
+Status: step 1 of the plan (section 11) is implemented; the rest is
+design. Figures in the examples are from mcp-gateway's docs; elided ones
 are marked `…`.
 
 ## 1. The problem
@@ -407,11 +407,21 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 
 ## 11. Plan
 
-1. **Core** (what mcp-gateway has, as documents): the scanner with ids,
-   ported with its tests; one or more `--root`/`--collection`;
-   `outline`, `search` with sections, `read_section` with `depth` and
-   parts, `read_lines` with versions; the cache; generated
-   instructions; Landlock; `--fs-compat`.
+1. **Core** (done): the scanner with ids, front matter skipped and
+   line offsets, ported with mcp-gateway's tests; collections from
+   `--root` and `--collection name=/path[:description]`; `outline`,
+   `search` with sections (context kept to the match's section),
+   `read_section` with heading paths (section numbers ignored),
+   `depth` and parts, `read_lines` with versions; the cache; generated
+   instructions; Landlock; `--fs-compat`, checked against the
+   assertions of mcp-gateway's `TestDocsLookup` and `TestDocsOutline`
+   on its documentation. Taken from step 2 early: a basic `list_docs`
+   (titles from the first heading, sizes), since without it an agent
+   has no way to find documents but the index. Left for later: the
+   in-memory copy for search (`--cache-bytes`): documents are read
+   from disk on each search, which is fast enough for documentation of
+   a few MB; the catalog is walked on each listing or search, so no
+   `--rescan-interval` is needed.
 2. **Catalog**: `collections.d` in `/usr` and `/etc`, front matter and
    metadata, `list_docs`, generated indexes, resources and the prompt.
 3. **Packaging and adoption**: an RPM (`mcp-docs`) with the
