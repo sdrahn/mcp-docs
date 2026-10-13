@@ -1,0 +1,6 @@
+mcp-gateway/ is a snapshot of the documentation of
+https://github.com/sdrahn/mcp-gateway (MIT) at commit
+e0657c1dffeee60f4ffe4cde89a6845e02bbf536 (2026-10-08): docs/README.md,
+docs/architecture.md and docs/user-guide/{03-configuration,04-mcp-servers,
+07-approvals,10-operations}.md. It is fixed on purpose: the questions of
+eval_test.go name its sections. Replace it only together with them.

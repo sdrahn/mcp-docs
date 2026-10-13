@@ -1,0 +1,1203 @@
+# 4. MCP servers
+
+The gateway runs MCP servers that speak MCP over **stdio** (`command`),
+and connects to servers that speak **Streamable HTTP**, on the host or
+elsewhere (`url`; "Servers that speak HTTP" below). Each server is
+registered by a small YAML file; the gateway starts instances of it on
+demand, one per principal (or per session), confined by systemd and
+SELinux, and stops them when idle (for a `url` server, the instance is
+the connector that relays to it).
+
+## Registering a server
+
+Create one file per server in `/etc/mcp-gateway/servers.d/` (packages
+install theirs to `/usr/share/mcp-gateway/servers.d/`), and check it.
+The running gateway picks it up when the file is written (chapter 3,
+"Changing the configuration while the gateway runs"):
+
+```yaml
+# /etc/mcp-gateway/servers.d/git.yaml
+name: git
+command: ["/usr/libexec/mcp-servers/mcp-git"]
+```
+
+```bash
+mcp-gateway --check
+systemctl reload mcp-gateway.service    # optional: at once, and fails on a broken definition
+```
+
+### Changing definitions while the gateway runs
+
+The gateway reloads the server definitions when a file in either
+`servers.d` is added, changed or removed, and on `systemctl reload
+mcp-gateway.service`; sessions stay open:
+
+- a new server appears in the sessions' lists (clients are sent
+  `notifications/tools/list_changed`);
+- a changed server: each session's next call to it starts an instance
+  from the new definition. The old instance keeps running until no
+  session uses it any more and no call on it is running, so calls in
+  progress finish and sessions move over one by one;
+- a removed server's instances stop once their running calls are
+  answered, and calls to it fail as for an unknown server.
+
+A reload loads and validates all definitions before it changes anything.
+If a file does not parse or validate, two files name the same server, or
+no definitions are left, nothing changes: the gateway serves the
+definitions it had, logs the error, audits it (`mcp-config-reload`,
+chapter 9), and `mcp-gateway-admin doctor` warns about it until a reload
+succeeds. `systemctl reload` runs `mcp-gateway --check` first and fails
+then, so you see the problem at once. The gateway's own configuration
+(`gateway.yaml`) is reloaded the same way; some of its keys take effect
+at the next start only (chapter 3, "Changing the configuration while the
+gateway runs").
+
+A server is only usable by principals whose roles have permissions for it
+(chapter 6). A server nobody has permissions for is invisible.
+
+`mcp-gateway-admin doctor --server git` (as root) then checks that the
+server starts, that roles do not name tools it lacks, and whether SELinux
+denied it something (chapter 10, "Self-check").
+
+### Inspecting a server
+
+`mcp-gateway-admin inspect` starts a server, lists its tools, prompts and
+resource templates, classifies each tool as reading or changing, and
+drafts roles for it. Use it before writing roles, and to check roles
+after a server update. It comes, with `profile` and `review` below, in
+the package `mcp-gateway-tools` (`zypper install mcp-gateway-tools`):
+
+```bash
+# A registered server, started as the gateway starts it for discovery
+# (through systemd, in its sandbox and SELinux domain; as root):
+mcp-gateway-admin inspect --server git
+
+# Check role data against the tools the server really has:
+mcp-gateway-admin inspect --server git --roles /etc/mcp-gateway/policy/rbac/data.json
+
+# A server not registered yet, as a child process of yours (without
+# systemd and SELinux, under Landlock; refused as root). Writes the
+# drafts git.yaml and roles.json to ./git-drafts:
+mcp-gateway-admin inspect --name git --out ./git-drafts -- /usr/libexec/mcp-servers/mcp-git
+```
+
+A server started by command (or a registered one with `--exec`) runs
+under Landlock (see [Landlock](#landlock)): it reads the system, writes
+a directory of its own that is its home and `TMPDIR` (removed
+afterwards), may read and execute its program and the existing
+absolute paths on its command line, and has no TCP. `--home` gives it
+your home instead, `--network` TCP, `--allow DIR` another tree to read
+and execute (a server's package beside its script, for example). A
+server that fails with "permission denied" may need one of them; a
+definition's own `landlock` applies as well. Landlock is a second wall,
+not systemd's sandbox or an SELinux domain: start servers you do not
+trust with `--server`, as root, through systemd.
+
+The report shows for each tool its class and why: the MCP annotations
+the server gives (`readOnlyHint`, `destructiveHint`) and the first word
+of its name (`get`, `list`, … read; `set`, `delete`, `install`, …
+change). Arguments that look like paths are listed as candidates for an
+`args` constraint (chapter 6).
+
+The drafted roles are `<server>-reader`, with the tools the server marks
+read-only by exact name, and `<server>-operator`, which adds every other
+tool after an out-of-band approval. Tools that only their name marks as
+reading need approval in the draft: annotations and names come from the
+server and prove nothing. Review the report, move tools you have checked
+into the reader role (or use `--read-by-name`), and copy the roles into
+your role data or a setup package.
+
+The report also lists tool arguments whose schema leaves agents
+guessing, as candidates for `tool_notes` ("What agents see about their
+limits", below):
+
+- **times without a format**: string arguments that look like times or
+  dates (names such as `since`, `start_time`, `createdAt`, or a
+  description with "time" or "date") whose description does not say how
+  to write them. A Go `time.Time` argument has the schema
+  `{"type": "string"}` and accepts RFC 3339 only; systemd-mcp's
+  `list_log` (`from`, `to`) is one;
+- **no description**: string arguments without description, enum,
+  pattern or format, for which agents have only the name.
+
+Each comes with a draft note to complete, after finding out what the
+server takes (its documentation or source); the draft definition of
+`--out` has them as comments. A tool the definition already has a note
+for is marked "has a note"; notes for tools the server does not offer
+are listed. Only the schemas are read: no tool is called to try values.
+
+The role check reports a permission that names a tool or prompt the
+server does not have as an error (exit status 1), a pattern that matches
+none as a warning, and tools no permission names as information. A
+server that changes its tools in an update shows up this way before
+users miss them.
+
+What a server lists can depend on how it runs: mcp-server-zypp offers
+its installing tools only as root (the privileged definition), and
+systemd-mcp offers `get_man_page` only where `man` is installed.
+`inspect` reports what the definition it starts offers on this system;
+check roles meant for another definition with that definition (for
+example through `--config` with a configuration whose `servers_dir`
+holds it).
+
+What `inspect` does not find out is what the server needs from the
+system: SELinux rules, polkit actions, an account, the network. That is
+what `mcp-gateway-admin profile` is for.
+
+### Profiling a server
+
+`mcp-gateway-admin profile` runs a registered server with its SELinux domain
+permissive (only that domain), calls its tools and drafts a policy
+module from the denials of the run:
+
+```bash
+# Register the server first (with run_as, if it should run as an account):
+cat >/etc/mcp-gateway/servers.d/git.yaml <<'END'
+name: git
+command: ["/usr/libexec/mcp-servers/mcp-git"]
+END
+
+# As root, with selinux-policy-devel installed:
+mcp-gateway-admin profile --server git --out ./git-profile
+```
+
+A server that still runs in the default domain `mcpsrv_generic_t` gets a
+new domain, `mcpsrv_git_t`, from the gateway's template; for one with a
+domain of its own, the draft adds to it (`mcp_git_local`). While it
+runs, a temporary module `mcpprof_git` makes the domain permissive (and
+labels the program), and the policy's dontaudit rules are off
+(`semodule -DB`): a denial they keep silent is allowed without a trace in
+a permissive domain, and the server would fail on it once enforcing
+(firewalld-mcp needs to search `/run/dbus`, which the policy denies
+silently). At the end the module is removed and the rules are back on;
+both switches rebuild the policy and take a while. `--keep-dontaudit`
+skips the switch. The rules are off for the whole system, so the audit
+log has denials of other programs from that time too (the gateway's
+own scan of `/proc` for MCS categories, for one); they are not
+problems.
+
+It calls the tools that read (see "Inspecting a server" above) with
+arguments made up from their schemas: enough to run the code that talks
+to the system, not to succeed. Real arguments, and calls of other tools,
+come from a file:
+
+```json
+{"get_file": {"path": "/etc/hosts"}, "log": [{"count": 5}, {"count": 0}]}
+```
+
+```bash
+mcp-gateway-admin profile --server git --out ./git-profile --calls calls.json
+```
+
+`--call-all` calls every tool with made-up arguments: only on a system
+that may be changed, such as a test VM.
+
+The drafts directory then holds:
+
+| File | Content |
+|---|---|
+| `mcp_git.te`, `mcp_git.fc` | the module: the template and one allow rule per kind of access seen, with paths and programs as comments; already compiled to `mcp_git.pp` |
+| `git.yaml` | the definition with `selinux_type: mcpsrv_git_t` (and `network: true` if the server connected to the network), and a `landlock` of the trees it used (below) |
+| `report.txt` | the calls and their answers, the denials, and hints |
+| `calls.json` | the calls and their answers, for scripts |
+
+Landlock refuses without an audit record, so the run drafts the
+definition's `landlock` from what the server's processes have open: it
+samples their files (with the mode they were opened in), working
+directories and mapped programs and libraries every 50 ms, adds the
+paths of the run's SELinux denials, and keeps the trees beyond the base
+(chapter "Landlock" above): a file stands for its directory, `/` for
+nothing, nested trees fold into the outer one. `report.txt` lists them
+under "Landlock". The run goes without the definition's own `landlock`
+so that the server reaches what it needs; the draft replaces it. A
+file opened and closed between two samples is missed: `--verify` with
+the drafted definition installed runs under its `landlock`, and a tool
+failing with "permission denied" there (no SELinux denial) names a tree
+to add.
+
+The hints say what allow rules cannot: a helper the server runs that
+belongs in its own domain (zypper: `rpm_t`, see
+`mcp_gateway_backend_rpm`), capabilities it used (perhaps it should run
+as another account), authorizations a service refused (a polkit rule for
+the account), and SELINUX_ERR records.
+
+Review the module before loading it: it allows what one run did, which
+can be more than the server needs (a path it only looked at), and lacks
+what the run did not reach. Replace rules by interfaces of the reference
+policy where one fits (`sesearch`, `audit2allow -R`). Then:
+
+```bash
+cd git-profile
+make -f /usr/share/selinux/devel/Makefile mcp_git.pp && semodule -i mcp_git.pp
+restorecon -F /usr/libexec/mcp-servers/mcp-git
+cp git.yaml /etc/mcp-gateway/servers.d/    # after comparing it with yours
+mcp-gateway --check && systemctl reload mcp-gateway.service
+
+# The same calls, enforcing; fails if there is a denial:
+mcp-gateway-admin profile --server git --verify
+```
+
+### Reviewing a server's source
+
+A profiling run sees only the code its calls reach. `mcp-gateway-admin review`
+reads the server's source for what it does to the system, to find the
+rest:
+
+```bash
+# The source of the server (for Go: --main, the server's main package,
+# so that other programs and tools in the repository are left out).
+# --profile: the drafts directory of a profiling run, for its denials.
+mcp-gateway-admin review --source ./mcp-git --main ./cmd/mcp-git --profile ./git-profile
+```
+
+It lists, each with file and line:
+
+| Kind | What it finds | What it may need |
+|---|---|---|
+| Programs it runs | `exec.Command`, `subprocess`, `spawn`, `popen`, `Command::new`, paths in `bin`/`libexec` | execute rights, or a transition (zypper, rpm: `rpm_t`) |
+| D-Bus | names, interfaces and polkit actions (`org.freedesktop.…`) | talking to the service; a polkit rule for actions |
+| Paths | absolute paths in the code | access to their type; writable paths in the sandbox |
+| Network | HTTP clients, sockets, URLs | `network: true`, connect rules |
+| Root checks | `geteuid()` and the like | the right `run_as`: some servers hide tools from non-root users |
+| Environment | variables it reads | `env` in the definition |
+
+On the system it runs on, programs are looked up on root's PATH and each
+program and path shows its SELinux type. With `--profile`, every finding
+with a type says whether the profiling run recorded a denial for that
+type; one without ("not reached, or allowed already") is a code path to
+give a call for (`--calls`), or to look at in the code. For systemd-mcp
+the review lists `rpm`, `man` and `getfacl`, the polkit actions it
+checks itself and `/run/log/journal`, which a profiling run reaches only
+with calls of the right tools.
+
+The scan is textual: it shows what the code mentions, not what each
+tool does, and misses what the code puts together at run time. Tests,
+vendored code and comments are left out. `--json` prints the findings
+for scripts.
+
+### Overriding and disabling package definitions
+
+A file in `/etc/mcp-gateway/servers.d/` replaces the package file **of
+the same file name**; an empty file, or a symlink to `/dev/null`,
+disables it:
+
+```bash
+# change the file server
+cp /usr/share/mcp-gateway/servers.d/fs-demo.yaml /etc/mcp-gateway/servers.d/
+$EDITOR /etc/mcp-gateway/servers.d/fs-demo.yaml
+
+# disable it
+ln -s /dev/null /etc/mcp-gateway/servers.d/fs-demo.yaml
+```
+
+Server names must be unique across all files.
+
+## Definition reference
+
+| Key | Default | Meaning |
+|---|---|---|
+| `version` | `1` | the version of the definition format (see chapter 3, [Format version](03-configuration.md#format-version)) |
+| `name` | — (required) | the server's name: lower case letters, digits and `-`, starting with a letter, at most 32 characters. It appears in endpoint paths (`--server git`, `/mcp/git`), in tool name prefixes (`git__commit`) and in policy (`"server": "git"`). |
+| `command` | — (required, or `url`) | the command line; the first element must be an absolute path. `${HOME}` and `${USER}` are replaced by the principal's home directory and name; other `${…}` are left as they are. |
+| `url` | none | instead of `command`: the endpoint of a server that speaks Streamable HTTP, `https://…` (`http://` only to the local host). See [Servers that speak HTTP](#servers-that-speak-http) |
+| `headers` | none | with `url`: headers sent with each request (map); `${CREDENTIAL:name}` in a value is the secret `name` from `credentials` |
+| `proxy` | none | with an `https://` `url`: an HTTP proxy to tunnel through, `http://host:port` (or `https://`). See [Through a proxy](#through-a-proxy) |
+| `proxy_headers` | none | with `proxy`: headers sent to the proxy (map), typically `Proxy-Authorization`; `${CREDENTIAL:name}` as in `headers` |
+| `sign_in` | none | with `url`: each user signs in to the server with their own account there (`scopes`, `client_id`, `client_secret`). See [Signing in for each user](#signing-in-for-each-user) |
+| `env` | none | extra environment variables (map); `${HOME}` and `${USER}` are replaced as in `command` |
+| `selinux_type` | `mcpsrv_generic_t` (`mcpsrv_http_t` with `url`) | the SELinux domain instances run in; must be `mcpsrv_<name>_t` (see [SELinux domains](#selinux-domains-for-servers)) |
+| `isolation` | `principal` | `principal`: one instance per principal, shared by that principal's sessions. `session`: a new instance per session; agents of MCP 2026-07-28 have no session and share one instance per principal, as with `principal`. |
+| `network` | `false` | allow network access. Without it, the instance has a private network namespace and only unix sockets. |
+| `run_as` | `principal` (`dynamic` with `url`) | whom the instance runs as: `principal` (the local user; remote users without a local account get a throwaway dynamic user), `dynamic` (always a throwaway dynamic user), or the name of a system account |
+| `discovery` | `shared` (`instance` with `sign_in`) | where tool and prompt lists come from: `shared` (one gateway-owned instance per server, cached; listing starts no per-user instances), `instance` (each principal's own instance, for servers whose tools depend on the user) |
+| `credentials` | none | secrets handed to the server by systemd, see [Secrets](#secrets) |
+| `tool_notes` | none | notes on tools, by tool name (up to 500 characters each), added to the tools' descriptions after "Administrator's note:": what the server's own description does not say, such as an argument's format. The doctor warns about a note for a tool the server does not offer |
+| `landlock` | none | restrict each instance with the Landlock LSM, a second wall behind the domain and the sandbox: `read`, `write`, `exec` (lists of trees; `${HOME}` and `${USER}` are the principal's), `tcp_connect`, `tcp_bind` (ports; an empty list allows none, unset leaves TCP to the sandbox), `required` (refuse to start where the kernel cannot apply all of it). See "Landlock" below |
+| `sandbox.protect_home` | `read-only` | access to home directories: `yes` (none), `read-only`, `read-write` |
+| `sandbox.read_write_paths` | none | existing absolute paths the instance may write despite `ProtectSystem=strict` (systemd `ReadWritePaths=`); paths of the gateway itself, and directories containing them, are refused |
+| `sandbox.state_directory` | none | a directory below `/var/lib` (a relative name, e.g. `my-server`) that systemd creates for the instance, owned by its user, mode 0700, writable and kept across instances (systemd `StateDirectory=`) |
+| `privileged` | `false` | run without the sandbox, with the rights of a root service, for servers that change the system as a whole (package installation); needs `run_as: root` and is accepted only in `/etc/mcp-gateway/servers.d`. See [Privileged servers](#privileged-servers). |
+
+Example with everything:
+
+```yaml
+name: fs
+command: ["/usr/libexec/mcp-servers/mcp-server-fs", "--root", "${HOME}"]
+env:
+  LOG_LEVEL: info
+selinux_type: mcpsrv_fs_t
+isolation: principal
+network: false
+run_as: principal
+discovery: shared
+sandbox:
+  protect_home: read-write
+credentials: [fs-license]
+```
+
+### What agents see about their limits
+
+In `tools/list`, the gateway adds a line to a tool's description when
+the user's roles limit it (the shipped policy's `data.mcp.filter.hints`,
+from the same role data the decisions use): the argument constraints,
+in words where they are a plain prefix or value, and whether calls need
+an approval and where. With the server's `tool_notes`, the
+administrator's note follows:
+
+```
+Reads a file.
+
+[mcp-gateway] According to your roles, calls need path starting with /home/alice/. Each call needs a human approval, out of band (Cockpit, a desktop notification or mail); the call waits for it.
+```
+
+The agent can then pick a call its roles allow instead of finding out by
+trying. Only role data is described, not custom policy rules, and only
+the user's own; every call is still decided. On the aggregated endpoint,
+the gateway's tool `gateway_capabilities` gathers these descriptions for
+all servers, with each server's instructions (chapter 5).
+
+A denied call says why: "no matching permission: the arguments are
+outside what your roles allow (path: ^/home/alice/)" (chapter 10,
+"Calls fail").
+
+### Landlock
+
+With `landlock` in its definition, an instance starts through
+`/usr/libexec/mcp-gateway/mcp-landlock`, which restricts itself with the
+kernel's Landlock LSM and then executes the server. The restriction is
+for good: neither the server nor anything it starts can lift it, root
+included, and it follows the real file hierarchy, so a symbolic link
+leads nowhere else. It stacks with the SELinux domain and the unit's
+sandbox: an access needs all of them.
+
+```yaml
+landlock:
+  write: ["${HOME}"]              # the user's home: read and change
+  read: ["/srv/shared"]           # read only
+  exec: ["/opt/tool"]             # read and execute
+  tcp_connect: [443]              # only this TCP port (empty list: none)
+  required: false                 # true: refuse to start without Landlock
+```
+
+Every ruleset also allows a base: the system's programs and libraries
+(`/usr`, read and execute), its configuration and state as the sandbox
+shows them (`/etc`, `/proc`, `/sys`, read), `/dev/null` and the random
+devices, the instance's private `/tmp` and `/var/tmp`, and its
+credentials. Anything else, such as another user's home or `/var`, is
+out of reach unless the rules name it. A tree that does not exist, or
+that the instance may not open anyway (SELinux, permissions, such as a
+link its domain may not follow), is left out (the journal line says so); a tree that expands to `/` (the
+home of the shared discovery instance, which runs for no one) is read,
+never written. Signals and abstract unix sockets reach only the
+instance's own processes (Landlock ABI 6). Connecting to the system bus
+and other named sockets is not restricted by Landlock; that stays with
+SELinux and polkit.
+
+The shipped definitions use it: `fs` writes the user's home and nothing
+else of `/home`, even where another user's files are world-readable;
+`gateway-docs` reads the documentation; `exec` reads `/var` and `/run`
+(the system's state) besides the base; the setup packages' `systemd`,
+`firewalld` and `zypp` read what their tools need (chapter 13). The rules are fixed for the life
+of an instance: a changed definition takes effect with new instances,
+as any other change does.
+
+The instance's journal starts with what the kernel applied
+(`mcp-landlock: Landlock ABI 6, scoped`). On a kernel without Landlock,
+or where `landlock` is not in the LSM list
+(`cat /sys/kernel/security/lsm`), the instance runs without the
+restriction and the doctor warns; with `required: true` it does not
+start. Landlock denials are not in the audit log of the 6.12 kernels:
+a denied access is an `EACCES` ("permission denied") the server reports,
+with no SELinux denial next to it. Widen the rules, or check them with
+`mcp-landlock -version` (the kernel's ABI). The doctor names Landlock
+as the likely cause for a server that does not start and runs
+restricted while SELinux denied it nothing (`landlock` *name*, chapter
+10); Cockpit adds the same hint under an instance's log that says
+"permission denied", and shows "Landlock" among a server's facts.
+
+The gateway's own programs restrict themselves at startup as well,
+without configuration and whatever starts them (the gateway, the
+supervisor's `exec` mode, `inspect`, or a shell): `mcp-server-fs` to its
+`--root` directories (read only with `--read-only`), `mcp-server-exec`
+to the trees its commands name (see
+[Commands an administrator allows](#commands-an-administrator-allows)),
+`mcp-http-connector` and `mcp-oauth-helper` to their credentials, the
+CA certificates and the resolver configuration, and to the TCP ports of
+the server or proxy they reach. The restriction stacks with the
+definition's `landlock`: both apply. The journal says what was applied
+(`mcp-server-fs: serving /home/alice; Landlock ABI 6, scoped`; the
+connector: `msg=restricted landlock="Landlock ABI 6, scoped"`).
+
+## What an instance gets
+
+Each instance runs as a transient systemd service named
+`mcp-<server>-<id>.service` with:
+
+- **stdio** connected to the gateway (a private socket pair); **stderr**
+  goes to the journal of the unit;
+- the **environment** `PATH=/usr/local/bin:/usr/bin`, `LANG=C.UTF-8`,
+  `HOME` and `USER` of the principal (if it has a local account), and
+  the definition's `env`;
+- the **working directory** of the principal's home (local principals);
+- a **sandbox**: `NoNewPrivileges`, `ProtectSystem=strict` (the whole
+  file system read-only except `/dev`, `/proc`, `/sys` and the home as
+  configured, the `state_directory` and the `read_write_paths`),
+  `ProtectHome` as configured, private `/tmp` and `/dev`, no
+  capabilities, the `@system-service` system call set only, protected
+  kernel tunables, modules, logs, clock, hostname and control groups,
+  `UMask=0077`; without `network: true` a private network namespace and
+  only `AF_UNIX` sockets;
+- **limits**: 512 MiB memory, 64 tasks, 8 hours runtime;
+- with SELinux: the definition's domain and a unique **MCS category
+  pair**, so instances running as the same account (for example dynamic
+  users of different remote principals) cannot touch each other;
+- with `landlock`: the instance's trees and ports, enforced by the kernel
+  ("Landlock" above).
+
+### Writable paths and state
+
+`ProtectSystem=strict` keeps everything but the private `/tmp` read-only,
+which also holds for servers running as root. A server that keeps state
+in a fixed place gets it with `sandbox.state_directory`:
+
+```yaml
+name: suseconnect
+command: ["/usr/bin/suseconnect-mcp"]
+run_as: root
+network: true
+sandbox:
+  state_directory: suseconnect-mcp     # /var/lib/suseconnect-mcp
+```
+
+systemd creates the directory before the instance starts, owned by the
+instance's user, and makes it writable; it needs no
+`read_write_paths` entry. All instances of the server share it, so it
+suits servers with a fixed `run_as`; with `run_as: principal`, systemd
+hands it to each user in turn.
+
+`sandbox.read_write_paths` makes other existing paths writable (an
+instance whose path does not exist fails to start). Each one widens what
+an agent can change through the server: keep the list short and
+specific.
+
+Neither option changes SELinux: in enforcing mode the server's domain
+also needs write access to these paths, for example a type of its own
+for its state directory:
+
+```
+# mcp_suseconnect.te (excerpt)
+type mcpsrv_suseconnect_var_lib_t;
+files_type(mcpsrv_suseconnect_var_lib_t)
+manage_dirs_pattern(mcpsrv_suseconnect_t, mcpsrv_suseconnect_var_lib_t, mcpsrv_suseconnect_var_lib_t)
+manage_files_pattern(mcpsrv_suseconnect_t, mcpsrv_suseconnect_var_lib_t, mcpsrv_suseconnect_var_lib_t)
+files_search_var_lib(mcpsrv_suseconnect_t)
+```
+
+```
+# mcp_suseconnect.fc (excerpt)
+/var/lib/suseconnect-mcp(/.*)?  gen_context(system_u:object_r:mcpsrv_suseconnect_var_lib_t,s0)
+```
+
+In development mode (`supervisor.mode: exec`) there is no sandbox, and
+both options have no effect.
+
+### Lifecycle
+
+- An instance starts with the first call that needs it and is shared by
+  the principal's sessions (`isolation: principal`) or belongs to one
+  session (`isolation: session`).
+- It stops `supervisor.idle_timeout` (15 minutes) after its last session
+  ended, or at session end with `isolation: session`.
+- If it crashes or fails to start, the next start of the same instance
+  waits: 1 s, then doubling up to 2 minutes; meanwhile calls fail at once
+  with `backend unavailable; retry in …`. A minute of stable running
+  resets the wait.
+- Administrators (and each principal for their own instances) can list
+  and stop instances in Cockpit (chapter 8) or through the control API.
+
+### Discovery instances
+
+With `discovery: shared`, tool, prompt and resource template lists come
+from one instance per server that the gateway runs for its own principal
+`mcp-discovery`: no local account (a dynamic user, home `/`), only list
+requests. The lists are cached until the server reports a change or the
+instance stops. Connecting and listing therefore start no per-user
+instances; calls and `resources/list` (which lists user data, such as a
+user's files) run on the principal's own instance, and `resources/list`
+only of servers that offer resources, as the discovery instance tells.
+
+Use `discovery: instance` for servers whose tool list depends on the user
+(for example on files in the home directory or the user's configuration).
+
+### Protocol versions
+
+MCP 2026-07-28 dropped the `initialize` handshake: such ("modern")
+servers answer `server/discover` instead, and every request carries the
+protocol version in its `_meta`. When the gateway starts the first
+instance of a definition, it sends `server/discover`; a modern server is
+then used without the handshake, any other answer means an earlier
+("legacy") server, which is initialized with MCP 2025-11-25 as before.
+The result is kept for the definition (a changed definition is probed
+again). A legacy server that exits on the probe, as some do on a request
+before `initialize`, is started again and initialized, and is not probed
+again. Agents see no difference: a legacy agent uses a modern server as
+any other, and `logging/setLevel` and `resources/subscribe` work with
+both (the gateway turns them into the per-request log level and the
+server's subscription stream).
+
+Servers that speak HTTP (`url`) are probed the same way. To a modern
+one the connector sends what the 2026-07-28 transport asks for: no
+session, the headers `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`,
+and `Mcp-Param-…` for the tool parameters the server marks with
+`x-mcp-header`; a tool whose marks are invalid is left out of its
+list, with a warning in the instance's log ("tool left out: invalid
+x-mcp-header"). Cancelling a call closes its stream. A server that is
+unavailable when probed (an HTTP error without an MCP answer) is probed
+again at its next start.
+
+A modern server asks the client for input (a form, a sampling request,
+its roots) with a result instead of a request of its own. The gateway
+asks the agent over its session, as it relays a legacy server's
+requests: each decided by the `client` permissions of the policy and
+labelled with the server's name, sampling messages pseudonymized as
+policy says. It then calls the server again with the answers, and the
+agent sees one call. An elicitation policy or the user refuses reaches
+the server as declined; a refused sampling or roots request ends the
+call with the policy's error. One call takes at most 8 such rounds
+("… asked the client for input more than 8 times in one call"). A
+modern server is told only of the capabilities the agent declared and
+the policy lets it use, on calls, reads and prompts.
+
+Tested in CI with servers built with the official SDKs, over stdio and
+HTTP: Go (`github.com/modelcontextprotocol/go-sdk` 1.8), Python (`mcp`
+2.3) and TypeScript (`@modelcontextprotocol/server` 2.3). Two things a
+server's author may need to know: the Go SDK serves 2026-07-28 over
+HTTP only without sessions (`StreamableHTTPOptions{Stateless: true}`),
+and the TypeScript SDK only through `serveStdio` and
+`createMcpHandler` (a `StdioServerTransport` connected by hand speaks
+the earlier revisions). Such a server still works, as a legacy one.
+
+`mcp-gateway-admin inspect` and the doctor probe the same way.
+
+## Privileged servers
+
+A server that installs packages (mcp-server-zypp) writes anywhere below
+`/`, changes owners, sets file capabilities and labels and runs package
+scripts; no sandbox allows that. Mark such a server `privileged`:
+
+```yaml
+# /etc/mcp-gateway/servers.d/zypp.yaml
+name: zypp
+command: ["/usr/bin/mcp-server-zypp"]
+run_as: root
+network: true
+selinux_type: mcpsrv_zypp_t
+privileged: true
+```
+
+- Only the administrator's directory may define one: a privileged
+  definition in `/usr/share/mcp-gateway/servers.d` stops the gateway
+  from starting, so installing a package never creates one (a symlink in
+  `/etc` to a shipped file is the administrator's choice).
+- The instance runs as a root system service: all capabilities, a
+  writable system, no system call filter, no `NoNewPrivileges`; private
+  `/tmp`, `UMask=0022`, 4 GiB memory and 4096 tasks; without
+  `network: true` still no network. With SELinux it runs in its domain
+  **without an MCS pair**, so the files it installs stay readable for
+  everyone. The process that installs (the zypp worker, `rpm`) runs in
+  `rpm_t`, as with zypper (`mcp_gateway_backend_rpm`, below).
+- Calls are allowed without approval only by permissions naming server
+  and tool without wildcards (chapter 6); every decision on the server
+  goes to the kernel audit log.
+- The gateway does not stop the instance while a call is running: not
+  after the idle timeout, not from Cockpit, and on `systemctl stop` or
+  restart it refuses new calls and waits up to 28 minutes for running
+  ones ("waiting for privileged calls").
+- `mcp-gateway --check` and the start log warn about every privileged
+  server; Cockpit marks them.
+
+SELinux module for mcp-server-zypp (its worker labelled like zypper):
+
+```
+# mcp_zypp.te
+policy_module(mcp_zypp, 1.0)
+
+mcp_gateway_backend_template(zypp)
+mcp_gateway_backend_rpm(zypp)
+```
+
+```
+# mcp_zypp.fc
+/usr/bin/mcp-server-zypp                     --  gen_context(system_u:object_r:mcpsrv_zypp_exec_t,s0)
+/usr/libexec/mcp-server-zypp/zypp-mcp-tool   --  gen_context(system_u:object_r:rpm_exec_t,s0)
+```
+
+## Servers that speak HTTP
+
+A server that runs elsewhere, or on this host as a web service, and
+speaks MCP over Streamable HTTP, is defined with `url` instead of
+`command`. Its calls go through the same policy, approvals,
+obligations, audit records and limits as those of other servers.
+
+```yaml
+# /etc/mcp-gateway/servers.d/tickets.yaml
+name: tickets
+url: https://mcp.tickets.example.com/mcp
+credentials: [tickets-token]
+headers:
+  Authorization: "Bearer ${CREDENTIAL:tickets-token}"
+```
+
+```bash
+install -m 0600 /dev/stdin /etc/mcp-gateway/credentials/tickets-token <<<'…'
+mcp-gateway --check
+```
+
+- Each instance (one per principal, as for other servers) is
+  `mcp-http-connector`, started by systemd as a dynamic user in the
+  domain `mcpsrv_http_t`. It relays between the gateway and the server:
+  its requests, the server's answers, notifications and requests
+  (elicitation, sampling) on the request's event stream or the `GET`
+  stream, resuming a broken stream (`Last-Event-ID`); it ends the
+  server's session (`DELETE`) when the instance stops. The gateway
+  itself makes no outbound connection.
+- The gateway resolves the server's name when it starts an instance and
+  hands the addresses to it; the instance may reach those addresses
+  only (systemd `IPAddressAllow=`) and HTTP ports only (SELinux; for
+  other ports `setsebool -P mcpsrv_http_connect_any on`). No proxy is
+  taken from the environment (`https_proxy`); name one with `proxy`
+  ([Through a proxy](#through-a-proxy)). A name that resolves to other
+  addresses later is resolved anew for the next instance.
+- Secrets reach only the connector: `${CREDENTIAL:name}` in a header is
+  replaced by the instance from `$CREDENTIALS_DIRECTORY` ([Secrets](#secrets)),
+  not by the gateway, and is not on its command line. One secret serves
+  all principals; for each user's own account, see
+  [Signing in for each user](#signing-in-for-each-user).
+- If the server ends the session (HTTP 404), the instance ends, and the
+  next call starts a new one. A call whose answer cannot be had (an
+  HTTP error, a broken stream that cannot be resumed) fails with the
+  reason, `MCP server over HTTP: …`.
+- `mcp-gateway-admin inspect --server tickets` and the doctor start such
+  a server as any other.
+
+### Through a proxy
+
+Where the server can be reached only through an HTTP proxy, name it:
+
+```yaml
+# /etc/mcp-gateway/servers.d/tickets.yaml
+name: tickets
+url: https://mcp.tickets.example.com/mcp
+proxy: http://proxy.example.com:3128
+credentials: [tickets-token, proxy-auth]
+headers:
+  Authorization: "Bearer ${CREDENTIAL:tickets-token}"
+proxy_headers:
+  Proxy-Authorization: "Basic ${CREDENTIAL:proxy-auth}"
+```
+
+```bash
+# Basic authentication: base64 of user:password
+printf %s 'mcpuser:…' | base64 | install -m 0600 /dev/stdin /etc/mcp-gateway/credentials/proxy-auth
+```
+
+- The connector opens a tunnel through the proxy (`CONNECT`) and speaks
+  TLS to the server through it, verifying the server's certificate as
+  without a proxy: the proxy sees the server's name and port, not the
+  requests or the server's headers. `proxy_headers` go to the proxy
+  only, with the `CONNECT`.
+- The gateway resolves the proxy's name, not the server's (the proxy
+  does that), and the instance may reach the proxy's addresses only.
+  SELinux lets it connect to HTTP ports and the usual proxy ports
+  (`squid_port_t`: 3128; `http_cache_port_t`: 8080); for another port,
+  label it (`semanage port -a -t http_cache_port_t -p tcp 3129`) or turn
+  on `mcpsrv_http_connect_any`.
+- Only `https://` servers go through a proxy; credentials do not belong
+  in the proxy's URL (`http://user:password@…` is refused), but in
+  `proxy_headers`. With an `https://` proxy the connection to the proxy
+  is TLS too, verified against the system's certificates.
+
+### Signing in for each user
+
+A server that acts for each user with their own account there (a ticket
+system, a code host) authorizes them with OAuth, as the MCP
+authorization specification describes. With `sign_in`, each user signs
+in to it once, at its own authorization server; the gateway keeps their
+tokens and the agent never sees one:
+
+```yaml
+# /etc/mcp-gateway/servers.d/tickets.yaml
+name: tickets
+url: https://mcp.tickets.example.com/mcp
+sign_in:
+  scopes: [tickets.read, tickets.write]    # default: those the server lists
+```
+
+The authorization server sends users back to the gateway, to
+`<origin of http.audience>/oauth/callback`: `sign_in` needs the HTTP
+listener (chapter 3, "Remote access (HTTPS)"), reachable from the users'
+browsers. Without it, `mcp-gateway --check` refuses the definition:
+`server tickets: sign_in needs the HTTP listener (http.listen and
+http.audience) …`.
+
+What users see:
+
+- Until a user has signed in, the server offers them one tool,
+  `sign_in` (`tickets__sign_in` on the aggregated endpoint). Calling it,
+  or any tool of the server, starts the sign-in: a client that handles
+  URL elicitations (MCP 2025-11-25) offers to open the sign-in page,
+  the call waits up to `sign_in.timeout` (10 min), then the server's
+  tools are listed (`tools/list_changed`) and the call goes on. Other
+  clients get, at once, a tool error with a short link: `sign in to
+  tickets with your account there to use its tools: open
+  https://gw.example.com/oauth/start/… (valid until 14:10 UTC), then
+  use the tool again`. The agent shows it, the user opens it (any
+  browser; the link also shows on the Cockpit page), and the next call
+  works. Asking again before signing in gives the same link.
+- The user signs in at the server's authorization server and consents
+  there; the page they land on afterwards names the server and the user
+  it signed in for and says to return to the agent. The gateway checks
+  first that the answer comes from the authorization server it sent the
+  user to (the `iss` parameter, RFC 9207, as MCP 2026-07-28 asks); one
+  naming another issuer fails without its code being used (`the
+  authorization response names the issuer "…", not "…", the one signed
+  in with`), as does one without `iss` from a server that announces it
+  (`… has no iss, which … announces`).
+- Tokens are renewed when they expire: when the server refuses the
+  access token, the running instance gets a renewed one from the gateway
+  and the call goes on, in the same session with the server. If the
+  authorization server refuses the renewal, the user is asked to sign in
+  again.
+- Users sign out on the Cockpit page (Servers) or through the control
+  API (`DELETE /v1/sign-ins/tickets`); administrators see and revoke
+  everyone's sign-ins there. Signing out revokes the tokens at the
+  authorization server if it offers revocation, and stops the user's
+  instances of the server. Where it does not (or does not answer), the
+  tokens are only deleted and stay valid at the authorization server
+  until they expire; Cockpit says so, and the API counts the revoked
+  ones (`"revoked"`).
+- Removing the definition, its `sign_in`, or changing its `url` (tokens
+  are bound to it) signs everyone out of the server the same way: the
+  tokens are deleted and revoked with the previous definition, also when
+  the change was made while the gateway was not running (except for a
+  definition that is gone by then: its tokens are only deleted). Other
+  changes, such as `scopes`, keep the sign-ins.
+
+How the gateway is a client of the authorization server:
+
+| `sign_in` key | Default | Meaning |
+|---|---|---|
+| `scopes` | the server's `scopes_supported` | the scopes to ask for |
+| `client_id` | none | the client registered with the authorization server for the redirect URI above. Without it, the gateway uses a client ID metadata document (`<origin>/oauth/client.json`) where the authorization server supports them, else registers itself dynamically (RFC 7591) once per server, as a `web` application (`native` when the gateway's URL is on the local host). With neither, the first sign-in fails: `the authorization server … neither supports client ID metadata documents nor registration; register the gateway there (redirect URI …) and set sign_in.client_id`. |
+| `client_secret` | none | a credential name (in `credentials`) holding the client's secret, for a confidential client; needs `client_id` |
+
+```yaml
+name: tickets
+url: https://mcp.tickets.example.com/mcp
+credentials: [tickets-oauth]
+sign_in:
+  client_id: mcp-gateway-prod
+  client_secret: tickets-oauth
+```
+
+- The gateway finds the authorization server from the server's
+  protected resource metadata (RFC 9728) and reads its metadata
+  (RFC 8414); one without PKCE `S256` is refused. Every request names the
+  server as the resource (RFC 8707), so tokens are for that server only.
+- The gateway makes none of these requests itself: each runs
+  `mcp-oauth-helper` in a short-lived unit in the domain
+  `mcpsrv_oauth_t`, which may reach only the host of that step (or the
+  definition's `proxy`). Its unit names are
+  `mcp-<server>-sign-in-<id>.service`.
+- Tokens are kept per user and server in `/var/lib/mcp-gateway/tokens`
+  (`mcpgw_token_t`), encrypted with a key there that only the gateway
+  reads. An instance gets its user's access token from systemd as the
+  credential `sign-in` (`Authorization: Bearer …`), never on a command
+  line; refresh tokens never leave the gateway and the helper.
+- Policy decides the tool `sign_in` like the server's tools: a role that
+  allows any tool of the server allows it (chapter 6). Who may see and
+  end a user's sign-in is `data.mcp.approvals.manage_sign_in`, with the
+  approver rules (by default the user and the admin role).
+- A server's own tool named `sign_in` is reachable only once the user
+  has signed in.
+- Sign-ins, refreshes and sign-outs are audited (`mcp-sign-in`,
+  `mcp-sign-in-refresh`, `mcp-sign-out`), never tokens.
+
+## Secrets
+
+MCP servers often need an API token. The gateway never handles such
+secrets itself: systemd reads them and hands them to the instance.
+
+```yaml
+credentials:
+  - github-token                       # reads /etc/mcp-gateway/credentials/github-token
+  - db-password:/etc/db/mcp-password    # reads the given path
+```
+
+```bash
+install -m 0600 /dev/stdin /etc/mcp-gateway/credentials/github-token <<<'ghp_…'
+```
+
+The server finds each secret as the file `$CREDENTIALS_DIRECTORY/<name>`
+(systemd's `LoadCredential=`). Names consist of letters, digits, `_`,
+`.` and `-`; paths must be absolute. `/etc/mcp-gateway/credentials` is
+mode 0700 and labelled `mcpgw_cred_t`, which neither the gateway nor any
+MCP server may read. Every instance of the server gets the same secret;
+servers that need per-user secrets must obtain them otherwise. An
+instance sees only its own unit's credentials under `/run/credentials`,
+and not the transient unit files of other instances.
+
+Many servers expect the token in an environment variable. Wrap them:
+
+```bash
+#!/bin/sh
+# /usr/libexec/mcp-servers/mcp-github-wrapper
+GITHUB_TOKEN=$(cat "$CREDENTIALS_DIRECTORY/github-token")
+export GITHUB_TOKEN
+exec /usr/libexec/mcp-servers/mcp-github "$@"
+```
+
+Label such a wrapper like the server itself (it becomes the entry point
+of the domain, see [SELinux domains](#selinux-domains-for-servers)).
+
+## Examples
+
+### A file server on the user's home
+
+The package `mcp-gateway-fs-server` installs `mcp-server-fs` and
+registers it as the server `fs` on the connecting user's home directory
+(`/usr/share/mcp-gateway/servers.d/fs-demo.yaml`; the file keeps the name
+of the demo server's definition, so that a copy of it in
+`/etc/mcp-gateway/servers.d` still replaces it):
+
+```yaml
+name: fs
+command: ["/usr/libexec/mcp-servers/mcp-server-fs", "--root", "${HOME}"]
+selinux_type: mcpsrv_fs_t          # may read and write user home content
+sandbox:
+  protect_home: read-write
+```
+
+Its tools have the names and arguments of the MCP project's reference
+filesystem server, which agents know, and three additions (`search_text`,
+`outline_file`, line ranges in `read_text_file`) that let an agent read
+only what it needs:
+
+| Tool | Does |
+|---|---|
+| `read_text_file` | a text file, whole, its first (`head`) or last (`tail`) lines, or `limit` lines from line `offset` (ending with `[lines 120-160 of 3021]`) |
+| `read_media_file` | an image, audio or other binary file, base64 with its MIME type |
+| `read_multiple_files` | several text files; one that fails does not fail the others |
+| `list_directory`, `list_directory_with_sizes` | a directory's entries (`[DIR]`, `[FILE]`, `[LINK]`), with sizes |
+| `directory_tree` | the tree below a directory as JSON, without following links |
+| `search_files` | paths matching a glob: `*.go` at any depth, `src/**/*.go` relative to the start; `excludePatterns` |
+| `search_text` | lines of text files below a path, or in one file, containing `query` (case-insensitive unless `caseSensitive`; a regular expression with `regexp: true`, RE2 syntax), with file, line number and `context` lines (2); at most `maxResults` (50) matching lines and `--max-read` bytes; skips binary files and files larger than `--max-read`, follows no links; `excludePatterns` |
+| `outline_file` | the Markdown headings of a file (`#` to `######`, not those in fenced code) with their line numbers and the lines and bytes of each section, to the next heading of the same or a higher level; `maxLevel` (6) leaves out deeper ones. An agent reads one section with `read_text_file` (`offset`: its line, `limit`: its lines) |
+| `get_file_info` | type, size, permissions, times, MIME type |
+| `list_allowed_directories` | the directories the server works in |
+| `write_file` | creates or replaces a file, at once (temporary file renamed over it) |
+| `edit_file` | replaces text that occurs exactly once (`oldText` → `newText`); returns a diff, `dryRun` only shows it |
+| `create_directory` | a directory and its parents |
+| `move_file` | moves or renames within one directory tree; never replaces |
+| `delete_file` | a file or an empty directory |
+| `read_file`, `list_dir` | older names, kept for roles that name them |
+
+The last five change files; all tools carry MCP annotations (read-only,
+destructive), which `mcp-gateway-admin inspect` uses for its draft roles.
+
+The server's instructions tell the agent where the files are (the roots;
+nothing outside them can be reached), which tool to use for what (search
+with `search_text`, `search_files` or `outline_file` before reading whole
+files, then read the lines with `read_text_file`), and the limits of one
+call (`--max-read`, `--max-write`, `--max-entries`), which the tool
+descriptions repeat; `--instructions` text goes before them. On the
+aggregated endpoint, `gateway_capabilities` (chapter 5) passes them on
+from the user's own instance, since the shared discovery instance runs
+with the home `/`.
+Options, for a copy of the definition in `/etc/mcp-gateway/servers.d`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--root DIR` | current directory | a directory the tools work in; repeatable; relative paths are relative to the first |
+| `--read-only` | off | offer only the reading tools |
+| `--instructions TEXT` | | what the files are, for the client's model (the `gateway-docs` server uses it; chapter 10, "Asking an agent") |
+| `--max-read BYTES` | 10 MiB | what one call reads (summed over `read_multiple_files`); larger files are read with `head`/`tail` or `offset`/`limit`, and not searched |
+| `--max-write BYTES` | 10 MiB | what one call writes |
+| `--max-entries N` | 10000 | entries a listing, tree or search returns |
+
+On a transactional system (chapter 2), home directories are writable as
+anywhere else. A `--root` on the read-only root file system (`/usr`,
+`/`) is shown as read-only by `list_allowed_directories` and in the
+server's instructions; changes there are refused with "read-only file
+system (on a transactional system, … change only through
+transactional-update …)", also where a path below a writable root reaches
+a read-only mount. `search_files`, `search_text` and `directory_tree` do not enter
+btrfs `.snapshots` directories (a copy of the tree per snapper snapshot)
+unless the path given is inside one.
+
+Policy decides what the principal may do within the home (for example:
+read freely, write only with approval, never delete; chapter 6). The
+shipped `developer` role allows the reading tools and asks for approval
+for `write_file`, `edit_file`, `create_directory` and `move_file` within
+the home; `delete_*` is denied. `move_file` names two paths, so its
+permission constrains both (`"args": {"source": …, "destination": …}`).
+
+Policy checks paths as strings and does not follow symbolic links
+(chapter 9). If you write or choose a file server, make sure it opens
+every path beneath its root, so that a link inside the home cannot
+lead to files policy did not allow: in Go with `os.OpenRoot` and the
+methods of `os.Root`, in C with `openat2(2)` and `RESOLVE_BENEATH`,
+in Python by opening relative to a directory descriptor and refusing
+links (`O_NOFOLLOW`) or by checking `os.path.realpath` of the opened
+file. `mcp-server-fs` shows the Go way.
+
+### Commands an administrator allows
+
+Agents such as Kit bring their own shell, which runs as the user without
+any of the gateway's confinement; you may have turned it off. When an
+agent should still run a few commands, `mcp-gateway-exec-server` offers
+them as tools of the server `exec`, under the gateway's policy, approvals
+and audit, in the domain `mcpsrv_exec_t`, without network, as the calling
+user (`run_as: principal`):
+
+```bash
+zypper install mcp-gateway-exec-server
+cp /usr/share/mcp-gateway/exec/examples.yaml /etc/mcp-gateway/exec.d/
+/usr/libexec/mcp-servers/mcp-server-exec --check      # lists the commands, warns
+```
+
+Each command in `/etc/mcp-gateway/exec.d/*.yaml` is one tool:
+
+```yaml
+version: 1
+commands:
+  disk_usage:
+    description: Space on the mounted file systems
+    argv: [/usr/bin/df, -h]
+    read_only: true
+  unit_log:
+    description: The last lines of a unit's journal
+    argv: [/usr/bin/journalctl, --no-pager, -u, "{unit}", -n, "{lines}"]
+    args:
+      unit:  {pattern: "[A-Za-z0-9@._-]+\\.service", description: the unit}
+      lines: {pattern: "[0-9]{1,4}", default: "50"}
+    timeout: 30s
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `argv` | — (required) | the program (an absolute path) and its arguments; `{name}` is replaced by the caller's argument `name`, also inside an element (`--unit={unit}`) |
+| `args.NAME.pattern` | — (required) | a regular expression the whole value must match |
+| `args.NAME.default` | none (required argument) | the value when the caller gives none |
+| `args.NAME.allow_dash` | `false` | let a value start with `-`; otherwise refused, so that it cannot become an option of the program |
+| `description` | | what the tool does, for the agent |
+| `timeout` | `60s` | then the program and everything it started are killed (at most `1h`) |
+| `max_output` | 1 MiB | bytes of stdout and stderr kept (at most 16 MiB); the rest is cut |
+| `read_only` | `false` | the MCP annotation (`readOnlyHint`), a hint for clients and never a permission in the policy; the paths the command names are only read (Landlock, below) |
+| `env` | none | variables beyond `PATH=/usr/sbin:/usr/bin:/sbin:/bin` and `LANG=C.UTF-8`; nothing else is passed on |
+| `dir` | `/` | the working directory |
+
+What the agent sees of a command: its `description`, then a line the
+server adds from the definition ("Runs: /usr/bin/journalctl --no-pager
+-u {unit} -n {lines}. Ends after 30 s; output (stdout and stderr
+together) up to 1 MiB."), the arguments with their patterns and
+descriptions, a title from the name (`unit_log`: "Unit log") and the
+structure of the result (`argv`, `exit_code`, `stdout`, `stderr`,
+`seconds`, `truncated`, `timed_out`). The server's instructions list the
+commands with the first line of each description, and say that there are
+no others; the shipped definition's `--instructions` adds how they run
+(as the user, without network, in `mcpsrv_exec_t`, so reading beyond
+`/etc`, `/usr` and the system's state may be refused). A definition of
+your own with other settings should say so in its own `--instructions`.
+
+There is no shell: `argv` is passed to the program as it is, one element
+one argument, so `;`, `$(…)`, quotes or globs in a value are just
+characters. Patterns are what keep values in bounds; make them as narrow
+as the command needs, and let no value name a file the command should
+not read. stdin is empty. A file that does not validate keeps the server
+from starting (its error is in the journal, `journalctl -u 'mcp-exec-*'`,
+and `mcp-gateway-admin doctor` reports the server), so that no command goes
+missing unnoticed. The server reads the files when an instance starts:
+after a change, stop the running instances (Cockpit, Servers tab) or
+wait until they end when idle.
+
+Who may run which command is policy. The shipped role `exec-operator`
+runs every command with approval; a role of your own can allow some
+freely and others with approval (tool names are the command names):
+
+```json
+"roles": {"ops": {"permissions": [
+  {"server": "exec", "tool": "disk_usage"},
+  {"server": "exec", "tool": "unit_log"},
+  {"server": "exec", "tool": "*", "require_approval": true, "approval_channel": "oob"}
+]}}
+```
+
+Roles for every server reach commands too: the shipped `viewer` allows
+`list_*`, `read_*` and `get_*` on all servers, so avoid such names
+(`--check` warns). Add `"audit": "full"` to a permission to record the
+arguments in the audit log instead of their digest (chapter 6).
+
+The server and its commands also keep to the trees the command files
+name (Landlock, [above](#landlock)): the system read (`/etc`, `/usr`,
+`/proc`, `/sys`, `/var`, `/run`), each command's program executed, and
+the paths a command names written, or only read when it is
+`read_only`: its `dir` and the absolute paths in its `argv`, a whole
+element (`/etc/os-release`), the value of an option
+(`--directory=/var/log/journal`), or the directory before a placeholder
+(`/var/log/app` for `/var/log/app/{name}.log`). A value the caller
+gives (`{path}`) names no tree: `cat {path}` reads the system, not a
+home. A command that needs other trees gets them from its file's
+`landlock` (trees only; TCP ports belong in the server's definition),
+which applies to the commands of that file:
+
+```yaml
+version: 1
+landlock:
+  write: [/srv/spool]     # read and change
+  read: [/srv/shared]
+  exec: [/opt/tool]       # programs and libraries the commands run
+commands:
+  ...
+```
+
+The definition's `landlock` still applies on top: the shipped one reads
+`/var` and `/run` and writes nothing beyond the base, so a command that
+writes, say, `/var/lib/app` needs both the file's `landlock` and a
+copy of the definition that writes it. The journal line at start says
+what the kernel applied (`mcp-server-exec: 2 commands from
+/etc/mcp-gateway/exec.d; Landlock ABI 6, scoped`).
+
+Commands run with the calling user's rights and the domain's: they read
+`/etc`, `/usr`, system state, mounts and the rpm database, and change
+nothing beyond what the user may. For a command that needs more (another
+user's journal, files in homes), run it in a test with
+`mcp-gateway-admin profile --server exec` and load the module it
+drafts, or define a second command server with a domain of its own
+(copy `exec.yaml` under another name, with its own `selinux_type` and
+`--commands` directory). Do not
+allow a shell or an interpreter with arguments from the caller
+(`/bin/sh -c "{cmd}"`): that is a shell again, only without the
+confinement this is for.
+
+### A server with network access and an API token
+
+For a server that speaks HTTP, see [Servers that speak HTTP](#servers-that-speak-http);
+for one that runs as a local program:
+
+```yaml
+name: github
+command: ["/usr/libexec/mcp-servers/mcp-github-wrapper"]
+selinux_type: mcpsrv_github_t      # needs a module allowing HTTPS, see below
+network: true
+run_as: dynamic                    # no need for the user's account
+sandbox:
+  protect_home: yes
+credentials: [github-token]
+```
+
+### A server installed with npm or pip
+
+Install the server on the host (not with `npx -y` or `uvx` at run time,
+which needs network access, a writable home and downloads code on every
+start), then reference its absolute path:
+
+```bash
+npm install -g @example/mcp-server-postgres        # /usr/local/bin/mcp-server-postgres
+```
+
+```yaml
+name: postgres
+command: ["/usr/local/bin/mcp-server-postgres", "postgresql://localhost/app"]
+network: true
+run_as: dynamic
+```
+
+Interpreted servers run through their interpreter (`node`, `python3`);
+see the SELinux note below.
+
+### A server per session
+
+```yaml
+name: scratch
+command: ["/usr/libexec/mcp-servers/mcp-scratchpad"]
+isolation: session                  # fresh state for every agent session
+run_as: dynamic
+```
+
+## SELinux domains for servers
+
+Without `selinux_type`, instances run in `mcpsrv_generic_t`, the most
+restricted domain: it may use its stdio, load libraries, read `/etc`
+and the localization files, and log to syslog. That is enough for simple
+servers, not for ones that read the home directory or use the network.
+
+A dedicated domain comes from a small policy module using the gateway's
+template:
+
+```
+# mcp_git.te
+policy_module(mcp_git, 1.0)
+
+mcp_gateway_backend_template(git)
+
+# What the server needs, e.g.:
+mcp_gateway_backend_home_rw(mcpsrv_git_t)       # read and write user home content
+corenet_tcp_connect_http_port(mcpsrv_git_t)      # HTTPS to a forge
+sysnet_dns_name_resolve(mcpsrv_git_t)
+files_read_usr_files(mcpsrv_git_t)               # e.g. scripts below /usr
+```
+
+```
+# mcp_git.fc
+/usr/libexec/mcp-servers/mcp-git   --   gen_context(system_u:object_r:mcpsrv_git_exec_t,s0)
+```
+
+```bash
+make -f /usr/share/selinux/devel/Makefile mcp_git.pp   # needs selinux-policy-devel
+semodule -i mcp_git.pp
+restorecon -v /usr/libexec/mcp-servers/mcp-git
+```
+
+Then set `selinux_type: mcpsrv_git_t` in the definition.
+
+Notes:
+
+- The type must be in the loaded policy before a definition names it.
+  Without its module, systemd cannot start instances, in permissive
+  mode too ("Failed to change SELinux context to
+  system_u:system_r:mcpsrv_git_t:s0"). The gateway warns at start of
+  every `selinux_type` the policy does not know ("selinux_type is not in
+  the loaded SELinux policy"), and `mcp-gateway-admin doctor` fails the check
+  `SELinux type`; `semodule -l` lists the loaded modules.
+
+- `mcp-gateway-selinux` installs the template's interface file
+  (`/usr/share/selinux/devel/include/services/mcp_gateway.if`), so
+  building a module needs only `selinux-policy-devel`.
+- Servers that talk to system services over D-Bus (systemd, firewalld,
+  snapper) need `dbus_system_bus_client(mcpsrv_<name>_t)` and the
+  service's chat interface, e.g. `init_dbus_chat` or
+  `firewalld_dbus_chat`; what the service then allows the instance's
+  user is up to its polkit rules.
+- The template defines `mcpsrv_<name>_t` and `mcpsrv_<name>_exec_t`.
+  If the server's program keeps a generic label (for example an
+  interpreter such as `/usr/bin/node`, labelled `bin_t`), also add
+  `corecmd_bin_entry_type(mcpsrv_<name>_t)`, and allow reading the
+  scripts (`files_read_usr_files`).
+- To find missing rules, profile the server (`mcp-gateway-admin
+  profile`, "Profiling a server" above), or by hand: run the domain
+  permissive for a while (`semanage permissive -a mcpsrv_git_t`), use
+  the server, then read `ausearch -m AVC -ts recent | audit2allow`.
+  Remove the permissive setting afterwards.
+- The gateway's isolation rules still apply to every server domain: no
+  access to the gateway's and OPA's sockets, no writes to the gateway's
+  configuration or state, no reading of the credentials directory.
+
+## Packaging a server for the gateway (openSUSE / OBS)
+
+An MCP server package makes itself available by installing its definition
+to `/usr/share/mcp-gateway/servers.d/<name>.yaml` and, for a dedicated
+domain, a policy module. The gateway's source repository
+(<https://github.com/sdrahn/mcp-gateway>) explains how in
+`packaging/suse/README.md`, section "Packaging an MCP server for the
+gateway"; `packaging/fs-server/` is the file server's package.

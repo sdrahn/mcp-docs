@@ -1,0 +1,3125 @@
+# mcp-gateway — Architecture
+
+Status: maintained with the code; decisions D1–D14 accepted (section 9).
+Scope: design of a policy-enforcing proxy that exposes MCP servers to
+local and remote MCP clients: local servers that speak stdio, and
+servers that speak Streamable HTTP, on the host or elsewhere (section
+5.7.2).
+
+This document explains why the gateway is built the way it is. How to
+install, configure and run it is the [user guide](user-guide/README.md);
+[README.md](README.md) maps questions and error messages to its chapters.
+
+| Section | Contents |
+|---|---|
+| 1–3 | problem statement, goals and non-goals, terminology |
+| 4 | architecture overview: the parts and how a request flows through them |
+| 5 | components: transports, identity, router, enforcement, OPA, approval broker, instance supervisor, SELinux module, audit, Cockpit |
+| 6 | policy model: packages, input and decision documents, role data, policy lifecycle |
+| 7 | key flows: a call needing approval, remote session setup, discovery |
+| 8 | threat model (summary) |
+| 9 | decisions D1–D19, each with its rationale |
+| 10 | repository layout |
+| 11 | roadmap: the steps by release, with what each delivered |
+| 12 | open items |
+
+---
+
+## 1. Problem statement
+
+A Linux host has several MCP servers installed that speak MCP **only over
+stdio**; others run as web services, on the host or elsewhere, and speak
+Streamable HTTP (since 0.11 the gateway relays to those too, section
+5.7.2). Clients (AI agents such as Kit, Claude Code, IDE integrations)
+should be able to use them:
+
+- **locally** — processes on the same host, running as various Unix users;
+- **remotely** — agents on other hosts, over the network.
+
+Access must be governed. The gateway shall
+
+1. provide **access control / RBAC**,
+2. provide means for **permission elicitation** (asking a human to approve an
+   action),
+3. integrate **OPA** as the policy engine,
+4. use **SELinux** for OS-level confinement.
+
+## 2. Goals and non-goals
+
+### Goals
+
+- Single, auditable entry point to all MCP servers on the host.
+- MCP-aware enforcement: decisions on method, server, tool/resource/prompt
+  *and arguments*, not just on "may connect".
+- Least privilege at discovery time: principals only *see* the tools they
+  may use.
+- Human-in-the-loop approval for sensitive operations, with approvals that
+  cannot be forged by the agent being governed.
+- Defence in depth: a compromised MCP server, or a bug in the policy, must
+  still be contained by the kernel (SELinux, cgroups, namespaces, DAC).
+- No modification of the existing MCP servers.
+- Operable with standard Linux tooling: systemd, journald, auditd, RPM
+  (packages built with OBS). Supported distributions: SLES 16 and
+  openSUSE Leap 16; openSUSE Tumbleweed is the development platform.
+
+### Non-goals (for now)
+
+- Being an identity provider. The gateway consumes identities from the
+  kernel (local) or an external OIDC IdP (remote).
+- Content-level safety filtering of tool output (prompt-injection
+  detection etc.). The design leaves a hook for it (obligations, §6.4).
+- High availability / multi-host clustering. One gateway per host.
+- SLES 15 and Leap 15, and with them AppArmor: the confinement model is
+  SELinux.
+
+## 3. Terminology
+
+| Term | Meaning |
+|---|---|
+| **Backend** | An MCP server, spoken to over stdio: a program on the host, or, for a server that speaks Streamable HTTP, the connector that relays to it (section 5.7.2). |
+| **Instance** | A running process of a backend, bound to one principal/session. |
+| **Client** | An MCP client connecting to the gateway. |
+| **Principal** | The authenticated identity on whose behalf a client acts. |
+| **PEP** | Policy Enforcement Point — code in the gateway that applies decisions. |
+| **PDP** | Policy Decision Point — OPA. |
+| **Grant** | A recorded human approval, with scope and expiry. |
+| **Obligation** | An extra condition attached to an `allow` (redaction, limits…). |
+
+## 4. Architecture overview
+
+```
+             LOCAL CLIENTS                          REMOTE CLIENTS
+   (Kit, Claude Code, IDEs as user X)        (agents on other hosts)
+        │ stdio shim   │ unix socket                │ HTTPS (MCP Streamable HTTP)
+        │ (mcp-connect)│ SO_PEERCRED + SO_PEERSEC   │ OAuth 2.1 bearer / mTLS
+        ▼              ▼                            ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  mcp-gateway  (SELinux domain: mcpgw_t)                              │
+│                                                                      │
+│  ┌────────────┐   ┌──────────────────┐   ┌─────────────────────────┐ │
+│  │ Transport  │──▶│ AuthN / Identity │──▶│ MCP Protocol Router     │ │
+│  │ adapters   │   │ → Principal      │   │ - JSON-RPC parsing      │ │
+│  └────────────┘   └──────────────────┘   │ - namespacing srv__tool │ │
+│                                          │ - list filtering        │ │
+│                                          │ - session management    │ │
+│                                          └──────────┬──────────────┘ │
+│   ┌─────────────────────┐   input / decision        │                │
+│   │ PEP                 │◀──────────────────────────┘                │
+│   │ allow / deny / ask /│──────┐                                     │
+│   │ allow+obligations   │      │ unix socket (or embedded library)  │
+│   └────────┬────────────┘      ▼                                     │
+│            │ ask       ┌───────────────┐  bundles  ┌───────────────┐ │
+│            ▼           │ OPA (PDP)     │◀──────────│ Policy repo / │ │
+│   ┌─────────────────┐  │ mcpopa_t      │           │ Cockpit admin │ │
+│   │ Approval broker │  └──────┬────────┘           └───────────────┘ │
+│   │ (elicitation)   │         │ decision logs                        │
+│   └────────┬────────┘         ▼                                      │
+│            │           ┌──────────────────────────┐                  │
+│            │           │ Audit (journald/auditd)  │                  │
+│            │           └──────────────────────────┘                  │
+│   ┌────────▼───────────────────────────────────────────────────┐     │
+│   │ Instance supervisor: spawns/reaps backends via systemd     │     │
+│   └────────┬──────────────────┬──────────────────┬─────────────┘     │
+└────────────┼──────────────────┼──────────────────┼───────────────────┘
+             │ stdio pipes      │                  │
+     ┌───────▼──────┐   ┌───────▼──────┐   ┌───────▼──────┐
+     │ mcp-fs       │   │ mcp-git      │   │ mcp-db       │
+     │ mcpsrv_fs_t  │   │ mcpsrv_git_t │   │ mcpsrv_db_t  │
+     │ :s0:c12,c40  │   │ :s0:c12,c40  │   │ :s0:c7,c99   │  ← MCS pair per session
+     └──────────────┘   └──────────────┘   └──────────────┘
+```
+
+**Central design decision:** the gateway is a *protocol-aware* MCP proxy,
+not a byte-level stdio↔socket bridge. It terminates the client's MCP
+session, inspects every JSON-RPC message, and opens its own MCP sessions to
+backend instances. RBAC, OPA decisions and elicitation all require
+knowledge of method, target and arguments; a transparent pipe cannot offer
+that.
+
+**Separation of concerns between OPA and SELinux:**
+
+| Layer | Question answered | Enforced by |
+|---|---|---|
+| OPA | *Should* principal P be allowed to call tool T with args A now? | Gateway (PEP) |
+| SELinux | *Can* this process touch this file / socket / port at all? | Kernel |
+
+OPA governs MCP semantics; SELinux bounds what any backend process can do
+regardless of what OPA said, and protects the gateway and OPA from their
+own backends.
+
+## 5. Components
+
+### 5.1 Transport adapters
+
+| Adapter | Used by | Authentication |
+|---|---|---|
+| **Unix socket** `/run/mcp-gateway/mcp.sock` | local clients | kernel: `SO_PEERCRED` (uid/gid/pid), `SO_PEERSEC` (SELinux label) |
+| **stdio shim** `mcp-connect` | local clients that can only spawn a command | as unix socket (the shim connects to it) |
+| **Streamable HTTP** `https://host:8443/mcp` | remote clients | OAuth 2.1 bearer token (JWT from external IdP); optional mTLS |
+
+- The unix socket is `0660` with a dedicated group (`mcp-users`); the
+  socket file is labelled `mcpgw_sock_t` so SELinux decides which client
+  domains may `connectto` it.
+- `mcp-connect` is deliberately dumb: it copies bytes between its stdio and
+  the socket. Usage in a client config:
+  ```json
+  { "command": "mcp-connect", "args": ["--server", "git"] }
+  ```
+  To select a backend it first sends a JSON-RPC notification on the
+  socket, then the client's MCP traffic:
+  ```json
+  {"jsonrpc":"2.0","method":"mcp-gateway/hello","params":{"version":1,"server":"git"}}
+  ```
+  A connection whose first message is an MCP message instead (as with
+  `--server all`, the default) wants the aggregated endpoint.
+- HTTP follows the MCP authorization specification: the gateway is an
+  OAuth **resource server**, publishes Protected Resource Metadata
+  (RFC 9728) pointing at the configured authorization server, validates
+  audience (RFC 8707 resource indicator = gateway URL), issuer, expiry and
+  signature. The gateway never issues tokens itself.
+  - Keys come from the issuer's JWKS (found by OIDC discovery, or
+    configured), cached for an hour and refreshed on an unknown key id at
+    most every 30 s. The gateway's domain fetches them on HTTP ports
+    (`http_port_t`) and proxy ports (`http_cache_port_t`: 8080, where
+    Keycloak listens by default). Only asymmetric algorithms are accepted (no `none`,
+    no HMAC key confusion); RSA keys below 2048 bits are ignored.
+    Required scopes are configurable.
+  - Every request carries the token and is validated; the metadata lives
+    at `/.well-known/oauth-protected-resource<path>` and every `401`
+    points to it.
+- **mTLS (optional):** with `http.client_ca_file`, the TLS layer verifies
+  client certificates against those CAs; `http.client_auth` is
+  `optional` (the default then: a certificate is verified if presented)
+  or `required` (no handshake without one). A client certificate does not
+  replace the token; it adds:
+  - **certificate-bound tokens (RFC 8705):** a token with a
+    `cnf.x5t#S256` confirmation is accepted only over a connection with
+    that certificate, so a stolen token is useless without the client's
+    key. `http.require_bound_tokens` refuses unbound tokens; the metadata
+    announces `tls_client_certificate_bound_access_tokens`.
+  - **policy input:** the certificate's subject, SANs and thumbprint are
+    `input.principal.cert`; permissions with `"require_client_cert":
+    true` apply only to clients that presented one (§6.4).
+  - a session is bound to the certificate as well as to the subject.
+
+  TLS must terminate at the gateway for this; a reverse proxy in front
+  would hide the client certificate.
+- Streamable HTTP details: the resource URL's path (e.g. `/mcp`) is the
+  aggregated endpoint, `<path>/<server>` the per-server ones. `POST`
+  carries one client message (no batches); requests are answered as JSON
+  or, if the client accepts it, as an SSE stream that also carries the
+  server's requests and notifications for that request (e.g. an approval
+  elicitation) and ends with the response. `GET` opens the session's
+  stream for everything else; messages with no open stream are queued
+  (bounded). `DELETE` ends the session.
+  **Resumability:** every SSE event carries an id `<stream>-<seq>`, and
+  each stream keeps its last 256 events, also while no connection is
+  attached; a stream starts with a priming event (id, no data). A request
+  stream whose connection broke keeps receiving its messages up to the
+  response, and can be resumed for 5 minutes after it. The client resumes
+  a stream with `GET` and `Last-Event-ID`: the events after that id are
+  replayed, then the stream goes on (a request stream ends with its
+  response); events of other streams are never replayed. A resumption
+  replaces a connection the server still considers attached. Unknown or
+  expired ids get `400`. A connection ends when the token of the request
+  that opened it is no longer accepted (its `exp`, plus the leeway), as
+  new requests with it are refused; the stream stays resumable with a
+  fresh token (audited as `mcp-token-expired`). `initialize` creates the
+  session and returns `Mcp-Session-Id`; a session is bound to its
+  principal (issuer + subject, and client certificate if any), and
+  requests from anyone else get `404`.
+  Sessions without traffic are closed after `http.session_idle_timeout`.
+  Browser `Origin`s must be allow-listed (DNS rebinding).
+- Transports hand the router a message connection
+  (`jsonrpc.MessageConn`) plus the authenticated principal.
+
+### 5.2 Identity → Principal
+
+All identity evidence is normalised into one `Principal`, which is exactly
+what policy sees as `input.principal`:
+
+```json
+{
+  "sub": "alice",
+  "uid": 1001,
+  "groups": ["dev", "mcp-users"],
+  "home": "/home/alice",
+  "roles": ["developer"],
+  "transport": "unix",
+  "selinux": "staff_u:staff_r:staff_t:s0-s0:c0.c1023",
+  "client": { "name": "kit", "version": "0.9.1" },
+  "session_id": "3f0c…",
+  "cert": { "subject": "CN=agent-1", "x5t#S256": "q3Zp…", "dns": ["agent-1.example.com"] }
+}
+```
+
+(`cert` only for remote clients that presented a verified client
+certificate; `uid`, `home` and `selinux` only for local principals and
+mapped remote ones.)
+
+- **Local:** `uid` → user name and groups via NSS (works with SSSD/IPA).
+- **Remote:** `sub`, `iss` and `groups` (claim name configurable) from the
+  token. With `http.local_user_claim` set (e.g. `preferred_username`) and
+  a local account of that name, the principal becomes that account: its
+  name as `sub`, its uid, home and groups (§9, D1). Otherwise backends run
+  as a dynamic user, isolated by the instance's MCS pair.
+- **Roles** are derived by policy data (`data.mcp.rbac.bindings`) from groups,
+  users or claims — role assignment is itself policy, not code.
+- **Scopes** (§6.7, D17; roadmap step 23): a remote principal's `scopes` are the
+  token's `scope` (or `scp`) claim. They never add a role; role data may
+  map them to a ceiling on what the agent holding the token may do.
+- `client` comes from the MCP `initialize` request (`clientInfo`); it is
+  **self-asserted** and must only be used for convenience rules, never as a
+  security boundary.
+
+### 5.3 MCP protocol router
+
+Responsibilities:
+
+1. **Session handling.** Terminates the MCP `initialize` handshake with the
+   client itself. The per-server endpoint mirrors the backend's
+   capabilities and server info; the aggregated endpoint advertises the
+   gateway's own. The gateway holds its *own* MCP session with every
+   backend instance (it sends `initialize` as client `mcp-gateway`), opened
+   lazily on first use, so an instance can serve several client sessions
+   of the same principal (§5.7): request ids and progress tokens are
+   remapped per instance, notifications are fanned out to the attached
+   sessions, and a request the backend sends to "its client" goes to a
+   session that has a request in flight on that instance (otherwise it is
+   refused).
+2. **Namespacing / aggregation.** Two endpoint styles (§9, D2):
+   - *aggregated*: one virtual server; tools are exposed as
+     `<server>__<tool>`, prompts as `<server>__<prompt>`, resource URIs and
+     URI templates as `mcp+<server>:<original URI>` (e.g.
+     `mcp+fs:file:///home/alice/a.txt`), also inside `resources/read`
+     results and `notifications/resources/updated`; log messages get the
+     server name as logger prefix;
+   - *per-server*: one endpoint per backend, names unchanged.
+   Lists from all backends are fetched in full (following cursors) and
+   returned as one page. On the aggregated endpoint a backend that fails
+   is left out of the list instead of failing it.
+3. **Discovery filtering.** `tools/list`, `resources/list`,
+   `resources/templates/list`, `prompts/list` responses are filtered per
+   principal using a batch policy query (§6.3).
+4. **Enforcement on invocation.** Every request in the table below goes
+   through the PEP before being forwarded.
+5. **Reverse-direction requests.** Requests that a *backend* sends to the
+   client (`sampling/createMessage`, `elicitation/create`, `roots/list`) are
+   also policy-checked and labelled with the originating backend.
+6. **Change propagation.** Emits `notifications/tools/list_changed` (and
+   the resources/prompts equivalents) to every session when OPA loads a
+   changed policy or RBAC data. The gateway checks a fingerprint (a hash
+   of OPA's `/v1/policies` and `/v1/data/rbac`) every
+   `policy.watch_interval` (default 10 s), and 0.3, 1 and 3 s after a file
+   in the local policy trees changed (inotify; OPA reloads with `--watch`
+   a moment after the write), and advertises `listChanged` for all three
+   lists.
+   Grants do not change visibility (discovery shows items that need
+   approval), so they trigger no notification. Backends' own
+   `list_changed` notifications are passed through.
+7. **Cancellation / progress.** Maps request IDs between client and backend
+   sessions; forwards `notifications/cancelled` and progress tokens.
+
+Enforced methods:
+
+| Direction | Method | `input.action` |
+|---|---|---|
+| client → backend | `tools/call` | `tools.call` |
+| client → backend | `resources/read`, `resources/subscribe`, `resources/unsubscribe` | `resources.read`, `resources.subscribe`, `resources.unsubscribe` |
+| client → backend | `prompts/get` | `prompts.get` |
+| client → backend | `completion/complete` | `completion.complete` |
+| client → backend | `*/list` | batch filter (`data.mcp.filter.visible`) |
+| backend → client | `sampling/createMessage` | `sampling.create` |
+| backend → client | `elicitation/create` | `elicitation.create` |
+| backend → client | `roots/list` | `roots.list` |
+
+Unknown methods are **denied by default**.
+
+### 5.4 Policy Enforcement Point (PEP)
+
+- Builds the OPA input document (§6.2), queries OPA, and applies the
+  decision:
+  - `allow` → re-identify pseudonyms in the arguments the obligations name
+    (and decide again on the real values), check the argument constraints
+    and rate limits, forward, then apply redaction, pseudonymization and
+    the output size limit to the result (§6.3);
+  - `deny` → JSON-RPC error `-32001` ("Forbidden") with a policy-provided,
+    non-sensitive `reason`; for `tools/call`, respond with a tool result
+    `isError: true` so agents can reason about it;
+  - `ask` → hand to the approval broker; re-query OPA after the outcome.
+- **Fail closed:** OPA unreachable, timeout (default 250 ms), or malformed
+  decision ⇒ `deny`.
+- Decision cache keyed by the full input hash, TTL ≤ a few seconds, flushed
+  on bundle activation or grant change. Only for list filtering; calls are
+  always evaluated live.
+
+### 5.5 OPA (Policy Decision Point)
+
+- **Deployment:** sidecar `opa run --server` listening on a unix socket
+  (`/run/mcp-gateway/opa.sock`), in its own SELinux domain `mcpopa_t`. The
+  distribution's `/usr/bin/opa` is used; `mcp-opa.service` enters the
+  domain with `SELinuxContext=` rather than relabelling a shared binary.
+  Rationale: hot bundle reload, standard OPA tooling, process isolation,
+  language neutrality. Embedding OPA as a Go library remains an option if
+  latency requires it; the PEP talks to OPA through an interface so both
+  are drop-in.
+- **Policy distribution**, three modes, chosen by the `mcp-opa.service`
+  unit (drop-ins in `/usr/share/mcp-gateway/opa/`):
+  - **directories** (default): policy logic from the package in
+    `/usr/share/mcp-gateway/policy/`, roles and bindings from the
+    administrator in `/etc/mcp-gateway/policy/` (D4), reloaded on change
+    (`--watch`). Unsigned; protected by file permissions and SELinux
+    (`mcpgw_etc_t`).
+  - **signed bundle file** (`signed-bundle.conf`): `mcp-policy-bundle -k
+    <key>` builds a bundle from the same two sources, signs it (RS256),
+    writes `/etc/mcp-gateway/bundle/policy.tar.gz` and restarts OPA,
+    which verifies it against `/etc/mcp-gateway/bundle/verify.pem` and
+    refuses to start with an unsigned or tampered bundle (the gateway
+    then denies everything). The signing key is safest off the host,
+    e.g. in CI, which builds bundles from the policy repository. For
+    signing on the host (and from Cockpit, §5.10), `mcp-policy-bundle -G`
+    creates the key pair: `/etc/mcp-gateway/bundle/signing.pem` (root,
+    0600, `mcpgw_signing_key_t`, which the gateway, OPA and backends may
+    never read) and `verify.pem` next to the bundle. Signing then protects
+    against changes by anyone who can write the bundle or role data but
+    is not root; root can always sign.
+  - **bundle server** (`bundle-server.conf`, `opa-config.yaml.example`):
+    OPA polls a bundle server and verifies every download (`signing`
+    in its configuration); a bundle that does not verify is rejected and
+    the active revision stays. Needs `setsebool -P mcpopa_can_network
+    on`.
+
+  Signed bundles are not combined with `--watch`: OPA (checked with 1.21)
+  does not verify signatures when `--watch` reloads a bundle file, and a
+  tampered bundle would be activated. Bundle files are read once at start
+  instead, so a new revision needs a restart of `mcp-opa.service` (the
+  gateway, which only `Wants=` OPA, keeps its sessions and denies
+  requests for that second). The gateway logs the active revisions at
+  start and records them in `mcp-policy-change` audit events.
+- **Decision logs:** enabled, masked (`mcp.log.mask`) to strip argument
+  values flagged as sensitive, written to the journal and, with the
+  `decision-logs.conf` drop-in, shipped to a collector through OPA's
+  decision-log service (§5.9). The drop-in sets `OPA_EXTRA_ARGS`, which
+  every `mcp-opa.service` variant passes to OPA, so it combines with any
+  policy distribution mode.
+- **Status API:** gateway polls OPA health; unhealthy ⇒ fail closed.
+
+### 5.6 Approval broker (permission elicitation)
+
+Two distinct flows with different trust properties.
+
+#### 5.6.1 Gateway-initiated approvals (policy said `ask`)
+
+The broker suspends the request and obtains a human decision via one of
+these channels (configured per policy decision, `ask.channel`):
+
+| Channel | Mechanism | Trust | Use for |
+|---|---|---|---|
+| `form` | MCP `elicitation/create` (form mode) sent to the client | **Low** — the client is the agent's host; a misconfigured or compromised client can auto-accept | low-risk confirmations, "are you sure?" |
+| `url` | MCP URL-mode elicitation: client is asked to open an approval URL served by the gateway (Cockpit page); the human authenticates *there* | **High** — approval happens outside the agent's control, bound to a separately authenticated human | sensitive tools (default) |
+| `oob` | Out-of-band: Cockpit "Approvals" inbox, desktop notification, push | **High** | unattended / remote agents, clients without elicitation support |
+
+Behaviour:
+
+- If the client did not advertise the required elicitation capability in
+  `initialize`, the broker falls back to `oob`, or denies if the policy
+  forbids fallback.
+- Pending approvals have a timeout (default 120 s); timeout ⇒ `deny`.
+- An approval produces a **grant**:
+  ```json
+  {
+    "id": "g-8d1e…",
+    "sub": "alice",
+    "server": "fs",
+    "tool": "write_file",
+    "args_match": { "path": "/home/alice/project/**" },
+    "scope": "session",            // once | session | duration
+    "session_id": "3f0c…",
+    "expires": "2026-09-28T10:00:00Z",
+    "approved_by": "alice",
+    "channel": "url"
+  }
+  ```
+- Grants are kept by the broker and passed to OPA as `input.grants` (only
+  those matching the principal, server and tool; session grants only in
+  their session), and are revocable from Cockpit. `duration` grants
+  (scopes like `"24h"`, at most 30 days) are persisted to
+  `/var/lib/mcp-gateway/grants.json` (atomic writes, mode 0600, label
+  `mcpgw_var_lib_t`) and apply across sessions and restarts; session
+  grants live in memory.
+- `scope: once` grants are valid only for the one re-evaluation after the
+  approval and are not stored, except for approvals decided while no call
+  was waiting (below).
+
+**Pending approvals outlive their call.** `url` and `oob` approvals are
+persisted to `/var/lib/mcp-gateway/pending.json` (atomic writes, mode
+0600; it holds the arguments shown to approvers). If the waiting call goes
+away before the decision (the client disconnects, the gateway shuts down
+or restarts), the approval stays pending until it expires, marked as
+having no waiting call (`"waiting": false` in the control API, a note on
+the Cockpit page), and without the `session` scope, whose session is gone.
+Then:
+
+- deciding it stores the grant for the agent's next attempt: a duration
+  grant as usual, a `once` grant as a stored one-time grant (valid for
+  15 min) that the next matching call takes and uses up (it is put back if
+  policy does not allow that call);
+- an attempt with the same principal, target and arguments before the
+  decision takes the approval over (same id, so an approval page already
+  open stays valid; the policy's scopes apply again), instead of creating
+  a second one;
+- a timeout or a decline removes it, as for a waiting call.
+
+`form` approvals are not persisted: they live in the client's dialog.
+
+**How the `url` and `oob` channels work.** Both create a *pending
+approval* with an unguessable id, visible through the control API
+(§5.10). With `url`, the client receives a URL-mode `elicitation/create`
+(MCP 2025-11-25: `mode: "url"`, `url`, `elicitationId`) pointing at the
+approval page (`approvals.url_template`, e.g. the Cockpit page with
+`#/approvals/{id}`); the client's answer only says whether the user agreed
+to open it, and declining denies the call. The decision is made on the
+page, and the gateway then sends `notifications/elicitation/complete`.
+With `oob`, the client only gets a `notifications/message` that an
+approval is pending; the request shows up in the inbox. Either way the
+call waits until a decision or `approval_timeout`.
+
+**Who may decide** is policy (`data.mcp.approvals`, rules in
+`data.mcp.rbac.approvers`, §6.4); the gateway identifies the approver by the
+control socket's peer credentials. The shipped rules allow the principal
+themself, matched by local uid (the approval page runs as the logged-in
+Cockpit user, so a local principal approves their own requests), and the
+admin role. A remote principal without a local account has no uid, so
+only role, group or user rules can approve its requests. The same rules
+decide who sees and revokes a grant (grants record the principal's uid).
+Root may always decide. If OPA fails, nobody else may. The page shows
+the exact call: server, tool, arguments, principal, client, and the scopes
+the policy offered; nothing else can be chosen.
+
+#### 5.6.2 Backend-initiated elicitation
+
+A backend may itself send `elicitation/create` to ask the user something.
+The gateway:
+
+1. checks `elicitation.create` policy for that backend (may it elicit at
+   all, which modes);
+2. prefixes the message with the backend's identity (the user must always
+   know *who* asks) and never lets backend-originated requests use the
+   gateway's own approval UI styling or URL namespace;
+3. passes the request's mode, URL (URL mode), field names and a
+   `sensitive` flag to policy as `input.args`. The flag is set when a
+   field's name, title, description or format looks like a secret
+   (password, token, secret, API or private key, credential, PIN, OTP,
+   card number, …). A sensitive request is only covered by a permission
+   with `"allow_sensitive": true`;
+4. relays to the client and returns the answer to the backend.
+
+#### 5.6.3 Push channels for out-of-band approvals
+
+Approvers learn about pending approvals without watching the inbox:
+
+- **Desktop:** `mcp-gateway-notify` (package `mcp-gateway-desktop`,
+  started with graphical sessions by XDG autostart) follows `GET
+  /v1/events` on the control socket as the logged-in user: the pending
+  approvals that user may decide on (the approver policy filters the
+  stream), then changes. It shows one notification per approval over
+  `org.freedesktop.Notifications`, updates it when the call stops waiting
+  and closes it when the approval is decided or times out. Its action
+  opens the approval page (`approvals.url_template`, else the Cockpit
+  page). Notifications deliberately offer no Approve button: any program
+  in the user's session, the agent included, can talk to the session bus,
+  while the approval page needs the human's own login. The agent is
+  single-instance per session, accepts `ActionInvoked` only from the
+  notification server, escapes markup, opens http(s) URLs only,
+  reconnects after gateway restarts and exits for users without access to
+  the control socket.
+- **E-mail** (`notifications.email`): for each new approval, the gateway
+  asks `data.mcp.approvals.notify` whom to tell: the approvers the
+  server's rules name, as local users and groups (`self` is the
+  principal's account, `role:<r>` the users and groups bound to it).
+  Groups are expanded through NSS (`getent group`, and `getent passwd`
+  for the users whose primary group it is, enumerating and by name for
+  the local users the gateway has seen, `principals.json` in
+  `state_dir`), users become addresses by the `to` template
+  (`{user}` for local delivery, `{user}@example.com` otherwise), and one
+  mail goes to all of them (`To: undisclosed-recipients:;`). The mail
+  names the call and links the approval page; arguments are left out
+  unless `include_args` is set, since mail may leave the host. SMTP with
+  STARTTLS when offered (`starttls: auto|always|never`), optional
+  PLAIN authentication (password from a file, e.g. a systemd
+  credential). SELinux: `setsebool -P mcpgw_can_send_mail on`.
+
+### 5.7 Instance supervisor
+
+- **Instance model:** stdio backends are single-client and may keep state,
+  so there is **one instance per (principal, backend)** by default, or one
+  per *session* for backends marked `isolation: session`. Instances are
+  never shared across principals. The key of a shared instance is
+  (transport, subject, backend). After its last session ends an instance
+  stays up for `supervisor.idle_timeout` (default 15 min) and is reused if
+  the principal comes back; `isolation: session` instances stop with their
+  session.
+- **Spawning** via systemd transient units over D-Bus
+  (`StartTransientUnit`), unit name `mcp-<backend>-<instanceid>.service`,
+  with properties from the backend definition:
+  ```ini
+  User=alice                 # or DynamicUser=yes (§9, D1)
+  SELinuxContext=system_u:system_r:mcpsrv_fs_t:s0:c12,c40
+  NoNewPrivileges=yes
+  ProtectSystem=strict
+  ProtectHome=read-only      # relaxed per backend
+  PrivateTmp=yes
+  PrivateDevices=yes
+  PrivateNetwork=yes         # unless backend needs network
+  RestrictAddressFamilies=AF_UNIX
+  ProtectKernelTunables=yes, ProtectKernelModules=yes, ProtectKernelLogs=yes
+  ProtectControlGroups=yes, ProtectClock=yes, ProtectHostname=yes
+  LockPersonality=yes, RestrictRealtime=yes, RestrictSUIDSGID=yes
+  CapabilityBoundingSet=     # none
+  SystemCallArchitectures=native
+  SystemCallFilter=@system-service
+  UMask=0077
+  MemoryMax=512M
+  TasksMax=64
+  RuntimeMaxSec=8h
+  LoadCredential=github-token:/etc/mcp-gateway/credentials/github-token
+  ```
+  `MemoryDenyWriteExecute=` is deliberately not set: it breaks JIT
+  runtimes such as Node.js, which many MCP servers use. For a
+  definition with `landlock`, the unit's command is
+  `mcp-landlock -rules <JSON> -- <command>`: the launcher restricts
+  itself with Landlock to the definition's trees and ports (`${HOME}`
+  and `${USER}` expanded for the principal) and executes the server
+  (D19).
+  stdio is wired by passing one end of a gateway-owned socketpair to
+  systemd through the transient-unit properties
+  `StandardInputFileDescriptor` / `StandardOutputFileDescriptor`
+  (stderr goes to the journal).
+- **Lifecycle:** start on first use; idle timeout (default 15 min); stop on
+  session end for `isolation: session`; crash ⇒ error to client, restart on
+  next call. After an instance failed to start or exited on its own, the
+  next start of the same instance (same principal or session and backend)
+  waits 1 s, doubling with each further failure up to 2 min; calls in
+  the meantime fail at once with "backend unavailable; retry in …". An
+  instance that ran for a minute before failing starts the count afresh,
+  and stops by the gateway (idle, session end) are not failures.
+- **Credentials:** the gateway **never forwards client tokens** to
+  backends (token passthrough is prohibited by the MCP authorization
+  specification). Backend secrets come from systemd credentials.
+- **Backend registry:** one YAML file per backend. Packages install
+  theirs to `/usr/share/mcp-gateway/servers.d/`; files in
+  `/etc/mcp-gateway/servers.d/` override those of the same name, and an
+  empty file (or a symlink to `/dev/null`) disables one, like systemd
+  units. Example:
+  ```yaml
+  name: fs
+  command: ["/usr/libexec/mcp-servers/mcp-fs", "--root", "${HOME}"]
+  selinux_type: mcpsrv_fs_t
+  isolation: principal          # principal | session
+  network: false
+  run_as: principal             # principal | dynamic | <user>
+  env: { LOG_LEVEL: info }
+  credentials: []
+  sandbox:
+    protect_home: read-write
+  ```
+
+#### 5.7.1 Privileged backends
+
+Some servers change the system as a whole: mcp-server-zypp installs
+packages, and an RPM transaction writes anywhere below `/`, changes
+owners, sets file capabilities and SELinux labels and runs package
+scripts. No sandbox setting short of "none" allows that. A backend
+marked **privileged** runs with the rights of a root service, and its
+protection moves from the kernel sandbox to the gateway: policy,
+approval and audit decide every call (decision D9).
+
+```yaml
+# /etc/mcp-gateway/servers.d/zypp.yaml
+name: zypp
+command: ["/usr/bin/mcp-server-zypp"]
+run_as: root
+network: true                 # downloads
+selinux_type: mcpsrv_zypp_t
+privileged: true
+```
+
+- **Where it may be defined.** Only in `/etc/mcp-gateway/servers.d`
+  (the administrator's directory); a privileged definition in
+  `/usr/share/mcp-gateway/servers.d` is refused, so installing a package
+  never creates one. `run_as` must be `root`; `isolation`,
+  `credentials` and `env` apply as usual.
+- **Unit properties.** Those of a root system service: full capability
+  bounding set, no `NoNewPrivileges` (SELinux domain transitions to
+  `rpm_t` need it off, and package scripts run setuid helpers), no
+  `ProtectSystem`/`ProtectHome`, `PrivateDevices`, `RestrictSUIDSGID`,
+  system call filter or address family restriction; `PrivateTmp`,
+  `UMask=0022`, and larger `MemoryMax`/`TasksMax`. The SELinux context is
+  `system_u:system_r:<selinux_type>:s0` **without an MCS pair**: files the
+  backend creates would otherwise carry the instance's categories, and
+  services running at `s0` could not read them.
+- **SELinux.** The server process stays in its own domain
+  (`mcp_gateway_backend_template`); the interface
+  `mcp_gateway_backend_rpm(<name>)` lets it run its worker in `rpm_t`
+  (the worker labelled `rpm_exec_t`, as zypper is), with the pipes and
+  signals between the two. The kernel confines the MCP-speaking part;
+  the part that installs runs where zypper runs.
+- **Policy.** The policy input carries `resource.privileged: true`. For
+  such servers the shipped policy allows a call without approval only
+  through a permission naming server and target without wildcards, so
+  roles like `admin` (`"tool": "*"`) ask for approval there; a
+  permission may still deny. Every decision on a privileged server, not
+  only denials, goes to the kernel audit subsystem (when it is
+  available), with the grant that allowed it.
+- **Never stopped during a call.** The pool does not stop a privileged
+  instance while a call is running: the idle timer starts only when no
+  session is attached and no call is in flight, including calls whose
+  session went away (the gateway keeps reading their responses). On
+  shutdown the gateway refuses new calls to privileged servers and waits
+  for running ones before stopping the instances (`TimeoutStopSec` of
+  `mcp-gateway.service` raised to 30 min; logged as "waiting for
+  privileged calls"). A gateway crash still closes the stdio socket, so
+  the server itself must finish a transaction it has started when its
+  input ends (mcp-server-zypp: to be raised upstream).
+- **The gateway's own update.** A package update through a privileged
+  server that restarts `mcp-gateway.service` from its scriptlets would
+  wait for itself. The package therefore does not restart the gateway on
+  update (`%service_del_postun_without_restart`); the Cockpit page and
+  the log say that a restart is pending.
+- **Visible.** `mcp-gateway --check`, the servers list and the Cockpit
+  page mark privileged servers; the control API refuses to stop a busy
+  privileged instance (`409`).
+
+#### 5.7.2 Servers that speak HTTP
+
+A definition with `url` (an `https://` endpoint, `http://` only to the
+local host) instead of `command` stands for an MCP server that speaks
+Streamable HTTP (decision D15). It is a backend like the others: the
+same policy, approvals, obligations, audit, limits and instance pool.
+Its `command` is the connector, `mcp-http-connector -url … -header …`,
+which relays between the gateway's stdio and the server: each message
+from the gateway is a `POST`; an answer comes as JSON or on an event
+stream, which also carries the server's notifications and requests
+about it; what the server sends outside a request comes on the `GET`
+stream; a stream that breaks is resumed with `Last-Event-ID`; the
+session ends with `DELETE` when the instance stops, and a session the
+server ended (404) ends the instance. `initialize` is posted before
+anything else, since its answer brings the session id.
+
+A modern server (MCP 2026-07-28, §5.11) has none of this: no session,
+no `GET` stream, no resumption. The connector tells a modern request by
+the protocol version in its `_meta` and posts it with the headers that
+version requires, computed from the body: `MCP-Protocol-Version`,
+`Mcp-Method`, `Mcp-Name` (the tool or prompt name, the resource URI)
+and `Mcp-Param-*` for the parameters a tool's schema marks with
+`x-mcp-header`, values outside plain ASCII in the Base64 sentinel form.
+It learns the schemas from the `tools/list` answers it relays, or lists
+the tools itself before calling one it does not know, and after a
+`HeaderMismatch` lists them again and retries once; tools whose
+annotations are invalid are left out of `tools/list`, as the
+specification asks. A modern server's HTTP error carries a JSON-RPC
+error, which the connector relays as the answer (the gateway's probe
+tells the versions from it); otherwise an HTTP error is answered as
+before. The gateway's `notifications/cancelled` for a modern request
+closes its stream, which is the cancellation over HTTP.
+
+When the supervisor starts such an instance, it resolves the URL's host
+(in the gateway, which may resolve names) and passes the addresses
+(`-resolve host:port:address`); the unit gets `IPAddressDeny=any` and
+`IPAddressAllow=` those addresses, and its domain `mcpsrv_http_t` may
+connect to HTTP ports only (`mcpsrv_http_connect_any` for any port),
+cannot resolve names and reads only the CA certificates besides what
+every server domain may. Defaults for such a definition: `network:
+true`, `selinux_type: mcpsrv_http_t`, `run_as: dynamic`. Headers may
+name credentials (`${CREDENTIAL:name}`), which the connector reads from
+`$CREDENTIALS_DIRECTORY`: they appear neither in the gateway nor on a
+command line.
+
+With `proxy` (an `https://` server only), the connector tunnels through
+an HTTP proxy (`CONNECT`, with `proxy_headers`, whose credentials it
+reads the same way); TLS still ends at the server, whose certificate it
+verifies. The gateway then resolves the proxy's name instead of the
+server's, and `IPAddressAllow=` holds the proxy's addresses; the domain
+may also connect to proxy ports (`squid_port_t`, `http_cache_port_t`).
+No proxy is taken from the environment.
+
+#### 5.7.3 Signing in to servers for each principal
+
+*Roadmap step 21 (0.12), decision D16.*
+
+A server defined with `url` may need each principal to sign in to it
+with their own account there (OAuth 2.1 with PKCE, as the MCP
+authorization specification describes), instead of one secret for all
+(`headers`). The definition says so with `sign_in`:
+
+```yaml
+name: tickets
+url: https://mcp.tickets.example.com/mcp
+sign_in:
+  scopes: [tickets.read, tickets.write]  # default: what the server's metadata lists
+  client_id: mcp-gateway                 # optional, see "Client identity"
+  client_secret: tickets-oauth           # optional credential name (confidential client)
+```
+
+`sign_in` excludes an `Authorization` header in `headers` and needs the
+HTTP listener (`http.listen`, `http.audience`), whose origin receives
+the callback: the redirect URI is `<origin of http.audience>/oauth/callback`,
+which must be reachable from the principals' browsers. `mcp-gateway
+--check` refuses a definition with `sign_in` without it.
+
+**Who talks to the authorization server.** As for the servers
+themselves (D15), the gateway makes no outbound connection for signing
+in. Each step that needs the network runs `mcp-oauth-helper` in a
+transient unit like an instance: its own domain (`mcpsrv_oauth_t`), a
+dynamic user, the sandbox, and `IPAddressAllow=` the addresses of the
+one host the step talks to (resolved by the gateway, as for instances;
+through the definition's `proxy` if it has one). It reads one request
+from stdin and writes one answer to stdout (JSON), then exits; the client
+secret, if any, reaches it as a credential. Steps:
+
+1. *Discover* (talks to the server): the protected resource metadata
+   (RFC 9728; the `resource_metadata` of the server's `401`, else
+   `/.well-known/oauth-protected-resource` with the URL's path), whose
+   first `authorization_servers` entry is the authorization server; then
+   (talks to that) its metadata (RFC 8414, else OpenID Connect
+   discovery). An authorization server without PKCE `S256`
+   (`code_challenge_methods_supported`) is refused. The result is
+   cached per server for an hour.
+2. *Register* (talks to the authorization server; only without
+   `client_id`, see below), once per server.
+3. *Exchange* the authorization code for tokens, and *refresh* them
+   (the token endpoint).
+4. *Revoke* (RFC 7009, if the authorization server offers it), on sign
+   out.
+
+Every request names the server as the resource (RFC 8707 `resource`,
+the definition's `url`), so tokens are bound to it.
+
+**Client identity.** With `client_id` (registered with the
+authorization server for the redirect URI above), the gateway uses it;
+with `client_secret` it is a confidential client. Without, the gateway
+uses a client ID metadata document if the authorization server supports
+them (`client_id_metadata_document_supported`): the document is served
+by the gateway at `<origin>/oauth/client.json` and its URL is the
+client id. Else it registers dynamically (RFC 7591) if the
+authorization server offers it, once per server, and keeps the result
+in the token store. Else the definition is refused at the first sign-in
+with an error naming `client_id`.
+
+**Signing in.** A principal who has no token for the server sees, in
+place of its tools, one tool `<server>__sign_in` ("Sign in to tickets
+to use its tools"); such servers use `discovery: instance`, since what a
+server lists may depend on the account. The tool is decided by policy
+like the server's tools (`"tool": "sign_in"`; the shipped roles allow it
+where they allow any tool of the server). A call of it, or of any of the
+server's tools without a token, starts a sign-in:
+
+- the gateway makes a *pending sign-in* with an id of 128 random bits
+  (the OAuth `state`), a PKCE verifier, the principal and the server, valid
+  for `sign_in.timeout` (default 10 min), kept in memory only;
+- it builds the authorization URL (`response_type=code`, `client_id`,
+  `redirect_uri`, `scope`, `state`, `code_challenge` with `S256`,
+  `resource`) and sends it to the client as a URL-mode elicitation
+  (`elicitation/create`, `mode: "url"`), the call waiting meanwhile, as
+  for approvals (§5.6.1). A client without URL elicitations gets, at
+  once, a tool error (and a `notifications/message`) with a link to the
+  gateway, `<origin>/oauth/start/<state>`, which redirects to the
+  authorization URL while the sign-in waits (step 22): the agent shows
+  it, the principal opens it, and their next call goes on. Asking again
+  before signing in gives the same link; opening it does not use it up
+  (a chat program may preview it), the callback does. The sign-in also
+  shows up for that principal on the Cockpit page and in `GET
+  /v1/sign-ins`;
+- the principal signs in at the authorization server, which redirects
+  the browser to `/oauth/callback?code=…&state=…`; the gateway takes the
+  pending sign-in by its `state` (once; an unknown, used or expired
+  `state` gets an error page), runs the exchange, stores the tokens,
+  answers with a page naming the server and principal it signed in for
+  and saying to return to the agent, sends
+  `notifications/elicitation/complete`, and tells the principal's
+  sessions that the server's tools changed (`tools/list_changed`). A
+  call of a server tool that waited goes on; a call of `sign_in`
+  returns "signed in".
+
+A declined elicitation, an error from the authorization server (its
+`error` on the callback) or the timeout ends the sign-in, and the call
+fails with the reason.
+
+**Tokens.** The gateway keeps each principal's tokens per server in
+`state_dir/tokens/tokens.json` (atomic writes, mode 0600), each entry
+encrypted with AES-256-GCM under a key that only the gateway reads
+(`state_dir/tokens/tokens.key`, made on first use, mode 0600; the
+directory is `mcpgw_token_t`, which no other domain may read), the
+server name and the principal's key
+(transport, issuer, subject) as associated data, so that an entry cannot
+be moved to another principal or server. The file holds, per entry, the
+access token, the refresh token, the expiry, the granted scopes and the
+time of the sign-in; the registration (dynamic clients) is kept the
+same way.
+
+**Tokens reach the connector as a credential.** Before starting the
+principal's instance, the gateway makes sure the access token is valid
+for at least five more minutes (else it refreshes it), writes it to
+`/run/mcp-gateway/credentials/<unit>/access-token` (tmpfs, mode 0600,
+`mcpgw_cred_run_t`, which systemd reads and no server domain may), and
+starts the unit with `LoadCredential=sign-in:` that file, removing the
+file once the unit runs; the connector sends `Authorization: Bearer
+${CREDENTIAL:sign-in}`. The refresh token never leaves the gateway and
+the helper.
+
+**A running instance gets new tokens when asked** (step 22). The
+instance outlives its access token: when the server answers `401`, the
+connector writes a request `mcp-gateway/token` to its stdout, the pipe
+to the gateway, with the refused token (`{"refused": …}`), and waits
+(up to 150 s) for the answer on its stdin. The gateway takes the request
+out of the instance's stream (it never reaches a client) and, under the
+principal's refresh lock, refreshes the token if it is still the
+refused one, or expires within five minutes, else answers with the
+token another instance got meanwhile: `{"access_token", "expires_at"}`.
+The connector sends the request that met the `401` again, once, with
+the new token, also for its GET stream. If the gateway has none (the
+refresh was refused, the principal signed out), it answers with an
+error naming the refusal, and the connector exits (status 77) as before
+a second `401` would make it: the principal signs in again. Units get
+no `RuntimeMaxSec=` from the token's expiry, so the session with the
+server and its resumable streams survive token changes. A client cannot
+send `mcp-gateway/token` to an instance: the gateway answers unknown
+client requests with "method not found" and drops unknown
+notifications. A refresh that the authorization server refuses
+(`invalid_grant`) deletes the tokens: the principal signs in again.
+
+**Signing out and revoking.** `GET /v1/sign-ins` lists the caller's
+sign-ins (server, since, expiry, scopes; never tokens), and an
+administrator's all; `DELETE /v1/sign-ins/{server}` signs the caller out
+(an administrator names the principal: `?principal=…`). Who may see and
+end a principal's sign-in is policy, `data.mcp.approvals.manage_sign_in`,
+with the approver rules (by default the principal themself and the
+admin role). Signing out deletes the tokens, revokes them at the
+authorization server if it offers that, and stops the principal's
+instances of the server; the answer counts the sign-ins the
+authorization server revoked (`revoked`), the others' tokens were only
+deleted. Cockpit's Servers tab shows, per server with
+`sign_in`, whether the user is signed in, with Sign out, and for
+administrators all principals' sign-ins with Revoke.
+
+**Tokens go with their definition** (step 22). Each entry records the
+`url` it was signed in for (`resource`). When a reload removes a
+definition with `sign_in`, removes its `sign_in`, or changes its `url`
+(tokens are bound to it, RFC 8707), the gateway deletes the principals'
+tokens for it at once, tells their sessions, and revokes the tokens in
+the background with the previous definition (`mcp-sign-out` by
+`mcp-gateway`, with the reason). At start it does the same for entries
+whose server lost `sign_in` or whose `url` differs from the definition
+(revoked with the recorded `url`); the tokens of a server that has no
+definition any more are only deleted, as there is nothing to revoke
+them with. Entries of 0.12 record no `url` and are kept. Discovered
+metadata is cached per server and `url`, and dropped when the
+definition changes.
+
+**Audit.** `mcp-sign-in` (started, completed, failed, with the reason),
+`mcp-sign-in-refresh` (each refresh, and refusals that delete tokens),
+`mcp-sign-out` (by the principal, an administrator, or `mcp-gateway`
+with the reason when the definition changed; revoked at the
+authorization server or not): server, principal, scopes, never a token,
+code or verifier.
+
+**SELinux.** `mcpsrv_oauth_t` (the helper: HTTP ports, proxy ports, CA
+certificates, its credentials; with `mcpsrv_http_connect_any` any port),
+`mcpgw_token_t` (the gateway only),
+`mcpgw_cred_run_t` (the gateway writes, `init_t` reads).
+
+### 5.8 SELinux policy module (`mcp_gateway`)
+
+Types:
+
+| Type | Purpose |
+|---|---|
+| `mcpgw_t` / `mcpgw_exec_t` | gateway process / binary |
+| `mcpgw_sock_t` | client unix socket |
+| `mcpgw_ctl_sock_t` | internal control socket (Cockpit ↔ gateway) |
+| `mcpopa_t` / `mcpopa_exec_t` | OPA sidecar |
+| `mcpopa_sock_t` | OPA socket |
+| `mcpgw_etc_t`, `mcpgw_var_lib_t`, `mcpgw_log_t` | config, state, logs |
+| `mcpgw_cred_t` | backend secrets (`/etc/mcp-gateway/credentials`), read only by systemd |
+| `mcpgw_signing_key_t` | policy bundle signing key on the host (`/etc/mcp-gateway/bundle/signing.pem`); `neverallow` for the gateway, OPA and backends |
+| `mcpsrv_<name>_t` / `mcpsrv_<name>_exec_t` | per-backend domain / binary |
+| `mcpsrv_generic_t` | fallback for backends without a dedicated type |
+| `mcpsrv_exec_t` | `exec` (`mcp-server-exec`): commands an administrator allows, run as the calling user without network; reads system state, mounts and the rpm database |
+| `mcpsrv_admin_t` | `gateway-admin` (`mcp-gateway-admin serve`, entered on `mcpsrv_admin_exec_t`): root without capabilities, reads configuration, state, journal, audit log and labels; under the same `neverallow`s as every backend |
+| `mcp_port_t` | gateway HTTPS port |
+| `mcp_metrics_port_t` | gateway metrics port (`metrics.listen`) |
+
+Key rules (sketch):
+
+- `mcpgw_t` may: bind `mcp_port_t` and `mcp_metrics_port_t`, create/listen on `mcpgw_sock_t`,
+  `connectto` `mcpopa_t` via `mcpopa_sock_t`, talk to systemd over D-Bus,
+  read `mcpgw_etc_t`, manage `mcpgw_var_lib_t`. It may **not** read user
+  home directories or exec backends directly (systemd does).
+- `init_t` (systemd) may transition to `mcpsrv_*_t` only on the
+  corresponding `mcpsrv_*_exec_t` (or via explicit `SELinuxContext=`),
+  constrained by a `typebounds`/`neverallow` set so that no backend domain
+  gains more than `mcpsrv_generic_t` plus its declared extras.
+- `mcpsrv_*_t` may **not** `connectto` `mcpgw_sock_t`, `mcpgw_ctl_sock_t`
+  or `mcpopa_sock_t` (`neverallow`). Backends cannot talk to, or tamper
+  with, the policy path.
+- Per-backend extras via interfaces, e.g.
+  `mcp_backend_home_rw(mcpsrv_fs_t)`, `mcp_backend_net(mcpsrv_git_t, http_port_t)`.
+- `mcpopa_t`: read its bundles, listen on its socket; no network unless a
+  remote bundle server is configured (boolean `mcpopa_can_network`).
+
+**MCS isolation per session** (sVirt-style): the supervisor allocates a
+unique category pair per instance from `supervisor.mcs_range` (default
+`c768.c1023`) and sets it in `SELinuxContext=`. Per-instance scratch
+directories are labelled with the same pair. Two instances running as the
+same Unix account (e.g. dynamic/service user for remote principals) thus
+cannot access each other's processes or files.
+
+**Coordination with libvirt and podman.** Both hand out random pairs as
+well and know nothing about the gateway's. Type enforcement already keeps
+`mcpsrv_*_t` apart from `svirt_t` and `container_t` and their files, so a
+shared pair is not an access path by itself; coordination keeps MCS a
+second, independent barrier:
+
+- **libvirt** picks each machine's pair from the category range of its
+  own daemon process (`virSecuritySELinuxMCSGetProcessRange` in
+  `security_selinux.c`). The drop-ins in `/usr/share/mcp-gateway/mcs/`
+  (`virtqemud.conf`, `libvirtd.conf`) start the daemon with
+  `s0-s0:c0.c767`, so its machines never get a pair from the gateway's
+  range. The gateway warns at start, and when such a daemon starts later,
+  if a libvirt daemon's range overlaps its own.
+- **podman** (go-selinux) picks from the whole range: go-selinux has
+  `SetCategoryRange`, but podman (checked with v6.1.2) does not expose it,
+  and it only avoids pairs of its own containers. With
+  `supervisor.mcs_avoid: auto` (default) the gateway reads the contexts of
+  running container and machine processes, skips their pairs when it
+  allocates, and every 2 s stops an instance whose pair a container or
+  machine started later holds too (logged and recorded as an
+  `mcp-mcs-collision` audit event); its sessions get a new instance with a
+  new pair on their next call. Containers given explicit levels
+  (`--security-opt label=level:…`) should use categories below c768.
+
+The policy lets the gateway read the process state of container, virtual
+machine and libvirt domains only, not of all processes.
+
+**Client label as policy input:** `SO_PEERSEC` delivers the client's
+context; it is part of `input.principal.selinux`, allowing rules such as
+"only `staff_t`/`unconfined_t` clients may use `db__*`" or "clients in a
+sandbox domain get read-only tools". Client domains allowed to `connectto`
+the socket are controlled by an interface `mcp_gateway_client(domain)`.
+
+**Optional kernel-backed check:** a custom class
+`mcp_tool { list call }` can be defined and checked via
+`selinux_check_access(client_ctx, backend_ctx, "mcp_tool", "call")` as a
+coarse, admin-controlled second opinion before OPA. This is off by default
+and aimed at MLS-style deployments.
+
+### 5.9 Audit
+
+- Every enforced message produces a structured audit record (a JSON line
+  with `"audit":true` on stderr, i.e. in the journal of
+  `mcp-gateway.service`): session, principal, action, server, target,
+  effect, reason, grant id, backend instance, `decision_id` and the
+  arguments.
+- Arguments are logged as `args_hmac`, an HMAC-SHA256 of their JSON
+  encoding keyed with a per-installation key (`state_dir/audit.key`,
+  created on first start, mode 0600), so digests can be compared with
+  each other but not matched against guessed values without the key. The
+  full values are logged only when the decision carries the obligation
+  `audit: full`.
+- Security-relevant events are also sent to the kernel audit subsystem as
+  `AUDIT_TRUSTED_APP` records (`ausearch -m TRUSTED_APP`), next to the
+  SELinux AVC records of the same host: denials (`op=mcp-decision`),
+  approval decisions (`op=mcp-approval`, declines as `res=failed`), grant
+  revocations (`op=mcp-grant-revoke`) and policy changes
+  (`op=mcp-policy-change`). Values that are not plain tokens are
+  hex-encoded, as auditd does for untrusted strings. This needs
+  `CAP_AUDIT_WRITE` (granted by the unit as an ambient capability) and
+  the SELinux permission `logging_send_audit_msgs`; `audit.kernel: auto`
+  (default) uses it when available, `on` refuses to start without it.
+- OPA logs every decision to its journal (`decision_logs.console`). The
+  gateway puts a random `decision_id` into each policy input
+  (`input.context.decision_id`) and into its audit record, which links
+  the two. The mask policy `policy/mcp/log.rego` removes the arguments
+  from OPA's log unless the decision asked for `audit: full`.
+
+### 5.10 Cockpit integration
+
+The gateway serves a small **control API** on
+`/run/mcp-gateway/control.sock` (`mcpgw_ctl_sock_t`, same group as the MCP
+socket), HTTP with JSON:
+
+| Request | Meaning |
+|---|---|
+| `GET /v1/whoami` | the caller as the gateway sees them |
+| `GET /v1/approvals`, `GET /v1/approvals/{id}` | pending approvals the caller may decide on |
+| `POST /v1/approvals/{id}` `{"decision": "approve"\|"deny", "scope": "…"}` | decide |
+| `GET /v1/grants`, `DELETE /v1/grants/{id}` | the caller's grants (all for admins); revoke |
+| `GET /v1/servers` | the server registry (without command and environment) and the running instances the caller may manage |
+| `DELETE /v1/instances/{id}` | stop an instance; its sessions get a new one on their next call |
+| `GET /v1/sign-ins`, `DELETE /v1/sign-ins/{server}` | sign-ins to servers with `sign_in` the caller may see (never tokens) and the caller's pending ones with their link; sign out (§5.7.3) |
+| `GET /v1/policy` | policy mode (directories or bundle) and the active bundle revisions |
+| `POST /v1/policy/whatif` | "what changes?": the decisions proposed role data would change (`data.mcp.whatif.changes`, for reviewers per `data.mcp.approvals.review_policy`) |
+| `GET /v1/events` | server-sent events: the pending approvals the caller may decide on, then changes (§5.6.3) |
+
+Callers are identified by the socket's peer credentials, so the API needs
+no tokens: a Cockpit page reaches it with `cockpit.http({unix: …})` as the
+logged-in user, who has authenticated to Cockpit, not to the agent.
+Anything not the caller's is reported as not found. Who may see and stop
+an instance is policy (`data.mcp.approvals.manage_instance`, the same
+approver rules as for grants: by default the principal themself and the
+admin role).
+
+The Cockpit page ships in this repository (`cockpit/mcp-gateway`,
+installed to `/usr/share/cockpit/mcp-gateway`), with four tabs:
+
+- **Approvals:** pending approvals with their details and one button per
+  offered scope plus Deny, and the grants list with Revoke. Approval links
+  (`#/approvals/<id>`) highlight the request.
+- **Servers:** the registry (SELinux domain, isolation, network, run as)
+  and the running instances the user may manage, with their journal and
+  Stop. Instances start on demand, so there is no Start.
+- **Policy:** the policy mode and bundle revisions; role bindings (add or
+  remove roles of users and groups), roles with their permissions,
+  approver rules, and the whole role data as JSON. Edits are validated
+  (structure, bindings to unknown roles) and written to
+  `/etc/mcp-gateway/policy/rbac/data.json` with Cockpit's administrative
+  access; OPA reloads it by itself. With a signed bundle file and the
+  signing key on the host, **Sign and apply** runs `mcp-policy-bundle`
+  as root, which signs a new bundle with the revision
+  `cockpit-<user>-<time>` (recorded in the gateway's policy change audit
+  event) and restarts OPA. Without the key the page explains how to
+  create one; with a bundle server, changes must go into the bundle
+  published there.
+- **Audit:** the gateway's audit records from the journal (`journalctl
+  -u mcp-gateway.service`, which needs journal access), newest first,
+  filtered by kind (denials, allowed calls, events) and text.
+
+`cockpit/test/smoke.js` checks the page in headless Chrome against a stub
+of `cockpit.js` (CI job `cockpit`). Policy tests (`opa test`) are not run
+from the page: the Rego tests are not installed.
+
+### 5.11 Protocol revision 2026-07-28
+
+*Roadmap steps 24 and 25, decision D18 (accepted). Servers (step 24):
+done. Agents (step 25): done; the client suite runs the TypeScript SDK 2.3,
+the Python SDK 2.3 and mcp-go 1.1 on 2026-07-28 against the gateway.
+Sources: the specification of 2026-07-28 (changelog, versioning,
+Streamable HTTP, stdio, MRTR, subscriptions, discovery, caching) and
+SEP-2575 (stateless MCP), SEP-2567 (sessionless MCP), SEP-2322 (MRTR),
+SEP-2549 (TTLs), SEP-2243 (request headers).*
+
+MCP 2026-07-28 removes the `initialize` handshake and protocol
+sessions. Every request carries its protocol version and the client's
+capabilities in `_meta` (`io.modelcontextprotocol/protocolVersion`,
+`…/clientCapabilities`, optionally `…/clientInfo` and `…/logLevel`);
+`server/discover` advertises versions and capabilities; servers no
+longer send requests to clients, they answer a call with an
+`InputRequiredResult` (`resultType: "input_required"`, `inputRequests`,
+an opaque `requestState`) and the client retries the call with
+`inputResponses` (multi round-trip requests, MRTR); change
+notifications come on a `subscriptions/listen` stream; Streamable HTTP
+loses the GET stream, `Mcp-Session-Id` and resumability, and gains
+required `Mcp-Method`/`Mcp-Name` headers that must match the body. The
+specification calls revisions with the handshake *legacy* (2025-11-25
+and earlier) and the new ones *modern*; an implementation that speaks
+both is *dual-era*.
+
+Two facts decide the plan. A legacy client cannot use a modern-only
+server (the specification's compatibility matrix: it fails), and the
+gateway is a legacy client to its servers (it initializes them with
+2025-06-18): as servers drop the handshake, the gateway loses
+them. And agents keep speaking legacy for a while (Claude Code does
+today) while others go modern (the Python SDK 2 and mcp-go 1.1 probe
+`server/discover` first and fall back, roadmap step 15). So the
+gateway becomes **dual-era on both sides**, and translates between the
+eras where agent and server differ.
+
+**Era per request.** Toward agents, a request whose `_meta` names a
+modern version is served statelessly; an `initialize` opens a legacy
+session as today, on the same endpoint (HTTP) or connection (unix
+socket, where the stdio framing applies unchanged). Toward servers, the
+gateway learns each definition's era when it starts an instance: on
+stdio by probing `server/discover` and falling back to `initialize` on
+any error that is not a modern one (the specification's rule), over
+HTTP (the connector, §5.7.2) from a modern request's `400` body. The era
+is kept per definition and probed again when the definition changes or
+a probe assumption fails; legacy is kept only once `initialize`
+worked, since a probe over HTTP also fails while a server is
+unavailable, and a refused access token is the sign-in's error, not an
+answer about the era.
+
+**Version per client.** `agents.max_version` caps the version the
+gateway speaks with an agent by the name in its `clientInfo` (step 26).
+An agent capped below the modern version is answered as by a legacy
+gateway: `server/discover` is unknown (`-32601`), other modern requests
+get `UnsupportedProtocolVersion` naming the versions it may use, and
+`initialize` agrees on the cap at most. The dual-era SDKs (TypeScript
+2.3, Python 2.3, mcp-go 1.1) then fall back to the handshake. The name
+is self-asserted, like `clientInfo` everywhere (§5.2): it chooses the
+protocol, never what is allowed. As shipped, Kit is capped at
+2025-11-25. For clients named in `agents.no_request_timeout` (Kit, as
+shipped), a round of an approval or a sign-in waits until it is decided
+instead of `approvals.retry_wait` (§5.11.2).
+
+#### 5.11.1 Agents (modern)
+
+- **HTTP.** Each request is a POST; the response is JSON or an SSE
+  stream scoped to it (progress and log messages of that request only).
+  The gateway checks, before anything else, the required headers
+  against the body: `MCP-Protocol-Version` against `_meta`,
+  `Mcp-Method` against `method`, `Mcp-Name` against `params.name` or
+  `params.uri` (Base64 sentinel values decoded), and the
+  `Mcp-Param-*` headers of tools whose schema marks parameters with
+  `x-mcp-header` (the gateway knows the schemas from discovery). A
+  mismatch or a missing header is `400` with `HeaderMismatch` (`-32020`):
+  policy decides on the body, and a proxy in front must not be able to
+  route or rate-limit by a header that says otherwise. A missing
+  required `_meta` field is `-32602`; an unsupported version is `400`
+  with `UnsupportedProtocolVersionError` (`-32022`) listing the versions
+  the gateway speaks (modern and legacy). An unknown method is `404`
+  with `-32601`. Closing a response stream cancels that request (no
+  `notifications/cancelled`). `Mcp-Session-Id`, GET, DELETE and
+  `Last-Event-ID` keep their meaning for legacy sessions only; on a
+  modern request they are ignored. SSE responses carry
+  `X-Accel-Buffering: no`; long-lived streams send comment keep-alives.
+- **Unix socket** (`mcp-connect`, local agents): the same messages,
+  newline-delimited; cancellation by `notifications/cancelled`.
+- **Request sessions.** Each modern request is served in a session of
+  its own for its duration (no session id, not counted as a session):
+  its capabilities, client and log level come from its `_meta`, its
+  instances are the principal's (also for `isolation: session`), and
+  what a call needs of the server's tools (annotations for policy,
+  declared arguments, `x-mcp-header` parameters) the gateway lists from
+  the server (a shared discovery instance's cache where there is one).
+- **Identity and policy input.** The principal comes from the token or
+  the peer credentials of each request, as today. `input.context`
+  gains `protocol_version`; `client_capabilities` and `client` come from
+  the request's `_meta` (self-asserted, as `clientInfo` is today:
+  convenience, never a boundary); `session_id` is absent.
+- **`server/discover`** answers with the versions the gateway speaks,
+  the capabilities the principal may use (as the `initialize` result
+  does today: tools, prompts, resources, completions; logging while it
+  is not removed), the gateway's `serverInfo`, and on a single-server
+  endpoint the server's `instructions`; `cacheScope: "private"`.
+- **Lists** are a function of the deployment and the principal, never
+  of a connection (SEP-2567), which is what the gateway's filtering
+  already does. Every list and `resources/read` result carries
+  `cacheScope: "private"` (it is filtered per principal; a shared cache
+  must not serve it to another) and `ttlMs`: for lists
+  `http.list_ttl` (default 60 s), shortened to 0 for the next
+  answer after a policy or definition change; for reads the server's
+  own `ttlMs` (0 if it gives none). Aggregated lists are sorted by name
+  (deterministic order, as the specification asks).
+- **Subscriptions.** `subscriptions/listen` opens a stream for the kinds
+  the client opts in to; the acknowledgement names the subset the
+  gateway honours. Policy and definition changes go out as
+  `toolsListChanged`, `promptsListChanged`, `resourcesListChanged` to
+  the principal's open streams (the change events of §5.3, today sent
+  to sessions), and so do the servers' own list changes (from a shared
+  discovery instance, or the principal's). `resourceSubscriptions` are
+  admitted only for URIs the principal may subscribe to
+  (`resources.subscribe`, audited), and an update is delivered only while
+  that still holds; the gateway subscribes at the server on the
+  principal's instance (`subscriptions/listen` toward a modern server,
+  counted per URI and undone with the stream; `resources/subscribe` on a
+  legacy one, not undone, since the instance is the principal's and
+  updates reach only the streams that subscribed). What comes before the
+  acknowledgement waits for it. A stream ends without a response when the
+  agent cancels it (closing it on HTTP, `notifications/cancelled` on the
+  socket) or its token expires, and with the request's response when its
+  server is removed from the definitions; on HTTP it sends comment
+  keep-alives. Streams count against a per-principal limit (below).
+- **Logging.** The level is per request (`…/logLevel`); log messages go
+  only on that request's stream, and only if the request asked.
+  `logging/setLevel` and its replay to new instances (§5.3) remain for
+  legacy sessions.
+
+#### 5.11.2 Approvals and sign-in as multi round-trip requests
+
+Today a call that needs an approval waits, open, until someone decides
+(§5.6.1), with progress to keep the client from giving up; clients give
+up anyway (the TypeScript SDK after 60 s unless progress extends it).
+MRTR removes the wait:
+
+1. The first call is decided `ask`. The gateway answers at once with an
+   `InputRequiredResult`: for the channels `form` and `url`, an
+   `inputRequests` entry `approval` (`elicitation/create`, form or URL
+   mode, as the dialog is built today), provided the request's
+   capabilities declare that mode; otherwise the decision's `fallback`
+   applies (`oob`, or deny). For `oob` it carries no `inputRequests`.
+   Always with a `requestState` (below).
+2. The client retries with `inputResponses.approval` (form: the choice
+   and scope; URL: `accept` after the page). The gateway records the
+   decision, as an answer on the approval page or in Cockpit is recorded
+   today, decides again with the grant, and forwards the call.
+3. A retry before anyone decided (URL, `oob`) waits up to
+   `approvals.retry_wait` (default 25 s, below the clients' timeouts,
+   with progress) and then answers another `InputRequiredResult` with
+   only a `requestState`, which the client may retry at once. Each round
+   trip stays shorter than any client timeout; the approval keeps its
+   own expiry (`approvals.timeout`), after which the call is denied.
+   For clients without a request timeout of their own, named in
+   `agents.no_request_timeout` (Kit, as shipped), a round waits until
+   the decision or the expiry instead: mcp-go 1.1 gives up after three
+   rounds in a row that ask for nothing (step 26). Sign-in rounds wait
+   alike.
+
+Approvals in the inbox, push notices and approval pages are keyed by
+the approval's id, carried in the `requestState`, not by a session.
+Grant scopes are `once` (bound to this call's digest) and durations;
+`session` is not offered to modern clients (there is no session), as it
+is not offered today where the client cannot keep one. Signing in to a
+server (§5.7.3) follows the same pattern: the sign-in link is a URL-mode
+input request; the retry finds the token or asks again.
+
+**The gateway's `requestState`.** The client must echo it unchanged;
+the specification makes it attacker-controlled input and asks for
+integrity, principal binding, expiry and request binding. The gateway's
+is sealed with AEAD (a key held in memory, new at each start, so a
+restart turns outstanding retries into an error the client answers by
+calling again) and holds: the principal (transport, issuer, subject),
+the endpoint, the method and a digest of the call's parameters
+(without `_meta`, `inputResponses` and `requestState`), the approval
+or pending sign-in id, the server's own `requestState` if any
+(§5.11.4), and an expiry. A state that fails to open, belongs to
+another principal or call, or has expired is refused (`-32602`); it is
+never logged. Single use is enforced where it matters: an approval
+answer is recorded once. A "once" grant that allowed the call travels
+in the state for the call's later rounds (a sign-in, a server's input
+requests), so that the approval is not asked again; a server's input
+requests that policy refused are answered by the gateway, and its
+answers travel in the state too. The state expires after 30 minutes.
+An approval decided while no retry waited is kept as for a call that
+went away (§5.6.1): the next retry finds its grant. An `oob` approval
+has nothing to show the agent first, so its first round already waits.
+For the clients' sake an `InputRequiredResult` always carries
+`inputRequests` (empty if there is nothing to ask) and the method's own
+result field, empty (`content`, `contents`, `messages`): mcp-go 1.1
+refuses a result without the latter, the Python SDK 2.3 takes one with
+it but without `inputRequests` for a final result.
+
+#### 5.11.3 State that belonged to the session
+
+| Today (legacy session) | Modern requests |
+|---|---|
+| Pseudonym vault per session (§6.3.1) | per principal and endpoint, with the same bound and an idle expiry (`pseudonymize.vault_idle`, default 1 h). Pseudonyms stay consistent across calls, which the model needs; the vault cannot live in `requestState`, which spans the round trips of one call only. |
+| Grants `session` | not offered (above) |
+| `isolation: session` instances | one instance per principal, as `isolation: principal`, which SEP-2567 names for gateways that bridged sessions to stdio processes ("route by authenticated principal"). Legacy sessions keep their own instances. The specification asks such servers to move their state to handles in tool arguments; the doctor and the reference say that modern agents get per-principal instances. |
+| Sessions per principal (D14) | in-flight requests and open subscription streams per principal: `limits.requests_per_principal`, `limits.streams_per_principal` |
+| `logging/setLevel` | per-request `logLevel` |
+| Replay of 256 events per stream | none: a broken stream loses its request, and the client issues it again |
+
+#### 5.11.4 Translating between the eras
+
+| Agent | Server | What the gateway does |
+|---|---|---|
+| modern | modern | Passes a server's `InputRequiredResult` on after policy has decided each input request as a request from the server is decided today (`client` permissions, `allow_sensitive`, pseudonymization of sampling messages). The server's `requestState` travels inside the gateway's; the retry goes to the principal's instance with the server's state restored. |
+| modern | legacy | Calls pass as today. A request the legacy server sends while it runs a modern agent's call (`elicitation/create`, `sampling/createMessage`, `roots/list`) is refused: an elicitation is declined, the others get an error, each audited. The gateway does not park the server's request to turn it into an `InputRequiredResult` (decided: not worth the state it needs); such servers keep elicitation and sampling with legacy agents, and get them with modern agents once they speak 2026-07-28. |
+| legacy | modern | The server answers `InputRequiredResult`. The gateway asks the agent over its session (the requests the server wants, decided by policy as above), retries the call at the server with `inputResponses` and the server's `requestState`, and the agent sees one call. An elicitation policy or the agent refuses is answered as declined; a refused sampling or roots request ends the call, since answers have no error form. At most 8 rounds per call. `inputResponses` and `requestState` an agent puts into its own request are removed: the answers are the gateway's to give, after policy. |
+| legacy | legacy | as today |
+
+#### 5.11.5 Servers (modern)
+
+The gateway sends each request with `_meta`: the modern version, its
+`clientInfo`, and as `clientCapabilities` what the agent of this request
+declared and policy lets the server use (elicitation and each of its
+modes, sampling, roots; decided without the arguments of a particular
+request, which policy still decides on each), so a server asks only for
+what the agent can give. Only the requests that may be answered with
+`InputRequiredResult` (`tools/call`, `resources/read`, `prompts/get`)
+carry them; others declare none; to a legacy server it
+keeps declaring a fixed set at `initialize`. It opens
+`subscriptions/listen` on an instance for the changes it relays, and
+answers `UnsupportedProtocolVersionError` by choosing from the server's
+list. The connector (§5.7.2) sends the required headers, computed from
+the body as forwarded (after re-identification), including
+`Mcp-Param-*` for the tool's `x-mcp-header` parameters. Instances stay
+per principal; discovery instances (`discovery: shared`) fit the model
+better than before, since lists may no longer depend on a connection.
+Extensions are not passed through unless the gateway implements them:
+it declares none to servers and strips unknown ones from what agents
+declare (the reason tasks are not relayed today, roadmap step 15). The
+MCP Apps extension (`io.modelcontextprotocol/ui`, server-rendered HTML
+shown by the agent) does not pass the gateway (decided for now: its
+content is not something policy and obligations can judge). The tasks
+extension (`io.modelcontextprotocol/tasks`: polling with `tasks/get`,
+input with `tasks/update`) can be supported later with policy and
+obligations applied to task results.
+
+**Errors and audit.** Error codes follow the request's era (a missing
+resource is `-32602` for modern requests, `-32002` for legacy ones).
+Decision records carry the protocol version; the round trips of one call
+share the approval or decision id.
+
+**Authorization.** As a resource server nothing changes: each request
+carries its token, as today. As an OAuth client (the sign-in,
+§5.7.3) the gateway validates `iss` in the authorization response
+(RFC 9207) against the issuer of the metadata it signed in with, exact
+string comparison, before it uses the code or shows an error from the
+response; a server that announces `iss`
+(`authorization_response_iss_parameter_supported`) must send it. It
+sends `application_type: "web"` (`"native"` for a redirect URI on the
+local host) when it registers dynamically and in its client ID metadata
+document, and keeps registrations keyed by the
+authorization server's issuer; client ID metadata documents, which the
+specification now prefers to dynamic registration, the gateway already
+serves.
+
+## 6. Policy model
+
+### 6.1 Packages
+
+```
+policy/
+  mcp/authz.rego          # main decision: data.mcp.authz.decision
+  mcp/filter.rego         # batch visibility for */list
+  mcp/elicitation.rego    # rules for backend-initiated elicitation
+  mcp/lib/*.rego          # helpers (arg matching, time windows)
+  mcp/*_test.rego         # policy tests (opa test)
+  mcp/log.rego            # masking for OPA's decision log
+  mcp/rbac/data.json      # data.mcp.rbac: roles, permissions, bindings, approvers
+                          # (installed as /etc/mcp-gateway/policy/rbac/data.json)
+```
+
+Everything the gateway uses lives below `data.mcp`, so the policy can
+share an OPA with other policies (D8): `mcp-opa.service` loads the
+administrator's data files with the prefix `mcp:` (`rbac/data.json` is
+`data.mcp.rbac`), sets `decision_logs.mask_decision` to `/mcp/log/mask`
+instead of OPA's default `/system/log/mask`, and bundles from
+`mcp-policy-bundle` declare the single root `mcp`.
+
+### 6.2 Input document
+
+```json
+{
+  "version": 1,
+  "principal": { "...": "see §5.2" },
+  "action": "tools.call",
+  "resource": {
+    "server": "fs",
+    "kind": "tool",
+    "name": "write_file",
+    "annotations": { "destructiveHint": true, "readOnlyHint": false }
+  },
+  "args": { "path": "/home/alice/project/x.txt", "content": "…" },
+  "grants": [ { "...": "see §5.6.1" } ],
+  "context": {
+    "time": "2026-09-27T14:03:11Z",
+    "transport": "unix",
+    "request_id": "42",
+    "decision_id": "5f0c…",
+    "client_capabilities": { "elicitation": { "form": {}, "url": {} } }
+  }
+}
+```
+
+`principal.scopes` holds a remote principal's token scopes; the shipped
+policy uses them only as a ceiling (§6.7).
+
+`resource.sign_in` is `true` for the tool `sign_in` the gateway offers
+in place of a server's tools until the principal signed in to it
+(§5.7.3).
+
+`version` is the version of the input documents (D10); the OPA client
+adds it to the input of every query, also the filter's and the approver
+rules'.
+
+Tool annotations are taken from the backend's `tools/list` and are
+**untrusted hints**; policy may use them for defaults (e.g. destructive ⇒
+ask) but never to grant access.
+
+### 6.3 Decision document
+
+`data.mcp.authz.decision`:
+
+```json
+{
+  "version": 1,
+  "effect": "allow | deny | ask",
+  "reason": "human-readable, safe to show to the client",
+  "ask": {
+    "channel": "url | form | oob",
+    "prompt": "Allow alice to write /home/alice/project/x.txt?",
+    "scopes": ["once", "session", "8h"],
+    "fallback": "oob | deny"
+  },
+  "obligations": {
+    "redact_output": ["(?i)password=\\S+"],
+    "max_output_bytes": 1048576,
+    "rate_limit": ["30/m"],
+    "arg_constraints": { "path": ["^/home/alice/"] },
+    "audit": "digest | full",
+    "pseudonymize": {
+      "detect": ["email", "iban", "credit_card", "phone", "ipv4", "ipv6"],
+      "patterns": { "customer": "CUST-[0-9]{6}" },
+      "fields": { "name": "person" }
+    },
+    "reidentify": ["customer"]
+  }
+}
+```
+
+`version` is optional; a decision naming a version other than the one
+the gateway enforces is invalid and denies (D10).
+
+Obligations, as the gateway enforces them:
+
+| Obligation | Effect |
+|---|---|
+| `redact_output` | regular expressions; matches in every string of the result are replaced with `[redacted]` |
+| `max_output_bytes` | results larger than this (after redaction) are withheld; the call returns an error |
+| `rate_limit` | `N/s`, `N/m` or `N/h`, one or a list; each counts calls per principal, action and target; exceeding denies |
+| `arg_constraints` | per argument, regular expressions that must all match; a missing or non-string argument fails |
+| `audit` | `full` logs the arguments verbatim instead of a digest |
+| `pseudonymize` | values found by built-in detectors, named patterns or JSON field rules are replaced by per-session pseudonyms (`[EMAIL_1]`) in results and in sampling requests to the client's model (§6.3.1) |
+| `reidentify` | argument names in which the session's pseudonyms are replaced by the original values before forwarding; OPA is asked again with the real arguments, and that decision must allow |
+
+A malformed obligation (bad regex, bad rate, unknown detector) makes the
+whole decision invalid, which fails closed. The shipped policy takes
+obligations from the matching permissions' `obligations` objects and
+merges them. Redactions, rate limits, argument constraints, detectors,
+patterns, field rules and arguments to re-identify add up, the smallest
+output limit wins, and `full` audit wins.
+
+#### 6.3.1 Pseudonymization
+
+Customers who use external models want their internal data to stay
+inside. The gateway sees everything MCP servers return, so it can replace
+personal or confidential values before the agent (and with it the model
+provider) sees them.
+
+- **Reversible and consistent.** Each MCP session has a vault (in memory,
+  `internal/pseudo`) mapping values to tokens of the form
+  `[<CLASS>_<n>]`. The same value always gets the same token within the
+  session, so the model can relate records and refer to them. The vault
+  ends with the session and is never persisted; its size is bounded
+  (10,000 values, then values are replaced irreversibly).
+- **Deterministic detection.** Field rules (JSON keys, also inside JSON
+  returned as text), validated detectors (e-mail, IBAN with checksum,
+  payment cards with Luhn check, international phone numbers, IP
+  addresses) and named regular expressions. Statistical recognition of
+  names in free text (e.g. Presidio as a confined sidecar) is left open;
+  it would be another detector behind the same obligation.
+- **Controlled re-identification.** Only arguments named by `reidentify`
+  are translated back, and only with this session's tokens. Because any
+  re-identifying tool can turn a token back into its value, the gateway
+  asks OPA again with the arguments as forwarded, so that `args`
+  conditions and approvals see real values.
+- **Scope.** Results of calls, prompts, resource reads and completions,
+  and `sampling/createMessage` requests from backends (which go to the
+  client's model). Not covered: lists, notifications, what the user types
+  and tools outside the gateway. Approvals show the arguments with tokens;
+  the model's answer contains tokens, which the gateway cannot translate
+  for the user since it never sees the answer.
+- **Audit.** `mcp-pseudonymize` journal events with classes and counts,
+  never values; `reidentified` counts on decision records.
+
+Pseudonymized data remains personal data under the GDPR (Art. 4(5)): the
+feature reduces risk, it does not replace agreements with the model
+provider. Policy can combine it with client identity (e.g. client
+certificates of agent hosts that use an internal model) to pseudonymize
+only for external models.
+
+`data.mcp.filter.visible` returns, for a principal and a list of
+resources, the subset to show — one OPA query per `*/list`, not one per
+item. For the visible tools, `data.mcp.filter.hints` returns what the
+principal's matching permissions say about calling them (the approval
+channel; the `args` constraints, expanded, when every covering
+permission has some), which the gateway adds to the tools' descriptions
+(roadmap step 29). Advice for the agent only: every call is decided.
+
+On the aggregated endpoint the gateway has one tool of its own,
+`gateway_capabilities` (one underscore: no `<server>__<tool>` name can
+equal it). Policy decides on it as on any tool, as the resource
+`{server: "mcp-gateway", kind: "tool", name: "capabilities", builtin:
+true}`; the shipped `mcp/builtin.rego` covers it for principals holding
+a permission that is not a deny and needs no approval. It returns the
+principal's servers (from the filtered `tools/list`), each with its
+instructions (from shared discovery, or from the principal's own
+instance for a server without it or whose command names the principal:
+`${HOME}`, `${USER}`) and its tools with their
+descriptions and hints, and where the gateway's own files are. The
+instructions of an aggregated session point to it; they stay a fixed
+text, so that connecting asks neither servers nor policy.
+
+### 6.4 RBAC data
+
+A permission names a backend (`server` glob) and exactly one target: a
+`tool`, `prompt` or `resource` (URI) glob, or `client` for requests a
+backend sends to the client (`roots/list`, `sampling/createMessage`,
+`elicitation/create`). Globs have no separators (`*` matches `/`) and may
+use `${sub}` and `${home}`. Optional fields: `effect: "deny"` (explicit
+deny, wins over everything), `require_approval`, `approval_channel`,
+`args` (regular expressions per tool/prompt argument, deciding whether the
+permission applies), `require_client_cert` (applies only to remote
+clients with a verified TLS client certificate, §5.1; ignored for explicit
+denies, which always apply), `obligations` (§6.3, conditions on an allowed call),
+and for `client` permissions `allow_sensitive` (backend elicitations that
+look like they ask for secrets, §5.6.2).
+
+An optional `version` (1) names the format of the role data (D10).
+
+`approvers` maps a server name, or `default`, to the rules for who may
+decide on that server's approvals and manage its grants: `self`,
+`role:<role>`, `group:<group>`, `user:<user>` (§5.6.1). Without it, only
+`self` applies.
+
+Server setup packages (roadmap step 10) ship roles for their server in
+`data.mcp.profiles.<setup>.roles`. The policy merges them below the roles
+of `data.mcp.rbac`: a role of the same name there replaces the shipped
+one. Bindings and approvers come from `data.mcp.rbac` only, so installing
+a setup grants nothing by itself.
+
+Completions follow their target: a prompt's like `prompts.get`; a resource
+template's (and its visibility in `resources/templates/list`) wherever the
+principal may read some resource of that backend.
+
+```json
+{
+  "roles": {
+    "viewer":    { "permissions": [ { "server": "*", "tool": "read_*" },
+                                    { "server": "*", "prompt": "*" } ] },
+    "developer": { "permissions": [
+        { "server": "git", "tool": "*" },
+        { "server": "fs",  "tool": "read_*" },
+        { "server": "fs",  "resource": "file://${home}/*" },
+        { "server": "fs",  "tool": "write_file", "require_approval": true,
+          "args": { "path": "^${home}/" } },
+        { "server": "fs",  "tool": "delete_*", "effect": "deny" } ] },
+    "admin":     { "permissions": [ { "server": "*", "tool": "*" },
+                                    { "server": "*", "resource": "*" },
+                                    { "server": "*", "prompt": "*" },
+                                    { "server": "*", "client": "*" } ] }
+  },
+  "bindings": {
+    "groups": { "dev": ["developer"], "wheel": ["admin"] },
+    "users":  { "bob": ["viewer"] }
+  },
+  "approvers": { "default": ["self", "role:admin"] }
+}
+```
+
+### 6.5 Example rule
+
+```rego
+package mcp.authz
+
+import rego.v1
+
+default decision := {"effect": "deny", "reason": "no matching permission"}
+
+perms contains p if {
+	some role in data.mcp.roles_of[input.principal.sub]
+	some p in data.mcp.rbac.roles[role].permissions
+}
+
+matches(p) if {
+	glob.match(p.server, [], input.resource.server)
+	glob.match(p.tool, [], input.resource.name)
+	args_ok(p)
+}
+
+decision := {"effect": "allow"} if {
+	some p in perms
+	matches(p)
+	not p.require_approval
+}
+
+decision := {
+	"effect": "ask",
+	"ask": {
+		"channel": "url",
+		"prompt": sprintf("Allow %s to call %s/%s?", [input.principal.sub, input.resource.server, input.resource.name]),
+		"scopes": ["once", "session"],
+		"fallback": "deny",
+	},
+} if {
+	some p in perms
+	matches(p)
+	p.require_approval
+	not granted
+}
+
+decision := {"effect": "allow"} if {
+	some p in perms
+	matches(p)
+	p.require_approval
+	granted
+}
+
+granted if {
+	some g in input.grants
+	g.server == input.resource.server
+	g.tool == input.resource.name
+	time.parse_rfc3339_ns(g.expires) > time.now_ns()
+}
+```
+
+(Simplified. The shipped policy, `policy/mcp/authz.rego`, handles all
+target kinds, explicit denies and precedence: deny > allow > allow with
+grant > ask > default deny.)
+
+### 6.6 Policy lifecycle
+
+- Rego logic lives in git with `opa test` and `opa check --strict` in CI.
+- RBAC data may be edited through Cockpit; with signed bundles, edits
+  take effect with a new bundle revision (`mcp-policy-bundle`), keeping
+  git as source of truth for logic.
+- Bundle activation is atomic; the gateway notices the change (§5.3,
+  item 6), emits `list_changed` notifications and records a
+  `mcp-policy-change` audit event.
+
+### 6.7 Token scopes as a ceiling
+
+*Roadmap step 23 (0.15), decision D17 (accepted 2026-10-06). Not
+implemented yet.*
+
+An OAuth scope says what a client may do on the user's behalf: the
+client asks for it, the user consents, the authorization server grants
+it, often by the client's configuration rather than the user's (a
+Keycloak client scope assigned to a client is granted to each of its
+users unless role scope mappings restrict it). A scope is a delegation,
+not an entitlement. So scopes never grant a role; who the principal is
+and which roles they hold stays with `sub`, the groups claim and the
+bindings (§5.2, §6.4). What scopes may do is narrow: an administrator's
+automation agent gets a token with `mcp:read` and may list and read,
+not change anything, although its user could.
+
+**Input.** `input.principal.scopes`: the token's scopes (`scope`, else
+`scp`), for remote principals only. Local principals and principals of
+`mcp-connect` have no token and no scopes. A new optional key: the input
+stays version 1 (D10). Custom policy can use it at once.
+
+**Role data.** An optional `scopes` object maps a scope to a ceiling:
+
+```json
+{
+  "scopes": {
+    "mcp:read":  { "roles": ["viewer"] },
+    "mcp:fs":    { "permissions": [ { "server": "fs", "tool": "*" },
+                                    { "server": "fs", "resource": "*" } ] },
+    "mcp:admin": { "unlimited": true },
+    "default":   { "unlimited": true }
+  }
+}
+```
+
+- A ceiling is the permissions of named roles (`roles`), permissions of
+  its own in the form of §6.4 (`permissions`: targets and globs; the
+  fields that qualify an allow, such as `require_approval` or
+  `obligations`, are refused here), or `unlimited`.
+- A token's ceiling is the union of the ceilings of its scopes that the
+  map names: scopes add up, as they do in OAuth. Scopes the map does not
+  name are ignored (`openid`, `profile`, …).
+- `http.scopes` stays what it is: scopes every token must carry to be
+  accepted at all, checked before any of this.
+- `default` is the ceiling of a token that carries none of the named
+  scopes. Absent, it is `unlimited`: role data without `scopes`, or tokens
+  without such scopes, behave as today. Set to a ceiling (or to
+  `{"permissions": []}`, nothing), it makes narrowing the rule rather
+  than the exception.
+
+**Decision.** A request is allowed only if the roles allow it **and** it
+lies within the ceiling: explicit denies still win, the ceiling only
+removes. A request the roles would allow, or allow after an approval,
+but the ceiling does not is denied, not asked: the ceiling limits the
+token, and an approval by the same user, or a standing grant, does not
+lift it. Lists (`data.mcp.filter.visible`) show what the roles and the
+ceiling both allow. The decision marks such a denial (`outside_scopes`)
+and names the scopes whose ceilings would allow the request
+(`required_scopes`); the reason says it lies outside the token's scopes.
+A role named in a ceiling contributes its permissions without its
+explicit denies, which still deny through the roles.
+
+**Step-up.** For a call outside the ceiling over HTTP, the gateway
+answers the request with `403` and `WWW-Authenticate: Bearer
+resource_metadata=…, error="insufficient_scope", scope="<the token's
+scopes> <a required scope>"` (RFC 6750 §3.1), as the MCP authorization
+specification describes for a scope challenge, so that a client that
+supports it has the user authorize the wider scope and retries. The
+required scope is the first of `required_scopes`, which lists narrower
+ceilings first and unlimited ones last. The body is the JSON-RPC
+response, whose text names the scopes that would allow the request
+("…; a token with the scope mcp:write or mcp:admin would allow it");
+clients that do not step up show it. The router marks such a response
+(`ScopeChallenge`, never sent) and the HTTP transport turns it into the
+challenge while the response's headers are unwritten: a JSON response,
+a modern request's response before anything streamed, and an SSE
+request stream, whose headers wait up to 2 s for the first message
+(a decision comes sooner). Afterwards, and on the socket, the response
+is the denial as usual. Legacy sessions and modern requests are
+treated alike; each round of a multi round-trip call is decided with
+that round's token.
+
+**Checks and tools.** `mcp-gateway --check-policy-data` refuses a ceiling
+naming an unknown role or with qualifying fields; Cockpit's Policy tab
+shows the map next to the roles; `mcp-gateway-admin setup http --token`
+shows the token's scopes and the ceiling they set in the role data
+(`policydata.CeilingOf`, which chooses the ceiling as the policy does);
+decision records in the audit trail carry the token's scopes and
+whether the ceiling denied.
+
+**Managing roles in the identity provider** needs none of this: a claim
+with the user's realm or client roles (a mapper in Keycloak), named in
+`http.groups_claim`, and bindings of gateway roles to those names make
+the identity provider the place where roles are assigned. The claim
+must be a top-level list: nested claims (Keycloak's
+`realm_access.roles`) are not read. The user guide (chapter 5) shows
+both with Keycloak.
+
+## 7. Key flows
+
+### 7.1 Local `tools/call` requiring approval
+
+```
+Client        mcp-connect   Gateway/Router   PEP      OPA     Broker    Cockpit   Supervisor  Backend(fs)
+  │ tools/call   │               │            │        │        │          │          │           │
+  │─────────────▶│──────────────▶│ identify (SO_PEERCRED/SO_PEERSEC)       │          │           │
+  │              │               │──input────▶│───────▶│        │          │          │           │
+  │              │               │            │◀─ask───│        │          │          │           │
+  │              │               │            │───────────────▶ │ URL elicitation      │           │
+  │◀───────────── elicitation/create (url) ───────────────────── │          │          │           │
+  │  human opens URL, logs into Cockpit, approves "session" ──────────────▶ │          │           │
+  │              │               │            │        │        │◀─grant───│          │           │
+  │              │               │            │───────▶│(re-query with grant)          │           │
+  │              │               │            │◀─allow─│        │          │          │           │
+  │              │               │─────────── get/start instance (alice, fs) ─────────▶│──spawn───▶│
+  │              │               │─────────────────── tools/call (stdio) ─────────────────────────▶│
+  │              │               │◀───────────────────────── result ───────────────────────────────│
+  │              │               │ apply obligations, audit  │          │          │           │
+  │◀─────────────│◀──────────────│            │        │        │          │          │           │
+```
+
+### 7.2 Remote session setup
+
+1. Client hits `POST /mcp` without token → `401` with
+   `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource"`.
+2. Client performs OAuth 2.1 (auth code + PKCE, or client credentials for
+   machine agents) against the IdP, with `resource=https://host:8443/mcp`.
+3. Client retries with bearer token; gateway validates and builds the
+   principal, maps to local account if configured.
+4. `initialize`; gateway returns `Mcp-Session-Id`; normal flow continues.
+
+### 7.3 Discovery
+
+1. `tools/list` from client.
+2. For backends with `discovery: shared` (the default), the list comes
+   from a cache filled by one **discovery instance** per backend, which the
+   gateway runs for its own principal (`mcp-discovery`, no local account:
+   a dynamic user under systemd, home `/`) and which only ever receives
+   list requests. The cache holds `tools/list`, `prompts/list` and
+   `resources/templates/list`; it is dropped when any instance of the
+   backend sends the matching `list_changed` (sessions that did not get it
+   from their own instance are told too) and when the discovery instance
+   stops (idle timeout). A single-server endpoint's `initialize` also
+   answers from the discovery instance. Connecting and listing thus start
+   no per-principal instance, and no user's view of a server is shown to
+   another. If the discovery instance cannot run, the session's own
+   instance answers.
+3. One batch query to `data.mcp.filter.visible`; filtered, namespaced list
+   returned: visibility stays per principal.
+
+`resources/list` is user data (e.g. the files in the user's home) and
+always comes from the principal's own instance, as do calls; with
+`discovery: shared` it is asked only of servers whose discovery instance
+declares the `resources` capability, so that listing does not start the
+principal's instance of every server. Servers
+whose tool or prompt lists depend on the user set `discovery: instance`.
+`logging/setLevel` reaches running instances and is replayed to
+instances started later, without starting any.
+
+## 8. Threat model (summary)
+
+Reviewed for 1.0 (roadmap step 14). Who is trusted: administrators;
+users as far as their accounts go (they decide their own approvals unless
+policy says otherwise); not the agents, not the MCP servers, and not what
+either says about itself (client info, tool annotations).
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| Agent calls tools it shouldn't | RBAC + OPA per call; discovery filtering; default deny | the policy's quality |
+| Agent auto-approves its own elicitation | URL / OOB approvals authenticated outside the agent; `form` only for low-risk | `form` approvals are answered by the agent's client |
+| Prompt-injected agent exfiltrates via allowed tool | argument constraints, rate limits, output limits, approvals on destructive/egress tools, pseudonymization, audit | what an allowed tool returns reaches the model |
+| Parser differential: policy decides on parameters the server reads differently | requests whose objects repeat a key or have keys differing only in case, and keys differing only in case from one the gateway reads or from an argument the tool or prompt declares, are refused (`invalid params`); found and checked by fuzzing (step 14) | a server with its own notion of argument names (e.g. aliases) |
+| Path arguments leaving an allowed tree through symbolic links | path constraints are on the string (D13); servers confine their own file access (`os.Root`, `openat2` `RESOLVE_BENEATH`; the file server does), and account, sandbox and SELinux domain bound what any path reaches; with `landlock` (D19), the kernel bounds the instance to its trees, following the real hierarchy | servers that follow links without confining themselves, within what their account, domain and (with `landlock`) ruleset may access |
+| Access revoked while activity goes on | grants and decisions apply when a call starts (D12); updates of subscribed resources are decided again; instances can be stopped (Cockpit, control API) | a call in progress runs to its end; a privileged call is not stopped halfway |
+| Malicious/compromised backend | per-backend SELinux domain, no access to gateway/OPA sockets, systemd sandboxing (memory and task limits), no network by default, per-session MCS; with `landlock` (D19) the instance's trees and ports, our own servers restricting themselves in any case | what its own domain and ruleset allow (a profile drafted too wide) |
+| Compromised privileged backend (D9) | admin-only definitions, `run_as: root` explicitly, approval for every call not explicitly allowed, kernel audit, the MCP-facing part confined | root while it runs |
+| Backend phishing the user via elicitation | policy on `elicitation.create`, origin labelling, secret-field blocking | the user's judgement |
+| Cross-tenant data leakage | instance per principal (or session), MCS categories, separate Unix users where possible; with `landlock` (D19), an instance's trees per principal (the shipped `fs`: the user's home only, even for another user's world-readable files) | principals sharing a dynamic user rely on MCS and the instance split; without `landlock`, files another user made readable |
+| Token theft / confused deputy | audience-bound tokens, optional certificate binding (mTLS), no token passthrough, backend creds via systemd credentials | a stolen token until it expires; an open SSE stream outlives its token (§12) |
+| Approval spoofing | approval ids from 128 random bits; decisions only over the control socket with kernel-identified approvers and approver rules, or the Cockpit page (Cockpit login) | an approver tricked into approving |
+| Policy tampering | signed bundles verified by OPA (file or bundle server; never with `--watch`), OPA in own domain, config/bundle dirs writable only by admin | root |
+| OPA outage | fail closed; `mcp-gateway-admin doctor` and metrics show it | no service while it lasts |
+| Gateway hang | watchdog (`WatchdogSec=60s`) on the locks of sessions, instances and approvals; goroutine dump on SIGABRT | sessions end with the restart |
+| Resource exhaustion by a client | message size limits (32 MiB), instance memory and task limits, idle stop, restart backoff, rate-limit obligations, limits on sessions and instances per principal (D14) | many principals together, unless `limits.instances` is set; memory per session (replay buffers) within the session limit |
+| Rate limits reset by a restart | counters in memory (D11); a restart needs root or a crash, both audited | an agent that can crash the gateway; no such crash is known |
+| Theft of principals' upstream tokens (§5.7.3) | tokens encrypted in `state_dir` under a key only the gateway reads, bound to server and principal; refresh tokens never leave the gateway and the helper; a connector gets the access token for its own server and principal only, as a credential | root; a compromised connector uses its access token until it expires |
+| Sign-in link forwarded to someone else (login confusion: another person's account bound to the principal) | the link goes only to the principal's client or their own Cockpit view; its `state` is single-use and expires (10 min); PKCE; the authorization server's consent page names the client | a principal who passes their link on, and someone who signs in with it |
+| Compromised sign-in helper | own domain, a dynamic user, reaches one host per run, no access to the token store; Landlock keeps it to its credentials and that host's port (D19) | the tokens of the one exchange or refresh it runs |
+| Telemetry disclosure | metrics only for root on the control socket; the HTTP listener is opt-in and carries counts, no names or arguments | counts per server and action to whoever reaches the listener |
+| Local user spoofing identity | kernel-provided peer credentials; `clientInfo` never trusted | — |
+
+## 9. Decisions
+
+These resolve the open questions from the initial architecture discussion.
+D1–D7 were accepted on 2026-09-27, D8 on 2026-09-28, D9 on 2026-10-01.
+
+**D1 — Run-as identity for remote principals.**
+*Decision (accepted):* configurable per deployment, default **mapped local account**
+when a mapping exists (SSSD/IPA: `sub` → Unix user), otherwise
+`DynamicUser=yes` + per-instance MCS pair. Local principals always run as
+their own uid.
+*Rationale:* keeps DAC meaningful where accounts exist, still isolates
+where they don't.
+
+**D2 — Endpoint style.**
+*Decision (accepted):* offer **both**: aggregated `/mcp` (and `mcp-connect --server all`)
+plus per-server `/mcp/<server>`. Same pipeline, only the naming layer
+differs.
+*Rationale:* aggregated suits general agents; per-server keeps original tool
+names for clients configured per server.
+
+**D3 — Default approval channel.**
+*Decision (accepted):* policy chooses per decision; the shipped default policy uses
+**`url`** for anything `require_approval`, with `oob` fallback, and
+`form` only for rules explicitly marked low-risk.
+*Rationale:* the approval must not be answerable by the governed agent.
+
+**D4 — Policy authoring.**
+*Decision (accepted):* Rego logic in git (tests in CI); RBAC data editable through
+Cockpit, which generates signed bundle revisions.
+*Implementation:* bundles are built and signed by `mcp-policy-bundle`
+(§5.5). Cockpit signs when the administrator keeps the signing key on the
+host (`mcp-policy-bundle -G`); keeping it off the host (CI) is the
+stronger setup, then Cockpit only edits the role data.
+
+**D5 — Trust in backends.**
+*Decision (accepted):* treat all backends as **untrusted** by default
+(`mcpsrv_generic_t`, no network, read-only home). Vetted backends get a
+dedicated domain and wider sandbox via their registry entry and policy
+interfaces. Output inspection is an obligation hook: redaction and size
+limits are implemented; content-safety filtering (prompt-injection
+detection) is not.
+
+**D6 — Implementation language.**
+*Decision (accepted):* **Go**. Official MCP Go SDK, native OPA (sidecar now,
+embeddable later), mature SELinux (`github.com/opencontainers/selinux`)
+and systemd D-Bus (`github.com/coreos/go-systemd`) libraries, single
+static binary.
+*Implementation note:* the proxy core uses its own minimal JSON-RPC
+framing (`internal/jsonrpc`) instead of the SDK's server abstractions,
+because it forwards messages it does not need to understand and must keep
+ids, params and results byte-exact. The SDK remains an option for
+gateway-originated features (e.g. the aggregated endpoint).
+
+**D7 — OPA deployment.**
+*Decision (accepted):* sidecar over unix socket for v1 (§5.5).
+
+**D8 — Policy engine: OPA rather than Cedar.**
+*Decision (accepted 2026-09-28):* **OPA with Rego** is the only policy
+engine. No second engine (such as Cedar) is planned; the engine stays
+behind the `pep.Decider` and `Filterer` interfaces, so the option remains.
+*Rationale:*
+- **One tool on all levels of the stack.** OPA is the policy engine of
+  the cloud-native world (CNCF graduated; Kubernetes admission with
+  Gatekeeper, Envoy/Istio external authorization, Conftest for
+  infrastructure code and CI). Using it for MCP as well means one
+  language, one test and lint toolchain (`opa test`, Regal), one bundle
+  pipeline and one decision-log pipeline for platform and security teams.
+  Red Hat's MCP gateway (Kuadrant/Authorino) also uses OPA, so mixed
+  estates see a single policy language.
+- **Rich decisions.** The gateway's contract is a decision document
+  (§6.3): `ask` with channel, prompt and scopes, merged obligations
+  (redaction, output and rate limits, argument constraints), the visible
+  subset for listings, approver rules and mail recipients. Rego returns
+  these directly.
+- **Expressiveness where needed.** Argument patterns, `${home}`
+  substitution and path checks need regular expressions and string
+  functions.
+- **Operations included.** Signed bundles, bundle servers and OCI
+  registries, decision logs with masking.
+
+*Alternative considered:* **Cedar** (policies over principal, action,
+resource and context; `forbid` overrides `permit`). Its strengths are
+readable policies, schema validation, guaranteed termination, a formally
+verified core and solver-based analysis ("does this change grant new
+access?"); it is used by ToolHive, ContextForge and AWS. It was not
+chosen because it only answers allow or deny (ask and obligations would
+have to be carried as policy annotations and merged in Go), has no
+regular expressions, cannot compute result sets such as the visible
+tools, and brings no bundle distribution or decision logging.
+
+*Consequences:*
+- Rego's weak points stay: "undefined" versus "false", rules defined
+  twice fail only at evaluation time, and there is no static proof of a
+  policy's effect. Mitigations: a JSON Schema for the role data
+  (`rbac.schema.json`, done in 0.2: checked by `mcp-gateway --check` and
+  `--check-policy-data`, Cockpit before saving and `mcp-policy-bundle`
+  before signing, together with regular expressions and role
+  references); Regal in CI (0.2, pinned version, `.regal/config.yaml`;
+  the queries the gateway makes are marked as entrypoints); a "what
+  changes?" check (0.2, `POST /v1/policy/whatif`, shown by Cockpit
+  before saving): OPA evaluates, with the current and with the proposed
+  role data, the decision for every principal the bindings name and
+  every tool, prompt, resource template and client request the servers
+  offer, and returns those that differ. It is a comparison over what
+  exists, not a proof: arguments are not known (decisions are made as
+  for discovery), and servers with per-user discovery are not covered.
+- Integration with an existing OPA estate becomes a requirement:
+  - **Bundle roots** (done in 0.2): the policy, the role data and the
+    decision-log mask all live below `data.mcp`, and `mcp-policy-bundle`
+    declares the single root `mcp` (§6.1), so the bundle can share an
+    OPA with other teams' bundles.
+  - **Decision logs** (done in 0.2) go to the estate's collector
+    through OPA's decision-log service: the `decision-logs.conf`
+    drop-in, an OPA configuration file and the SELinux boolean
+    `mcpopa_can_network`; masking and decision ids carry over.
+  - **Versions.** The policy is Rego v1 and needs OPA 1.x.
+  - **Shared libraries.** Custom policy may import company-wide Rego
+    packages; a namespace convention keeps them apart from `mcp.*`.
+
+**D9 — Package installation through privileged backends.**
+*Decision (accepted and implemented 2026-10-01):* servers that change
+the whole system, first of all package installation with
+mcp-server-zypp, run as **privileged backends** (§5.7.1) instead of
+being left to tools outside the gateway.
+*Rationale:* package management is a core administration task for
+agents on SLES; leaving it outside the gateway would leave it outside
+policy, approval and audit. The price is that the kernel no longer
+contains such a server: a compromised privileged backend is root. This
+is limited by admin-only definitions, approval for every call not
+explicitly allowed, kernel audit, and confinement of the part that
+speaks MCP.
+
+**D10 — Interface stability and deprecation.**
+*Decision (accepted 2026-10-02, roadmap step 12):* what administrators
+write and what other programs use is a stable interface: `gateway.yaml`,
+server definitions, role data, the policy input and decision documents
+(§6.2, §6.3) and the control API. The files carry a format `version`
+(1; a file without one is read as 1). A gateway refuses a version it
+does not read, naming the version it reads, rather than misreading a
+newer file. Within a version, changes are compatible: new optional
+keys and values, never a changed meaning. A key that goes away, or
+whose meaning changes, is **deprecated** in a minor release: it keeps
+working, the gateway logs a warning at start and with `--check`, and
+the changelog lists it under "Deprecated". It is removed in the next
+minor release. A change that cannot be made that way raises the
+version, and the gateway reads the old version for one more minor
+release. CI loads the configuration of the previous minor release
+(`test/compat`, taken from its tag by `snapshot.sh`). The fields of the
+policy documents and of the control API's requests and responses are
+listed in `testdata/contract` files (internal/pep, internal/broker,
+internal/control); a test fails when a field disappears, and when a new
+one is not added to the list. The control API carries its version in
+the path (`/v1`). The rule holds from 0.4 on,
+so that 1.0 does not start with a break.
+*Rationale:* administrators upgrade with `zypper up` and must not find
+their gateway refusing to start, or worse, reading their policy
+differently. One minor release of warnings fits the release rhythm of
+the target distributions, where a minor release reaches users through
+maintenance updates.
+
+**D11 — Rate-limit counters stay in memory.**
+*Decision (accepted 2026-10-02, roadmap step 14):* the sliding windows
+of `rate_limit` obligations live in the gateway's memory, per principal,
+action and target, and start anew when the gateway does. Counters of
+principals and targets not seen for longer than any window (an hour) are
+dropped.
+*Rationale:* rate limits brake a runaway or manipulated agent; they are
+not a quota to bill against. Resetting them takes a restart, which needs
+root or a crash; both are audited, and a crash an agent could cause is a
+bug to fix rather than a reason to persist counters. Persisting them
+would add state to keep consistent across restarts and gateways for
+little gain. A quota that must hold across restarts belongs in the
+server or in a policy with data of its own.
+
+**D12 — Decisions and grants apply when a call starts.**
+*Decision (accepted 2026-10-02, roadmap step 14):* policy, and grants
+from approvals, are checked when a call starts. A call in progress is
+not interrupted when its grant expires, is revoked, or the policy
+changes; it runs to its end. What a server sends later on its own is
+decided anew: updates of subscribed resources reach the client only
+while policy still allows the subscription (an `allow` for
+`resources.subscribe`); requests to the client (sampling, elicitation,
+roots) are decided when they arrive. To end work in progress, stop the
+instance (Cockpit, `DELETE /v1/instances/{id}`); a privileged instance
+is not stopped during a call.
+*Rationale:* interrupting a call halfway leaves the system in an
+unknown state (half-installed packages, partly written files); a grant
+authorizes an action, and the action is taken when it starts. The
+window is the length of one call, bounded by the server, and revocation
+takes effect for the next call.
+
+**D13 — Path arguments are constrained as strings.**
+*Decision (accepted 2026-10-02, roadmap step 14):* `args` and
+`arg_constraints` match the path as the client sends it; the policy
+rejects `..` segments. The gateway does not resolve paths: it does not
+share the server's mount namespace, account or sandbox, and a path
+resolved by the gateway could change before the server opens it.
+Servers that take paths confine their own file access to their tree,
+through symbolic links too (Go `os.Root`, Linux `openat2` with
+`RESOLVE_BENEATH`); the file server does. Account, sandbox and SELinux
+domain bound what any path can reach.
+*Rationale:* only the server can resolve a path in its own view and
+without a race; the gateway's string check plus the server's own
+confinement plus the instance's confinement are three independent
+layers.
+
+**D14 — Sessions and instances are limited per principal.**
+*Decision (accepted 2026-10-02, roadmap step 15):* a principal
+(transport, issuer, subject) may have at most
+`limits.sessions_per_principal` open sessions (64) and
+`limits.instances_per_principal` running instances (32); optionally,
+`limits.instances` bounds the instances of all principals (off by
+default). At the session limit, the principal's longest-idle HTTP session
+without a request in flight or a stream attached is ended to make room;
+without one, the new session's `initialize` is refused. At an instance
+limit, the longest-idle instance no session uses (one waiting out its
+idle timeout) is stopped; without one, the request needing the instance
+fails. Discovery instances do not count. Refusals are audited
+(`mcp-limit`) and counted (`mcp_gateway_limit_refusals_total`).
+*Rationale:* the clients tested in step 15 keep one session per server
+and window (Claude Code: tens at most), but over HTTP some never end
+their sessions (Kit), which then linger until
+`http.session_idle_timeout`; ending the idle ones keeps such clients
+working without raising the limit. Instances of `isolation: principal`
+servers are bounded by the number of servers anyway; the instance limit
+matters for `isolation: session`, where each session starts one.
+Refusing beats queueing: the agent sees a clear error at once.
+
+**D15 — Servers that speak HTTP run as a connector instance.**
+*Decision (accepted 2026-10-04, roadmap step 20):* a server defined with
+`url` is reached through an instance of `mcp-http-connector` per
+principal, started by systemd like any server instance, in its own
+domain and with its network limited to the server's addresses; the
+gateway's domain gets no outbound network for it. Headers carry a
+secret per server (`credentials`); signing in for each principal is not
+done.
+*Rationale:* the gateway stays a process that makes no outbound
+connections to servers, so a flaw in relaying HTTP is contained like a
+flaw in any server, in a domain that reaches one address; the instance
+pool, limits, isolation per principal and the audit trail apply without
+a second code path. The cost is a process per principal and server, as
+for stdio servers.
+
+**D16 — Principals sign in to servers through the gateway, which
+keeps their tokens.**
+*Decision (accepted 2026-10-04, roadmap step 21):* a server defined with
+`url` and `sign_in` gets an OAuth 2.1 token per principal (§5.7.3). The
+gateway runs the authorization code flow with PKCE as the client: the
+sign-in link reaches the principal as a URL elicitation (else as a
+link to the gateway in the call's error, step 22), the callback comes to the gateway's HTTP listener, and the
+tokens are kept encrypted in `state_dir`. Network steps (discovery,
+registration, code exchange, refresh, revocation) run in a confined,
+short-lived helper; the access token reaches the principal's connector
+instance as a systemd credential at its start, and a new one when the
+connector asks after a `401` (amended in step 22: before, the token was
+fixed for the instance's life, which ended when the token expired or
+was refused).
+*Rationale:* the principal consents at the server's own authorization
+server and the agent never sees a token, as the MCP specification asks
+of servers that act for users. Keeping the gateway free of outbound
+connections (D15) contains a flaw in parsing an authorization server's
+answers like a flaw in a server. Tokens stay off command lines. A
+token fixed per instance cost a new instance, and a new session with
+the server, every time a token expired (typically hourly); from step 22
+the connector asks for a new token over its stdio when the server
+refuses one (pull), a request only the gateway answers, so sessions
+survive expiry at the cost of tokens crossing the gateway's pipe to the
+instance, which the gateway reads anyway.
+*Considered:* the gateway pushing a new token shortly before expiry: no
+slow first request after expiry, but a timer per instance and messages
+the connector did not ask for; worth it only if servers drop streams at
+expiry instead of answering `401`. The callback on the Cockpit page (which would tie the browser
+to a local account): remote principals have no Cockpit login. Tokens
+in the kernel keyring or a TPM-sealed key: not available in containers
+and not on every host; a key sealed with `systemd-creds` may follow.
+
+**D17 — Token scopes limit what an agent may do; they never grant.**
+*Decision (accepted 2026-10-06, roadmap step 23; proposed 2026-10-05):* a remote
+principal's token scopes are part of the policy input
+(`input.principal.scopes`), and role data may map scopes to ceilings
+(§6.7). A request must be allowed by the principal's roles and lie
+within the ceiling of the token's scopes; outside it, the request is
+denied (no approval), lists hide it, and over HTTP the gateway answers
+with an `insufficient_scope` challenge naming a scope that would allow
+it. Without a `scopes` map, or for a token with none of its scopes and
+no `default` ceiling, nothing changes.
+*Rationale:* in OAuth a scope is what a client may do for its user,
+requested by the client and often granted by the client's
+configuration; letting it grant roles would tie privileges to how a
+client is set up, and a permissive client would hand out more than the
+user's roles. As a ceiling, a scope can only take away, so a mistake in
+the identity provider or in the map denies too much, never too little,
+and an administrator can give an automation agent a token narrower than
+their own rights. The user's entitlements stay in claims that follow the
+user (groups, roles), which bindings already use.
+*Considered:* scopes as a source of roles (rejected: above); a scope per
+server or tool (`mcp:fs:write_file`): exact, but the identity provider
+fills with scopes and every new tool needs one there, so a map from a
+few coarse scopes to ceilings is kept in the gateway's role data;
+approvals lifting a ceiling: the same user would approve what their
+token was narrowed not to do; an audience per server endpoint
+(`/mcp/fs`) as a ceiling: complements this for whole servers and may
+follow.
+*Settled with it* (the questions left open by the proposal, as §6.7
+answers them):
+- Lists show only what the roles and the ceiling both allow. Clients step
+  up when a call is refused, not from the list.
+- `default` stays `unlimited` when absent. Narrowing by default remains
+  a choice in the role data, not a later change of the default.
+- The user guide recommends `mcp:read`, `mcp:write`, `mcp:admin` and
+  `mcp:<server>` as scope names; the gateway itself names none.
+
+**D18 — The gateway speaks both eras of MCP, on both sides.**
+*Decision (accepted 2026-10-05, roadmap steps 24 and 25):* the
+gateway serves modern (2026-07-28, stateless) and legacy
+(handshake-based) agents on the same endpoints, chosen per request, and
+starts each server in the era it speaks, translating between them
+(§5.11). Approvals and sign-ins become multi round-trip requests, whose
+`requestState` the gateway seals with AEAD and binds to the principal,
+the call and an expiry. State that was the session's is re-scoped: the
+pseudonym vault to the principal and endpoint, `session` grants are not
+offered, `isolation: session` instances become per principal. The
+server side comes first (step 24): a legacy client cannot use a
+modern-only server, so servers that drop the handshake would become
+unreachable through the gateway, while modern agents fall back to legacy
+today.
+*Rationale:* the specification removes sessions on purpose (SEP-2567:
+their scope differed between clients), so the gateway should not invent
+one for modern agents; its state is per principal already (instances,
+grants, limits), and only the vault and `session` grants were tied to a
+session. MRTR fits the gateway better than the open waiting call: each
+round trip ends before the client's timeout, which progress
+notifications only partly worked around. Sealing `requestState` in the
+gateway, with the server's state inside, keeps a client from replaying
+or altering an approval or a server's state, and from presenting
+another principal's. Translating between eras keeps every combination
+of agent and server working during the specification's deprecation
+window, which a gateway that spoke one era would break for either the
+agents or the servers.
+*Considered:* staying legacy-only (modern agents fall back today; but
+modern-only servers would be lost); the pseudonym vault in
+`requestState` (it spans one call, pseudonyms must stay consistent
+across calls); holding approval calls open for modern clients as today
+(the timeouts remain); a sealing key kept in `state_dir` so retries
+survive a restart (outstanding approvals would survive too, but a key on
+disk is one more secret; a restart only costs a repeated call);
+parking a legacy server's requests during a modern agent's call to turn
+them into an `InputRequiredResult` (rejected 2026-10-05: not worth the
+state; such servers lose elicitation and sampling with modern agents
+until they speak 2026-07-28).
+*Settled with it:* the defaults `http.list_ttl` 60 s and
+`approvals.retry_wait` 25 s; the MCP Apps extension does not pass the
+gateway for now; legacy servers' requests are not parked;
+`isolation: session` gives modern agents one instance per principal.
+Also considered for `isolation: session`: an instance per request
+(isolated, but state is lost between calls, the reason for the
+setting); a header or cookie the gateway issues (named in SEP-2567, but
+no standard client sends it back); separate instances per `clientInfo`
+(self-asserted, and it does not separate two conversations of one
+client); handles the gateway makes on a server's behalf (a
+`<server>__new_context` tool returning an id that later calls carry,
+each id an instance of its own): the only per-conversation isolation for
+modern agents, kept for later (§12), since it means the gateway changes
+servers' tool schemas.
+
+**D19 — Landlock as a second wall around instances.**
+*Decision (accepted 2026-10-08, roadmap step 30):* a server definition
+may restrict its instances with Landlock (`landlock`: trees to read,
+write and execute, `${HOME}` and `${USER}` expanded per instance; TCP
+ports to connect to and bind; `required`). Such an instance starts
+through `mcp-landlock`, which restricts itself to the rules and a fixed
+base (the system's programs and configuration, `/proc`, `/sys`, a few
+devices, the private temporary directories, the unit's credentials),
+scopes signals and abstract unix sockets to the instance (ABI 6), and
+executes the server, which keeps the restriction. What the kernel cannot
+apply is left out and logged, unless `required`, which refuses to start.
+In SELinux, `mcp-landlock` (`mcp_landlock_exec_t`) is an entry point of
+every server domain, which executes its own program from it. The
+shipped definitions restrict `fs` to the user's home, `gateway-docs` to
+the documentation, `exec` to reading the system and its state; a tree
+that expands to `/` (the discovery instance's home) is read, never
+written. Our own programs restrict themselves at startup (stage B):
+each restricts a thread locked to it and executes itself again from
+that thread (`landlock.Self`), so that every thread of the program
+shares one restriction; `mcp-server-fs` to its `--root` trees,
+`mcp-server-exec` to the trees its commands name (the system read,
+their programs executed, the paths in `dir` and `argv` written, or
+read for `read_only` commands), widened by a command file's `landlock`,
+`mcp-http-connector` and `mcp-oauth-helper` to their credentials, the
+CA certificates and the resolver configuration, and TCP to the ports
+of their server or proxy (and 53).
+*Rationale:* the domain and the unit's sandbox work on types and whole
+trees, and home files carry no MCS categories that tell users apart:
+what kept one user's `fs` instance out of another's home was DAC alone.
+Landlock adds the per-instance tree, binds root too, follows the real
+hierarchy (a link leads nowhere else), and stacks with SELinux (both
+must allow). On the 6.12 kernels of SLES 16 and Leap 16 (ABI 6) it
+covers file access, TCP and scoping, without audit records of denials.
+A launcher in front of the command is the only way to apply it to
+servers the gateway does not write; restricting before the exec, on the
+thread that executes, is the only way to apply it to a multi-threaded
+Go launcher, and for our own programs, executing themselves again: the
+6.12 kernels restrict one thread at a time, and with scoping, threads
+of one process left in different domains may be refused the signals
+the Go runtime sends between them. A command
+file widening the derived trees keeps an administrator able to run
+what the derivation cannot foresee, within the definition's ruleset.
+`profile` drafts a definition's trees by sampling, every 50 ms, what
+the instance's processes (its unit's cgroup) have open: file
+descriptors with their mode, working directories and mapped files,
+with the paths of the run's SELinux denials; files open only between
+two samples are missed, which `--verify` under the drafted ruleset
+shows. Sampling needs nothing of the kernel or the server; fanotify
+would see every open but takes a mount mark and CAP_SYS_ADMIN over the
+whole system for the run, ptrace slows the server and stops at its
+setuid helpers, and audit watch rules need every path in advance. Best effort by default keeps definitions working on
+kernels without Landlock, where the doctor warns.
+*Considered:* rules derived from the principal's roles (they change with
+the policy, while a ruleset is fixed for the life of an instance, and
+argument patterns are not trees); systemd's mount-namespace options
+(`InaccessiblePaths`, `TemporaryFileSystem`) per instance (they need the
+paths at unit creation as well, but bind only what a mount namespace
+can hide, and nothing outside systemd); a seccomp-unotify broker
+(heavier, and a broker in the gateway's path); waiting for audit
+records of denials (later kernels; diagnosis without them is stage D).
+
+## 10. Repository layout
+
+```
+cmd/
+  mcp-gateway/            # daemon
+  mcp-gateway-admin/      # doctor, the server gateway-admin; runs mcp-gateway-tools
+  mcp-gateway-tools/      # inspect, profile, review (package mcp-gateway-tools)
+  mcp-connect/            # stdio ↔ unix-socket shim
+  mcp-http-connector/     # instances of servers defined with url (D15)
+  mcp-oauth-helper/       # the requests of principals' sign-ins (D16)
+  mcp-landlock/           # starts instances of definitions with landlock (D19)
+internal/
+  transport/              # unix, http (streamable), shim protocol
+  authn/                  # peercred/peersec, OAuth resource server
+  principal/
+  router/                 # MCP session, namespacing, filtering
+  pep/                    # OPA client, decision application, obligations
+  pseudo/                 # pseudonymization: detectors, per-session vault
+  broker/                 # approvals, grants store, elicitation
+  contract/               # JSON field lists of the stable interfaces (D10)
+  metrics/                # counters and histograms, Prometheus text format
+  doctor/                 # mcp-gateway-admin doctor: checks of an installation
+  inspect/                # mcp-gateway-admin inspect: server inventory, draft roles, role check
+  profile/                # mcp-gateway-admin profile: permissive run, denials, drafted module
+  review/                 # mcp-gateway-admin review: source scan for what a server does to the system
+  supervisor/             # systemd transient units, instance pool, MCS allocator
+  landlock/               # Landlock rulesets: ABI, restricting a thread before exec, a program itself (D19)
+  egress/                 # HTTP clients of the connector and the helper: -resolve, proxy
+  oauth/                  # OAuth 2.1 client side: metadata, PKCE, the helper's steps
+  signin/                 # principals' sign-ins, token store, tokens for instances (D16)
+  audit/
+  config/
+policy/                   # default Rego bundle + tests
+selinux/                  # mcp_gateway.te / .fc / .if
+systemd/                  # mcp-gateway.service, mcp-gateway.socket, mcp-opa.service
+packaging/                # OBS/RPM (suse/), sysusers, polkit, file server definition
+profiles/                 # server setups (mcp-gateway-profile-*)
+test/compat/              # previous minor release's configuration (D10)
+docs/
+```
+
+## 11. Roadmap
+
+1. **Design doc** (this document).
+2. **Skeleton:** Go module, layout above, Makefile, CI (build, `go test`,
+   `opa test`), placeholder SELinux module and systemd units.
+3. **PoC** (done; `examples/dev` runs the gateway from a checkout):
+   - unix-socket transport + `mcp-connect`;
+   - protocol router for one backend (no aggregation yet);
+   - OPA sidecar with the example policy; `allow`/`deny`/`ask`;
+   - `form`-mode elicitation for `ask`;
+   - one backend spawned via systemd in its own SELinux domain (the
+     confined path is implemented but not yet exercised on a real host;
+     the end-to-end test uses the unconfined `exec` supervisor);
+   - pulled forward from step 4: `tools/list` filtering, audit records.
+4. **Aggregation** (done): aggregated endpoint with namespacing; policy
+   and filtering for resources, resource templates, prompts, completions
+   and backend requests; instances shared by a principal's sessions with
+   idle timeout; cancellation and progress mapping.
+5. **Remote access** (done): Streamable HTTP transport and OAuth resource
+   server (JWT/JWKS validation, RFC 9728 metadata, local account mapping).
+6. **Approvals** (done): URL-mode and out-of-band approvals, control API,
+   Cockpit approvals page, persistent grants.
+7. **Packaging and hardening** (done, pending tests on a real host):
+   openSUSE/SLES packages via OBS (`packaging/suse`), vendor/admin file
+   layout, tighter systemd sandboxes; MCS allocation and per-session
+   isolation were done with steps 3 and 4.
+8. **Operations** (done): obligations, backend credentials, approver
+   rules, sensitive elicitations; `list_changed` on policy changes; kernel
+   audit, keyed argument digests and correlated OPA decision logs; signed
+   policy bundles; restart backoff; mTLS with certificate-bound tokens;
+   Cockpit tabs for servers, policy and audit.
+9. **Data protection** (done): pseudonymization of results and sampling
+   requests with per-session reversible tokens, policy-controlled
+   re-identification (§6.3.1).
+
+Steps 1–9 made a proof of concept with all designed functions. Running it
+with real MCP servers (systemd, firewalld, snapper, zypp, suseconnect)
+showed where it is not yet a product: every server needed SELinux rules,
+polkit rules or sandbox settings worked out by hand, the packages broke
+on SLES 16 although CI (Tumbleweed only) was green, and agents differ in
+how they use sessions. Steps 10–15 lead to a 1.0 for SLES 16 and Leap 16.
+
+10. **Server profiles, tested on the target distributions:**
+    - setup packages `mcp-gateway-profile-<name>` (installing one
+      enables the server) for systemd-mcp (openSUSE/systemd-mcp),
+      firewalld-mcp (janvhs/firewalld-mcp), mcp-server-zypp,
+      suseconnect-mcp (SUSE/connect-ng) and mcp-server-snapper
+      (aschnell/mcp-server-snapper): server definition with sandbox
+      settings, account and polkit rule where needed, and shipped roles
+      (`data.mcp.profiles`, §6.4) to bind users to; the SELinux domains
+      in `mcp-gateway-selinux` (done);
+    - privileged backends (§5.7.1, D9) for package installation with
+      mcp-server-zypp, with a VM test that installs and removes a
+      package through the gateway after an approval (done);
+    - what a server cannot do behind a gateway (own interactive polkit
+      checks, unused options, fixed state paths) goes to its upstream
+      as an issue or patch rather than into a workaround here;
+    - the VM test (SELinux enforcing, no denials) runs these servers, not
+      only the file server, and reads and changes something through each,
+      with an approval;
+    - CI builds the servers from their upstream sources at pinned
+      versions and VM-tests on Leap 16 and Tumbleweed (SLES 16 through
+      the OBS builds; testing it in CI would need a registration code),
+      plus an upgrade test from the previous release.
+11. **Server onboarding:** tools that draft what step 10 worked out by
+    hand for each server. They propose and an administrator decides:
+    who may call what is a policy decision, and what a server says about
+    its tools (MCP tool annotations) is not to be trusted.
+    - `mcp-gateway-admin inspect` starts a server (through its definition and
+      the supervisor, or a bare command) and asks it for its tools,
+      prompts and resource templates. It reports names, argument
+      schemas, annotations and a read/change classification, drafts a
+      server definition and roles (a reader role with the tools the
+      server marks read-only and whose names do not say otherwise, an
+      operator role that adds every other tool with approval), and checks role
+      data against the tools the server really has: a permission that
+      names a missing tool is an error (a shipped systemd role named
+      `list_units`, which systemd-mcp does not have) (done);
+    - `mcp-gateway-admin profile` runs a server in its own domain, permissive
+      for that domain only (a new domain from the template for a server
+      without one), calls its reading tools with arguments from their
+      schemas (others only from a calls file or on request, on a
+      throwaway system) and records the SELinux denials in both
+      directions (D-Bus replies, polkit reading the process); from these
+      it drafts the module, file contexts and definition (domain,
+      network), and reports what allow rules cannot express: helpers
+      that need a transition, capabilities (the account), refused
+      authorizations (polkit), SELINUX_ERR records. `--verify` repeats
+      the calls enforcing and fails on a denial; the VM test profiles
+      firewalld-mcp as an unknown server and verifies the draft (done);
+    - `mcp-gateway-admin review` scans the server's source (Go, Python,
+      JavaScript/TypeScript, C/C++, Rust; for Go only the packages its
+      main package imports) for programs it runs, D-Bus names and polkit
+      actions, paths, network access, root checks and environment
+      variables, with file and line and the SELinux type on the system;
+      with a profiling run's denials it marks what that run did not reach
+      (as `rpm -qdf` in systemd-mcp's `list_log`, found by hand in step
+      10). The CI job that builds the setup servers reviews their sources
+      (done).
+12. **Stable interfaces** (D10):
+    - versioned `gateway.yaml`, server definitions and role data
+      (`version: 1`; other versions are refused with a clear error);
+      deprecated keys are read with a warning at start and with
+      `--check`; CI loads the previous minor release's configuration
+      (`test/compat`) (done);
+    - versioned policy input and decision documents (`version`), and
+      the control API (`/v1`), with their fields fixed by contract
+      tests so that a field cannot be renamed or dropped unnoticed
+      (done).
+13. **Operability:**
+    - `Type=notify` with a systemd watchdog for the gateway: ready once
+      its sockets are up, a status line (sessions, server instances,
+      pending approvals), and watchdog pings only while the locks of the
+      router, the instance pool and the approval broker can be taken, so
+      that a deadlocked gateway is restarted (after the Go runtime wrote
+      every goroutine's stack to the journal on SIGABRT) (done);
+    - metrics (decisions, pending approvals, instance starts and
+      failures, OPA latency) in the Prometheus text format, for root on
+      the control socket (`GET /v1/metrics`) and optionally over plain
+      HTTP (`metrics.listen`, port type `mcp_metrics_port_t`), without
+      names or arguments in labels (done);
+    - a self-check command that finds what had to be debugged by hand:
+      servers that do not start, SELinux denials for a backend, missing
+      polkit rules, role data that does not validate, principals without
+      roles: `mcp-gateway-admin doctor` also checks the services, that OPA
+      decides, and roles naming tools a server does not offer (done).
+14. **Security assurance:**
+    - fuzzing of the JSON-RPC parser, the HTTP transport and the policy
+      input, as Go fuzz targets with security properties (no request
+      without a valid token reaches a session, none reaches another
+      principal's; what policy decides on is what the server reads); CI
+      runs each for a minute. It found that a server decoding arguments
+      case-insensitively could read `{"Path": …}` or a repeated key
+      differently from policy; such requests are refused now (§8)
+      (done);
+    - a review of the threat model (§8), with residual risks per threat
+      (done);
+    - an external review of identity, approvals and the control socket;
+    - decisions on the open items that matter in production: rate-limit
+      counters stay in memory (D11), decisions and grants apply when a
+      call starts while updates of subscribed resources are decided
+      anew (D12), path arguments are constrained as strings and servers
+      confine their own file access (D13, the file server with
+      `os.Root`) (done).
+15. **Client compatibility:** tested and documented behaviour with Kit,
+    Claude Code and other MCP clients (sessions, elicitation, approval
+    timeouts, `list_changed`), in three stages:
+    - client libraries in CI (`test/clients`, `e2e/clients_test.go`): the
+      official TypeScript and Python SDKs and mcp-go (Kit's), over
+      `mcp-connect` and HTTPS, on discovery, calls, both kinds of
+      approval, `list_changed` and cancellation. Found and fixed: calls
+      waiting for approval reported nothing, so clients with request
+      timeouts (the TypeScript SDK: 60 s) gave up before the approval
+      timeout (120 s); they report progress now. Task and experimental
+      capabilities of servers were passed on, though the gateway routes
+      neither; a `server/discover` probe (MCP 2026-07-28) was audited as
+      a denial (done);
+    - Kit, Claude Code and other agents: setup, session behaviour,
+      timeouts, approvals and policy changes per agent, from Kit's source
+      and Claude Code's behaviour against a probe server, in the user
+      guide (chapter 5) (done);
+    - a limit on sessions and instances per principal, decided with what
+      the clients showed (D14) (done).
+16. **A smaller gateway** (0.7): the daemon keeps only what runs the
+    gateway; the tools for administrators move to a program of their
+    own, so that the gateway's entry point, package and SELinux domain
+    carry nothing but the gateway:
+    - `mcp-gateway-admin` with the commands `doctor`, `inspect`,
+      `profile`, `review` and `serve` (the MCP server `gateway-admin`,
+      until now `mcp-gateway admin-server`); `mcp-gateway` keeps running
+      the gateway, `--check`, `--check-policy-data`, `--version` and
+      `help` (done);
+    - its own program type (`mcpsrv_admin_exec_t`, as other servers
+      have): `mcpsrv_admin_t` is entered on it instead of on the
+      gateway's `mcpgw_exec_t`, so that, from 0.8 on, no backend domain
+      has an entry point on the gateway binary (done);
+    - packages: `doctor` and `serve` in `mcp-gateway`, which needs them
+      to check itself and to offer `gateway-admin`; `inspect`, `profile`
+      and `review`, which onboard servers, in `mcp-gateway-tools` (done);
+    - `mcp-gateway inspect` and the others keep working in 0.7: they run
+      `mcp-gateway-admin` with a deprecation warning, as D10 has keys go
+      (changelog "Deprecated"), and go away in 0.8; so does a
+      definition starting `mcp-gateway admin-server`, which gets a
+      warning, and the entry of `mcpsrv_admin_t` on `mcpgw_exec_t` it
+      needs (done);
+    - the program name `mcp-fs-demo`, deprecated in 0.6, goes away: the
+      link, its file context and the warning for definitions naming it
+      (done).
+17. **Cleanup and stream expiry** (0.8):
+    - what 0.7 deprecated goes, as D10 has it: `mcp-gateway inspect`,
+      `profile`, `review`, `doctor` and `admin-server` are unknown
+      commands (status 2, naming `mcp-gateway-admin`), a definition
+      starting `mcp-gateway admin-server` is reported (`--check`, at
+      start, the doctor) as one that cannot start, naming
+      `mcp-gateway-admin serve`, and `mcpsrv_admin_t` loses its
+      entry on `mcpgw_exec_t`: no backend domain has an entry point on
+      the gateway binary (done);
+    - an HTTP stream ends when the token that opened it expires (§12):
+      the gateway closes a session's GET stream and its request streams
+      at the token's `exp`, as it refuses new requests then; a client
+      resumes with a fresh token (`Last-Event-ID`), and a pending call's
+      answer is replayed to it. The expiry is audited
+      (`mcp-token-expired`) and counted (done).
+18. **Live server definitions and what 0.7 showed** (0.9):
+    - the gateway reloads the server definitions when a file in
+      `servers.d` changes (noticed like policy changes, every
+      `policy.watch_interval`) and on `systemctl reload` (SIGHUP), so
+      that a setup package installed or updated with the gateway
+      running takes effect without a restart: new and changed servers
+      start their next instances from the new definition (a session's
+      next call moves it to an instance of the new definition; the old
+      instance runs until no session uses it and no call on it is
+      running; instances of removed servers stop once their calls are
+      answered), and clients get `notifications/tools/list_changed`.
+      A reload never stops or crashes the gateway: the new definitions
+      are loaded and validated completely before they replace the old
+      ones, and anything that goes wrong (a file that does not parse or
+      validate, a duplicate name, a file removed while it is read, even a
+      panic in the loader) keeps the previous definitions in force,
+      logged at error and reported by the doctor, and the gateway goes on
+      serving; tests feed it such files while sessions run. The change
+      is audited (`mcp-config-reload`); `GET /v1/status` reports a failed
+      reload (`servers_error`). A gateway still ran from definitions
+      it loaded before an update otherwise, as seen on a 0.7.0 system
+      whose setup servers then started in `mcpsrv_generic_t` (done);
+    - the doctor checks the labels of every program the gateway's and the
+      setups' SELinux modules give a type to, not only the servers'
+      commands: a helper the server starts (zypp's `zypp-mcp-tool`,
+      `rpm_exec_t`) labeled `bin_t` runs in the wrong domain too (done);
+    - approval mail reaches the users whose primary group an approver
+      group is, which NSS does not list as members (done).
+19. **The rest of the configuration live, and what a reload leaves
+    behind** (0.10):
+    - `gateway.yaml` is reloaded like the server definitions (when the
+      file changes, and on `systemctl reload`): keys that can change
+      without ending sessions take effect at once (`approval_timeout`,
+      `approvals.url_template` and `progress_interval`,
+      `notifications.email`, `limits`, `supervisor.idle_timeout`,
+      `policy.timeout` and `watch_interval`), and the TLS certificate
+      and key of `http` and the SMTP password are read anew, so that a
+      renewed certificate needs no restart. Keys bound to what the
+      gateway set up at start (sockets and their group, `http.listen`
+      and the identity provider, `metrics.listen`, `state_dir`, the
+      supervisor's mode, SELinux and MCS range, the servers
+      directories) keep their running values: the gateway logs them,
+      `GET /v1/status` lists them (`restart_needed`) and the doctor
+      warns until a restart. The same rules as for server definitions
+      hold: the whole file is validated before anything changes, a file
+      that does not load (or a panic) keeps the configuration in force,
+      is logged at error, audited (`mcp-config-reload`) and reported
+      (`config_error`), and the gateway goes on serving. A renewed
+      certificate or password file counts as a change of the
+      configuration (done);
+    - instances that run from a previous server definition (step 18)
+      show as such: `GET /v1/servers` marks them (`definition:
+      "previous"`), Cockpit's Servers tab shows them apart and
+      shows a failed reload or a pending restart, with the error, and
+      offers to reload the configuration (administrative access,
+      `systemctl reload`); a removed server is listed while instances of
+      it run (`removed`) (done);
+    - HTTP streams: a server's notification or request that belongs to
+      a client request (progress, logging during the call, elicitation,
+      sampling) goes to that request's stream, not to the most recently
+      opened one (§12); what belongs to no request goes to the GET
+      stream. A backend's request or log message belongs to a client
+      request when the session has exactly one call in flight on that
+      backend: JSON-RPC does not say which call a backend means (done).
+20. **Changes at once, a doctor that names what to do, and MCP servers
+    that speak HTTP** (0.11):
+    - changes to `gateway.yaml`, `servers.d`, the TLS certificate and
+      key and the SMTP password file are noticed when they are written
+      (inotify on the files and their directories, which also catches a
+      file replaced by rename, as certbot and editors do), not within
+      `policy.watch_interval`; a burst of writes is reloaded once, after
+      the last. Polling stays as the fallback (a file system without
+      inotify, a watch that could not be set) and keeps its interval
+      (done);
+    - the doctor warns only about what an administrator can change, and
+      each warning names the change; a check that cannot tell whether
+      something is wrong (as `polkit` for a server that may not use
+      polkit at all) reports OK with a note, or nothing. Every WARN is
+      gone through against this rule and the cases are tested. Its
+      output is stable for monitoring: the exit status stays 1 for a
+      failure and 0 otherwise, `--strict` exits 3 when there are
+      warnings, and `--json` gives each result a stable `check` id and
+      `status`, documented in the reference; Cockpit's
+      Servers tab shows the doctor's summary with a link to the details
+      (done);
+    - approval mail reaches the users whose primary group an approver
+      group is also where the user database does not enumerate (SSSD,
+      LDAP without `enumerate = true`, §12): besides `getent passwd`,
+      the gateway looks at the local principals it has seen (kept in
+      `state_dir` by name, their primary group read with `getent passwd
+      NAME`, which needs no enumeration). The doctor warns about an approver group in
+      which neither finds anyone, naming `user:` approvers as the way
+      out (done);
+    - MCP servers that speak Streamable HTTP, on the host or elsewhere,
+      go through the same pipeline as stdio servers (policy, approvals,
+      obligations, audit, limits): a definition gives `url` instead of
+      `command`. The gateway's domain gets no outbound network: each
+      principal's instance of such a server is a connector
+      (`mcp-http-connector`, in its own domain `mcpsrv_http_t`), started
+      by systemd like other instances, which speaks stdio to the gateway
+      and HTTP to the server, with the instance's network limited to the
+      server's address (`IPAddressAllow`, resolved at start). Headers
+      (an API key, a bearer token) come from `credentials`, per server;
+      the server's notifications, requests (elicitation, sampling) and
+      its own session and stream resumption are relayed as for stdio
+      servers. `mcp-gateway-admin inspect`, `profile` and the doctor
+      handle such servers; a VM test runs one. Signing in to the server
+      for each principal (OAuth to the upstream) is not part of 0.11
+      (§12) (done);
+21. **Policy at once, releases that check themselves, and HTTP servers
+    behind proxies and per-user sign-in** (0.12):
+    - the Release workflow refuses a tag that does not match what it
+      releases: the spec's `Version` and the first CHANGELOG heading
+      must name the tag's version, and the tarball must equal `git
+      archive` of the tag; a mismatch fails the run before anything is
+      published, naming the file to fix (0.10.1 shipped a spec saying
+      0.10.0); `tools/check-release` runs the same check before tagging,
+      and the published files are downloaded again and verified (done);
+    - policy changes are noticed when written: with local policy (the
+      directories OPA runs with `--watch`, and the role data), the
+      gateway watches them with inotify as it does its configuration
+      (step 20) and checks OPA's fingerprint right after a change
+      settles, so agents are told to list their tools again at once.
+      Bundles from a bundle server keep being polled every
+      `policy.watch_interval` (§12) (done);
+    - a server defined with `url` may name a proxy (`proxy:
+      http://host:port`, credentials for it from `credentials`): the
+      connector tunnels through it (`CONNECT`; TLS still ends at the
+      server, whose certificate it verifies), and the instance may then
+      reach the proxy's addresses only. No proxy is taken from the
+      environment (§5.7.2) (done);
+    - signing in to a server defined with `url` for each principal
+      (OAuth 2.1 with PKCE, as the MCP authorization specification
+      describes): the server's protected resource metadata names its
+      authorization server; a principal's first call asks them to sign
+      in through a URL elicitation (the approval page, or the client's
+      own URL handling), the callback comes to the gateway's HTTP
+      listener, and the tokens are kept per principal and server in
+      `state_dir`, encrypted with a key only the gateway reads. The
+      gateway makes no outbound connection for it either: the code
+      exchange and refreshes go through a confined helper that reaches
+      only the authorization server, and the access token reaches the
+      principal's connector instance as a credential, never a command
+      line (§5.7.3, decision D16). A principal
+      can sign out (Cockpit, control API), and an administrator can
+      revoke a principal's tokens; the audit trail records sign-ins,
+      refreshes and revocations, never tokens (done).
+
+22. **Sign-in that lasts, for every client, and releases without
+    stray files** (0.13):
+    - a signed-in principal's instance outlives its access token: a
+      connector whose server answers `401` asks the gateway for a new
+      token over its stdio (`mcp-gateway/token`, a request only the
+      gateway answers; never passed to a client, never on a command
+      line), sends the request again with it, and exits (status 77)
+      only when the gateway has none (the principal must sign in
+      again). Instances no longer get `RuntimeMaxSec=` from the token's
+      expiry, so the principal's session with the server, and its
+      resumable streams, stay (§5.7.3, decision D16 amended, §12)
+      (done);
+    - signing in works with clients without URL elicitation: the call's
+      error, and the `notifications/message`, carry a short link to the
+      gateway's HTTP listener (`<origin>/oauth/start/<id>`, valid while
+      the sign-in waits, `sign_in.timeout`; the callback uses it up)
+      that leads to the authorization server, so the agent can show it
+      and any principal, remote ones without a local account included,
+      can sign in without the Cockpit page. The page after the callback
+      names the principal and server it signed in for (§12) (done);
+    - tokens do not outlive their server's definition: when a definition
+      with `sign_in` is removed, loses `sign_in`, or changes its `url`
+      (tokens are bound to it, RFC 8707), the gateway revokes the
+      tokens at the authorization server where it offers revocation
+      (through the helper, with the previous definition) and deletes
+      them, auditing each as a sign-out by the gateway. Today they stay
+      in the token store. `DELETE /v1/sign-ins/{server}` and Cockpit
+      report whether the tokens were revoked at the authorization
+      server or only deleted (done);
+    - nothing but sources reaches a release: CI, `tools/check-release`
+      and the Release workflow refuse a tree holding a program (an ELF
+      file or any file with NUL bytes) or a file of more than 1 MiB,
+      naming each (0.12.0 and 0.12.1 shipped two programs built in the
+      top directory, 27 MB) (done);
+    - the doctor tells systemd-mcp versions apart: it warns about a
+      missing `com.suse.gatekeeper.readlog` rule only when the server
+      reports a version before 0.3.5 (or none) at the doctor's probe,
+      and with 0.3.5 or later notes that the rule is no longer needed,
+      so that the systemd setup can drop it once its package requires
+      systemd-mcp 0.3.5 (done);
+    - remote access is set up and checked in one command:
+      `mcp-gateway-admin setup http` fills in the `http` block of
+      `gateway.yaml` from the public URL and the issuer (keeping the
+      other keys and the comments; the new file must load before it
+      replaces the old one), and checks the chain end to end, each
+      failure saying what to do: the identity provider's discovery
+      document and keys as the gateway fetches them (the issuer exactly
+      as tokens carry it, a CA the system trusts, PKCE S256), the
+      certificate and the firewall as the doctor checks them, the SELinux
+      labels of the listener's port and of the identity provider's port,
+      the listener as a client reaches it, and an access token as the
+      gateway takes it: the principal and groups it makes, or why it is
+      refused (audience, issuer, expiry, scope). The gateway's domain
+      also reaches the identity provider on `http_cache_port_t` (8080,
+      Keycloak's default), where it could not fetch the keys before.
+
+23. **Scopes that narrow** (0.15, §6.7, D17):
+    - token scopes as a ceiling (§6.7, decision D17, accepted): the
+      token's scopes in the policy input; an optional `scopes` map in the
+      role data from scopes to ceilings (roles, permissions, or
+      unlimited; a `default` for tokens without a named scope); requests
+      outside the ceiling denied without approval and hidden from lists,
+      with an `insufficient_scope` challenge over HTTP for clients to
+      step up; checks in `--check-policy-data`, the ceiling in `setup
+      http --token`, Cockpit and the audit trail; the user guide with
+      Keycloak client scopes, and with roles assigned in the identity
+      provider through `http.groups_claim` (done);
+    - for agents of MCP 2026-07-28 (§5.11) the same per request: a
+      request outside the ceiling is answered with the `insufficient_scope`
+      challenge (`403`) over HTTP, and a call's tool error on the
+      socket; a ceiling also applies to subscriptions (`resources.subscribe`)
+      and to the requests of a multi round-trip call (done: each round is
+      decided with its token; a resource subscription outside the ceiling
+      is left out of a `subscriptions/listen` stream, as other refused
+      ones are);
+
+24. **Modern MCP servers** (0.14, §5.11, D18):
+    - the server side dual-era over stdio: era probed per definition
+      (`server/discover`, fallback to `initialize`, a server that exits
+      on the probe started again and initialized), requests with
+      `_meta`, `subscriptions/listen` toward servers (list changes,
+      resources clients subscribed to), the log level per request,
+      `UnsupportedProtocolVersionError` handled, `resultType` removed for
+      legacy agents; legacy servers moved to 2025-11-25; `inspect` and
+      the doctor probe the same way (done);
+    - the connector modern: era by a modern request's `400`, the required
+      headers (`Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`), no session
+      (done);
+    - the agent's capabilities in requests as policy allows (done);
+    - servers' `InputRequiredResult` passed to legacy agents as requests
+      over their session and retried at the server (§5.11.4), with policy
+      on each input request (done);
+    - the sign-in: `iss` validated (RFC 9207), `application_type`
+      in dynamic registration (done);
+    - tests against modern servers built with the SDKs that speak
+      2026-07-28, stdio and HTTP (done: `test/servers`,
+      `e2e/servers_test.go`, Go, Python and TypeScript SDKs).
+
+25. **Modern MCP agents** (0.14, §5.11, D18):
+    - requests served statelessly beside legacy sessions: headers checked
+      against the body, `server/discover`, per-request capabilities and
+      log level, `ttlMs` and `cacheScope` on lists and reads, error codes
+      per era (done);
+    - `subscriptions/listen` (done);
+    - approvals and sign-ins as multi round-trip requests with a sealed
+      `requestState`; waiting rounds bounded by `approvals.retry_wait`;
+      a modern server's input requests passed on to modern agents
+      (done);
+    - session state re-scoped (pseudonym vault per principal and
+      endpoint, limits on requests and streams per principal) (done);
+    - legacy servers' requests during a modern agent's call refused and
+      audited (§5.11.4) (done);
+    - the client suite with the modern SDKs (Python `mcp` 2.3, mcp-go
+      1.1, the TypeScript SDK 2.3's `@modelcontextprotocol/client`)
+      over the socket and HTTPS, and serving modern agents switched on
+      (done).
+
+26. **Kit's approvals as long as before** (0.15, backported to 0.14.1;
+    a regression of 0.14):
+    - the problem: since 0.14, mcp-go 1.1 (Kit 0.121) speaks MCP
+      2026-07-28 with the gateway. It gives up on a call after three
+      answers in a row that ask for nothing (`maxLoadSheddingRoundTrips`,
+      a constant), so an approval out of band or on the page ends for
+      Kit after about three rounds of `approvals.retry_wait` (75 s).
+      Before 0.14 the call waited up to `approval_timeout`. Kit declares
+      neither elicitation nor roots, so the gateway cannot ask it for
+      something that resets the count;
+    - in the gateway: `agents.max_version` caps the MCP version per
+      client name (`clientInfo`), shipped with `kit: "2025-11-25"`
+      (§5.11, "Version per client"). Kit falls back to the handshake
+      and waits up to `approval_timeout` again, with a session. The
+      name is self-asserted; it chooses the protocol, never what is
+      allowed (§5.2). Reloadable; `{}` caps no client (done);
+    - the client suite checks it: the TypeScript SDK 2.3, the Python
+      SDK 2.3 and mcp-go 1.1, named as a capped client, fall back to
+      2025-11-25, and an approval out of band longer than their request
+      timeout is one call (done);
+    - in the gateway, for clients that speak 2026-07-28 (the cap
+      removed): `agents.no_request_timeout` names clients without a
+      request timeout of their own, shipped with `[kit]`; a round of an
+      approval or a sign-in waits for them until it is decided (up to
+      `approval_timeout`, `sign_in.timeout`) instead of
+      `approvals.retry_wait`, so mcp-go never sees three rounds that
+      ask for nothing (done);
+    - upstream, later: a change to mcp-go that treats an answer without
+      input requests as "retry later" with a backoff and a bound on
+      rounds, as the Python and TypeScript SDKs do. Then the shipped
+      cap and list can go;
+    - considered: offering tasks to clients that declare them (Kit
+      does), so that an approval becomes a task the client polls (more
+      general, but tasks would need policy and obligations on their
+      results, which the gateway does not offer yet).
+
+27. **Documentation that costs fewer tokens** (0.16; done):
+    - the problem: agents read the gateway's documentation through the
+      `gateway-docs` server (`mcp-server-fs --read-only` on the docs
+      directory). Its only search, `search_files`, matches file names,
+      and `read_text_file` returns a whole file or its first or last
+      lines. So an answer costs the index (about 2k tokens) and a whole
+      chapter (6k to 12k), or `architecture.md` (about 41k), or the
+      changelog (about 23k), most of it beside the question;
+    - text search in `mcp-server-fs`: a tool `search_text` (read-only,
+      every `fs` server) returning the lines below a path that contain a
+      text or match a regular expression (`regexp: true`; RE2, so no
+      backtracking), case-insensitive by default, with the file, the
+      line number and a few lines of context (`context`, default 2),
+      capped by count (`maxResults`, default 50) and by `--max-read`,
+      with `truncated` when there are more. It skips binary files and,
+      as `search_files` does, btrfs `.snapshots` directories and
+      `excludePatterns`; its `path` argument is the other tools', so
+      `args` conditions and `arg_constraints` on `path` apply to it;
+    - line ranges in `read_text_file`: `offset` (the first line, from 1)
+      and `limit` (how many lines) beside `head` and `tail`, so that an
+      agent reads the section around a match; the result says which
+      lines it holds and how many the file has;
+    - the `gateway-docs` server's instructions: search first
+      (`search_text`), then read the lines around a match
+      (`read_text_file` with `offset` and `limit`); read
+      `architecture.md` and `CHANGELOG.md` by section, never whole;
+      `README.md` still names the file for a question and the error
+      messages;
+    - policy: the tool is new, so a role must allow it. The shipped
+      role `gateway-docs-reader` allows every tool of the server; the
+      shipped role data's `developer` gets `search_text` beside
+      `search_files` (an installed `rbac/data.json` is kept on update:
+      the CHANGELOG says to add it). It is not named `read_*`: roles
+      written for reading do not gain it unnoticed;
+    - tests: the tool's unit tests (literal and regular expression,
+      case, context at file edges, caps, binary files, symbolic links
+      out of the root refused as for the other tools); `read_text_file`
+      ranges; the client suite reads the docs as an agent would (search,
+      then the range), and a test that the instructions name only tools
+      the server has.
+
+28. **An outline of the documentation** (0.16; done):
+    - the problem: search (step 27) finds a precise term (a setting, an
+      error message, "D17"), but a broad question ("how do approvals
+      work for modern agents?") has no such term, matches in many
+      places, and an agent falls back to reading a whole chapter or
+      `architecture.md`;
+    - a tool `outline_file` in `mcp-server-fs` (read-only, every `fs`
+      server): the ATX headings of a file (`#` to `######`) with their
+      line numbers and the lines and bytes of each section, to the next
+      heading of the same or a higher level; `maxLevel` leaves out
+      deeper headings (their lines stay in their parent's section).
+      Lines in fenced code blocks (backticks or tildes) are not
+      headings: the docs have `# /etc/…` comments in examples. Setext
+      headings (a line underlined with `=` or `-`) are not recognised,
+      as a line of dashes is as often a rule. The file is read as a
+      stream, so its size is not bounded by `--max-read`; the outline
+      is small (about 3 KB for `architecture.md`, 5 KB for the changelog);
+    - chosen over outlines generated into the docs at build time: always
+      current, works for any Markdown file of any `fs` server, and no
+      build step or check that line numbers are current;
+    - the `gateway-docs` instructions: for a broad question, read the
+      outline, then the one section (`read_text_file` with `offset` and
+      `limit` from the outline);
+    - policy: a new tool, as `search_text`: `gateway-docs-reader` and
+      `viewer` allow every tool of `gateway-docs`; the shipped role
+      data's `developer` gets `outline_file` for `fs`. Not named
+      `read_*`, for the reason given in step 27;
+    - limits: the roadmap and decisions sections keep their items as
+      list entries, not headings, so the outline does not split them
+      (about 34 KB and 22 KB); search covers those ("step 26", "D17");
+    - tests: headings and section extents, fenced code (backticks and
+      tildes, a fence of the other kind inside one), `#tag` and indented
+      code not headings, `maxLevel`, files without headings, directories,
+      binary files and links out of the root refused; the section's
+      line range read back with `read_text_file`; an end-to-end test
+      reads the docs through the gateway by outline (outline, then the
+      section).
+
+29. **Tools that tell the agent what it may do** (0.17; done:
+    descriptions and `tool_notes`, denials, `gateway_capabilities`
+    with a pointer in the instructions, §6.3):
+    - the problem: an agent learns what a user may do only by trying.
+      The gateway's instructions are a fixed text (name prefixes, where
+      the gateway's configuration and documentation are); a backend's
+      own instructions reach the agent only in a session for that one
+      server; a tool's description is the server's, which knows nothing
+      of the user's roles; and a denial says "denied by policy" without
+      what the roles allow or what to use instead. Agents probe: `fs`
+      outside the home, the systemd server's `get_file` on `/run`, a
+      relative time where a server wants RFC 3339. The gateway knows the
+      answers per principal, from the role data the policy decides on;
+    - tool descriptions with the principal's limits: in `tools/list`,
+      each tool's description gets one line from the principal's
+      matching permissions: the `args` and `arg_constraints` patterns,
+      in words where they are simple ("only paths under /etc/systemd and
+      /usr/lib/systemd") and as the pattern otherwise, and
+      `require_approval` with its channel ("needs a human approval, in
+      Cockpit or by mail"). Only role data is summarised, not custom
+      Rego, so the line says "according to your roles". The line changes
+      when the roles do; the gateway already sends `list_changed` then;
+    - denials that say why and what instead: a denial names the rule
+      that failed (the argument and the patterns the roles allow, the
+      tool no role grants, the scope missing), and, where the shipped
+      servers are there, where to look instead (the gateway's
+      configuration: `gateway-admin` `show_config`). Custom policy keeps
+      its own `reason`. Only what the principal's own roles allow is
+      named, never other users' roles;
+    - per-principal instructions: the instructions of an aggregated
+      session list the servers the principal sees, one line each (what
+      it reaches, its limits, a short form of the server's own
+      instructions), after the fixed text of today. Within a budget
+      (about 600 tokens; longer server instructions are cut, with a
+      pointer to the capabilities tool), since clients put instructions
+      into every request. (Not done: the instructions only point to the
+      capabilities tool. A per-principal list at connect would have
+      cost each first connect up to the discovery of every server, for
+      what the tool gives on demand);
+    - a capabilities tool: `gateway_capabilities` (offered to every
+      principal, decided by policy like any tool) returns the
+      principal's servers, tools, argument limits and approval rules in
+      full, and the paths and services no visible server reaches. Pulled
+      when the agent is unsure, so it costs nothing until then. (A
+      resource with the same content was left out: every client calls
+      tools, fewer read resources);
+    - notes per tool from the administrator: `tool_notes` in a server
+      definition (`list_log: "from: RFC 3339, e.g.
+      2026-10-07T11:00:00+02:00; relative times are refused"`), appended
+      to the tool's description and listed by the capabilities tool, for
+      what an upstream server's schema does not say. Reloadable like the
+      rest of the definition; `check_config` warns on a note for a tool
+      the server does not have;
+    - what it does not change: the policy still decides every call; the
+      text is advice to the agent, derived from the same data, never
+      trusted back. A principal learns only its own limits, which it can
+      find out by trying anyway;
+    - tests: the description line for `args`, `arg_constraints` and
+      approvals (and none without a matching permission); denial texts
+      for each failing rule; the instructions within budget and per
+      principal; the capabilities tool against the role data;
+      `tool_notes` in descriptions and in `check_config`; e2e: an agent
+      that reads a limit from the description does not make the call
+      that would be denied.
+
+30. **Landlock as a second wall** (0.18, D19; stage A done: the
+    launcher, `landlock`, the rulesets of the shipped `fs`,
+    `gateway-docs` and `exec`, the doctor's check; stage B done: `fs`,
+    `exec`, the connector and the sign-in helper restrict themselves,
+    `exec` to the trees its commands name, widened by a command file's
+    `landlock`; stage C done: `inspect` with a command or `--exec` runs
+    the server under Landlock, `--home`, `--network`, `--allow`;
+    `profile` runs through systemd and `review` runs no server; stage D
+    done: the doctor and Cockpit name the ruleset as the likely cause,
+    `profile` drafts the trees from what the instance had open; the
+    setups' rulesets done: `systemd`, `firewalld`, the unprivileged
+    `zypp`; snapper, the privileged zypp and suseconnect have none):
+    - the problem: an instance's isolation works on types and whole
+      trees. Its SELinux domain allows a type (`mcpsrv_fs_t` reads any
+      `user_home_t`; home files carry no MCS categories that tell users
+      apart), its unit's sandbox shows whole trees (`ProtectHome=read-write`
+      shows all of `/home`), and what keeps alice's `fs` instance out of
+      `/home/bob` is DAC alone: a world-readable file in bob's home, or a
+      group set too wide, is readable through the gateway. The policy
+      checks path arguments as strings (D13, §8); a server that follows a
+      link without confining itself leaves the allowed tree within what
+      its account and domain allow. And the tools that run servers
+      without systemd (`inspect`, `profile` and `review` with a command or
+      `--exec`, the supervisor's `exec` mode) have no sandbox at all;
+    - Landlock (in the kernels of SLES 16, Leap 16 and Tumbleweed) lets a
+      process restrict itself and its children to file hierarchies, for
+      good: unprivileged, stacked with SELinux (both must allow), binding
+      root too (capabilities do not bypass it), following the real
+      hierarchy rather than path strings. It is a second wall, not a
+      replacement: no labels, no D-Bus or other IPC, TCP ports but no
+      addresses, per process and not per call;
+    - first, the facts. On a 16.1 system (kernel 6.12.0-160100.7) the
+      LSM list is `lockdown,capability,landlock,yama,selinux,bpf,ima,evm`
+      (Landlock active, stacked with SELinux: each must allow) and the
+      Landlock ABI is 6: file access (ABI 1 to 3, 5: refer, truncate,
+      device ioctls), TCP bind and connect (4), and scoping of signals and
+      abstract unix sockets (6); no audit records of denials, which later
+      kernels add. The VM tests record the same for Leap 16 and
+      Tumbleweed (`/sys/kernel/security/lsm`, the ABI from
+      `landlock_create_ruleset` with `LANDLOCK_CREATE_RULESET_VERSION`);
+      a decision (D19) records the design;
+    - stage A, a launcher: `mcp-landlock` (in `/usr/libexec/mcp-gateway`)
+      applies a ruleset and executes the server; the supervisor puts it
+      in front of the command of every instance with a ruleset. The
+      definition gets `landlock` (`read`, `write`, `exec`: lists of
+      trees, `${HOME}` and `${USER}` expanded per instance as in
+      `command`; `tcp_connect`: ports), and every instance is scoped
+      (signals, abstract unix sockets) whether or not it has rules.
+      Rulesets for the shipped definitions: `fs` the user's home
+      (read-write) and the system trees it needs to run (read, exec);
+      `gateway-docs` the documentation (read); `exec` the system trees
+      (read, exec), as its instructions already say; the setup packages'
+      servers the trees they work on (the systemd profile: `/etc/systemd`,
+      `/usr/lib/systemd`, the journal, `/run/systemd`; zypp's privileged
+      variant what an installation writes). Best effort by ABI: on a
+      kernel without Landlock, or without a right a ruleset names, the
+      instance starts with what the kernel has and the doctor says so;
+      `landlock: {required: true}` refuses to start instead. The rules
+      cannot be relaxed while an instance runs: a changed definition gets
+      new instances, as today (step 18);
+    - stage B, our own programs restrict themselves at startup, without
+      configuration: `mcp-server-fs` to its `--root` trees (beyond
+      `os.Root`), `mcp-server-exec` to the trees its commands name,
+      `mcp-http-connector` and `mcp-oauth-helper` to their credentials
+      and nothing else of the file system, the connector's TCP to the
+      ports of its URL and proxy. This also holds in the supervisor's
+      `exec` mode and under `inspect`;
+    - stage C, the commands that run untrusted servers without systemd
+      (`inspect`, `profile`, `review` with a command or `--exec`) run
+      them under Landlock: the system read-only, a private writable
+      temporary directory, the caller's home only with `--home`, no TCP
+      unless `--network`. "Without sandbox" becomes "without systemd and
+      SELinux, under Landlock";
+    - stage D, diagnosis: without audit records a denial is an `EACCES`
+      the server reports in its own words. The doctor reports the kernel's
+      Landlock ABI, whether `landlock` is in the LSM list, and per server
+      whether its instances run with a ruleset and which rights the kernel
+      left out; for a server failing with "permission denied" and no
+      SELinux denial, the doctor and Cockpit name the ruleset as a
+      likely cause. `profile` drafts `landlock` trees from the files a
+      server opens in its test run, as it drafts SELinux rules from AVC
+      denials (by sampling what its processes have open, D19);
+    - not in this step: rules from the principal's roles (the permitted
+      paths of a server per principal): they change with the policy,
+      while a ruleset is fixed for the life of an instance, and argument
+      patterns are regular expressions, not trees; Landlock for the
+      gateway daemon and OPA, whose file access is broad and already
+      confined by their domains; network rules where `IPAddressAllow`
+      already bounds addresses;
+    - §8 (threat model): the residual risks of "path arguments leaving an
+      allowed tree" and "cross-tenant data leakage" narrow to what the
+      instance's ruleset allows;
+    - tests: the launcher (rulesets, `${HOME}` expansion, best effort and
+      `required` on a kernel lacking a right, scoping); in the VMs, alice's
+      `fs` instance cannot read a world-readable file in bob's home (it
+      could before), cannot follow a link out of her home, cannot signal
+      another instance; the systemd server reads outside its trees no
+      more; `inspect --exec` of a server that writes to `$HOME` fails
+      under Landlock; the doctor's report on both distributions.
+
+## 12. Open items
+
+- Per-conversation state for modern agents (D18): servers marked
+  `isolation: session` get one instance per principal from modern
+  agents. If stateful servers that do not move to handles matter in
+  practice (a browser server, for example), the gateway could make the
+  handles itself: a `<server>__new_context` tool returning an id bound to
+  the principal and expiring when idle, an optional `context` argument on
+  the server's tools, each id an instance of its own, with policy over
+  both.
+
+- HTTP streams: a backend's request or log message while a session has
+  several calls in flight on that backend cannot be told apart and goes
+  where messages of no request go (the GET stream, else the most recent
+  request stream). Clients treat all streams as one session, so this is
+  harmless, but not precise. Replay is bounded (256 events per stream)
+  and lives in memory: a gateway restart ends all HTTP sessions anyway.
+  With modern agents (§5.11) this goes away: what a server needs from
+  the client travels with its call (MRTR); it remains for legacy
+  sessions.
+- Approval mail finds the users whose primary group an approver group is
+  by enumerating users (`getent passwd`) and among the local users who
+  used the gateway or Cockpit's pages; with SSSD or LDAP that do not
+  enumerate, one who never did is not found until then (the doctor warns
+  about a group in which it finds nobody): name such approvers as
+  `user:`.
+- Exact JSON-RPC error codes for policy denials (align with any future
+  MCP-spec guidance).
+- Policy changes are noticed by polling (up to `policy.watch_interval`
+  late); OPA has no change notification over its REST API. Local policy
+  is watched with inotify from step 21; bundles from a bundle server
+  stay polled.
+- The kernel audit subsystem is optional (`audit.kernel: auto`); in
+  containers without `CAP_AUDIT_WRITE` only the journal records remain.
+- Servers with `sign_in` (§5.7.3): from step 22 a running instance gets
+  a new access token when its server refuses one, so the first request
+  after a token expired waits for a refresh (about a second); a server
+  that drops its streams at expiry instead of answering `401` would cut
+  them. Sign-in
+  needs the HTTP listener, reachable from the principals' browsers; a
+  gateway serving local clients only cannot offer it. A client without
+  URL elicitation gets the link in the call's error (step 22), which the
+  agent must show the principal; whoever opens it signs in for them, so
+  the page after the callback names the principal.
+- MCS pairs of stopped containers (their files keep the pair) are not
+  known to the gateway (container storage is readable by root only), so a
+  container started again, or a new one, can take an instance's pair; the
+  two share it for up to 2 s before the instance is replaced (§5.8).
