@@ -14,9 +14,11 @@ fail() {
 	exit 1
 }
 docdir=/tmp/smoke-docs
+src=$(cd "$(dirname "$0")/../.." && pwd)
+confdir=$src/.smoke-collections.d
 cleanup() {
 	rm -f /usr/share/mcp-docs/collections.d/mcp-docs.yaml /etc/mcp-docs/collections.d/broken.yaml
-	rm -rf "$docdir"
+	rm -rf "$docdir" "$confdir"
 }
 cleanup
 trap cleanup EXIT
@@ -35,7 +37,6 @@ grep -q 'no collections' /tmp/smoke.err || fail "without collections: $(cat /tmp
 
 # mcp-docs' documentation as a collection, as a package would ship one;
 # a broken file beside it is logged and left out.
-src=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$docdir"
 cp "$src/README.md" "$src/docs/architecture.md" "$docdir/"
 cat >/usr/share/mcp-docs/collections.d/mcp-docs.yaml <<EOT
@@ -71,5 +72,15 @@ expect '"uri":"docs://mcp-docs/README.md"'
 grep -q 'broken.yaml: root "relative"' /tmp/smoke.err || fail "the broken file was not reported: $(cat /tmp/smoke.err)"
 [ "$(grep -c 'broken.yaml' /tmp/smoke.err)" = 1 ] || fail "reported more than once: $(cat /tmp/smoke.err)"
 grep -q 'serving mcp-docs=' /tmp/smoke.err || fail "no start line: $(cat /tmp/smoke.err)"
+
+# Collection files outside the trees Landlock always allows (/etc, /usr,
+# /tmp): mcp-docs reads them again after restricting itself.
+mkdir -p "$confdir"
+cp /usr/share/mcp-docs/collections.d/mcp-docs.yaml "$confdir/"
+{
+	echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_sections","arguments":{"query":"read only the part you need"}}}'
+	sleep 2
+} | timeout 30 mcp-docs --config-dirs "$confdir" >/tmp/smoke.out 2>/tmp/smoke.err || fail "--config-dirs $confdir: $(cat /tmp/smoke.err)"
+expect 'section(s) for'
 
 echo "smoke-test: mcp-docs $version works ($(grep -o 'Landlock[^;]*$' /tmp/smoke.err || echo 'Landlock: not reported'))"

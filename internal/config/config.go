@@ -46,6 +46,10 @@ type Collection struct {
 	Also []string `yaml:"also"`
 	// Instructions are added to the server's instructions.
 	Instructions string `yaml:"instructions"`
+	// ListItems takes list items and paragraphs that open with a bold
+	// title as sections, for documents that keep steps, decisions or
+	// entries as items under one heading.
+	ListItems bool `yaml:"list_items"`
 
 	// File is the file it was read from.
 	File string `yaml:"-"`

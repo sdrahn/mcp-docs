@@ -283,8 +283,12 @@ func outline(s *Server, ctx context.Context, args json.RawMessage) (*result, err
 		if h.Level > a.MaxLevel || (within >= 0 && !o.Within(i, within)) {
 			continue
 		}
-		line := fmt.Sprintf("%*d  %s %s  #%s  [%d lines, %s]\n", w, h.Line, strings.Repeat("#", h.Level), h.Title,
-			h.ID, h.Lines, size(h.Bytes))
+		item := ""
+		if h.Item {
+			item = " (item)"
+		}
+		line := fmt.Sprintf("%*d  %s %s%s  #%s  [%d lines, %s]\n", w, h.Line, strings.Repeat("#", h.Level), h.Title,
+			item, h.ID, h.Lines, size(h.Bytes))
 		if int64(out.Len()+len(line)) > s.MaxRead-256 {
 			truncated = true
 			break

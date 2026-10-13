@@ -30,8 +30,10 @@ mcp-docs reads a document as a tree of sections:
   (`## 6.6 Policy lifecycle` is `#66-policy-lifecycle`), a line number,
   and a size in lines and bytes.
 - `outline` lists the headings with ids and sizes; `search` gives each
-  match with the section it is in; `read_section` returns one section,
-  and a section larger than one call (32 KiB) in parts.
+  match with the section it is in; `find_sections` ranks sections for a
+  question in words, a section's own title counting most;
+  `read_section` returns one section, and a section larger than one
+  call (32 KiB) in parts.
 - The document's **title** and **description** come from its front
   matter, or else from its first `#` heading and its first paragraph;
   `list_docs` shows them for every document.
@@ -82,10 +84,10 @@ one line under its own heading usually belongs with its neighbours.
 Lists of numbered or bold-titled items (roadmap steps, decisions,
 changelog entries, FAQ entries, error messages with long explanations)
 are often one section to the outline: mcp-gateway's roadmap is a list
-of 30 steps under one `## 11. Roadmap`, 46 KiB that no outline can
-split. An agent looking for one step searches for it and reads the
-lines around the match, which works but costs a guess at how many lines
-the step has.
+of 30 steps under one `## 11. Roadmap`, 46 KiB that an outline of its
+headings cannot split. An agent looking for one step searches for it
+and reads the lines around the match, which works but costs a guess at
+how many lines the step has.
 
 If readers look items up one at a time, give each its heading:
 
@@ -100,6 +102,15 @@ If readers look items up one at a time, give each its heading:
 A changelog does this already with a heading per release. Keep each
 release's notes under its own `## v1.2.0 — 2026-10-08` heading, newest
 first, so that an agent reads the release it was asked about.
+
+Where the documents cannot change (another project's, or a format
+everyone knows), the collection can take such items as sections:
+`list_items: true` in its collection file. Then a top-level list item or
+a paragraph that opens with a bold title over more than one line is a
+section one level below its heading (`30. **Landlock as a second wall**
+…` is `#30-landlock-as-a-second-wall`). Write such entries with the
+title in bold at the start, and a bold label that ends in a colon
+(`**Note:**`) for anything that is not an entry.
 
 ### Close fences, and only use `#` for headings
 
@@ -147,6 +158,11 @@ reading:
 
 Use the words people search for. If users say "timeout" and the
 section is about `approval_timeout`, the heading can say both.
+`find_sections` matches words, not meanings, and a word in a section's
+title counts most: "How approvals expire" ranks first for "how long
+does an approval last" only if the section also says "last", or the
+reader asks how approvals "expire". A sentence near the top of the section that names the
+question in other words ("how long an approval lasts") helps as well.
 
 ### Keep ids unique and stable
 
@@ -287,6 +303,7 @@ the right section. Run it again when the documentation changes.
 - [ ] Items read one at a time (steps, decisions, releases) have headings.
 - [ ] Fences closed; ATX headings only.
 - [ ] Headings say what the section answers, in the readers' words; no duplicate titles.
+- [ ] Entries kept as list items open with a bold title (or get headings).
 - [ ] Explicit `{#id}` on sections other documents link to.
 - [ ] Each section readable alone; links with anchors instead of "above".
 - [ ] Keys, options, paths and error messages written exactly, explained in one place.

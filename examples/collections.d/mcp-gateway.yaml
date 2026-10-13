@@ -12,6 +12,9 @@ index: README.md
 # Which files are documents, relative to root (default: every .md).
 # include: ["**/*.md"]
 exclude: ["user-guide/README.md"]
+# The roadmap's steps and the decisions are list items and bold
+# paragraphs under one heading each: take them as sections.
+list_items: true
 # Single documents elsewhere, named by their base names
 # (mcp-gateway/CHANGELOG.md).
 also: ["/usr/share/doc/packages/mcp-gateway/CHANGELOG.md"]

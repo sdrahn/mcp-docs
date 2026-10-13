@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdrahn/mcp-docs/internal/catalog"
 )
 
 func TestParseCollections(t *testing.T) {
@@ -47,7 +49,7 @@ func TestLoadCollections(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cs, problems, err := loadCollections([]string{dir}, nil, []string{"two=" + b})
+	cs, problems, err := loadCollections([]string{dir}, nil, []string{"two=" + b}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,5 +59,17 @@ func TestLoadCollections(t *testing.T) {
 	}
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "missing.yaml: root") {
 		t.Errorf("problems: %v", problems)
+	}
+}
+
+// The program is executed again under Landlock and reads the collection
+// files there: their directories must be readable, wherever they are.
+func TestLandlockRulesHaveConfigDirs(t *testing.T) {
+	k := &catalog.Collection{Name: "k", Path: "/srv/docs", Also: []string{"/opt/x/CHANGELOG.md"}}
+	r := landlockRules([]*catalog.Collection{k}, []string{"rel/collections.d", "/etc/mcp-docs/collections.d"})
+	wd, _ := os.Getwd()
+	want := []string{"/srv/docs", "/opt/x/CHANGELOG.md", filepath.Join(wd, "rel/collections.d"), "/etc/mcp-docs/collections.d"}
+	if strings.Join(r.Read, " ") != strings.Join(want, " ") || r.Write != nil {
+		t.Errorf("rules %+v, want read %v", r, want)
 	}
 }

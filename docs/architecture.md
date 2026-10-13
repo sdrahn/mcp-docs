@@ -12,8 +12,8 @@ gateway's own documentation (that project's `docs/architecture.md`,
 roadmap steps 27 and 28) into a server for any set of Markdown
 documents.
 
-Status: steps 1 to 3 of the plan (section 11) are implemented; the
-rest is design. Figures in the examples are from mcp-gateway's docs; elided ones
+Status: steps 1 to 5 of the plan (section 11) are implemented; step 6
+is design. Figures in the examples are from mcp-gateway's docs; elided ones
 are marked `…`.
 
 ## 1. The problem
@@ -148,6 +148,7 @@ index: README.md          # read first: which file answers which question
 include: ["**/*.md"]      # default
 exclude: []               # glob patterns
 also: ["/usr/share/doc/packages/mcp-gateway/CHANGELOG.md"]  # single files elsewhere
+list_items: true          # entries under one heading as sections (§5.8)
 instructions: >
   The machine's configuration is not here: the gateway-admin server
   shows it (show_config) and checks it (check_config, doctor).
@@ -298,15 +299,44 @@ without headings. With `version` (from `outline` or `search`) a
 document changed since then is an error that says so, rather than the
 wrong lines.
 
-### 5.6 `find_sections` (later)
+### 5.6 `find_sections`
 
 `find_sections(query, collection?, maxResults?)` — sections ranked for a
 question in words, for the broad question where search finds too much
-or nothing and the right document is not obvious. BM25 over sections
-(heading path weighted above body), built when a collection is first
-searched and kept with the cache; no embeddings, no network, no model.
-Returns ids, heading paths, sizes and the best-matching line of each,
-not text: the agent still chooses what to read.
+or nothing and the right document is not obvious. Returns each
+section's document, id, heading path, size and best-matching line (the
+line with most of the query's words), not text: the agent still
+chooses what to read (`internal/rank`).
+
+- **What is ranked:** each section's own text, from its heading to the
+  next heading of any level, so that a chapter does not outrank its
+  subsections by holding their text; the text before a document's
+  first heading is a unit too, with the document's title.
+- **Score:** BM25 (k1 1.2, b 0.75) over the own text and the titles of
+  the headings above it, plus a bonus for each query word in the
+  section's own title (twice the word's idf). The bonus is outside
+  BM25's length normalisation: a section titled "Instances do not
+  start" ranks above a short one that says "instance" five times, which
+  folding the title into the text did not achieve.
+- **Words:** lowercased, split at anything but letters, digits and `_`;
+  an identifier with `_` counts whole and in its parts
+  (`no_request_timeout`, `request`, `timeout`); a short list of English
+  stopwords; a light stemmer (plurals, `-ing`, `-ed`, a final `e`), so
+  that "instances" meets "instance" and "configuring" "configure".
+- **Index:** per collection, built when first asked and again when a
+  document changes, is added or goes (checked with the cache's versions
+  on each call); documents larger than `--max-file` are left out.
+  Across collections, results are merged by score.
+- **Limits:** it matches words, not meanings: "how long does an
+  approval last" does not find a section about approval scopes that
+  never says "last". Headings in the readers' words are what makes it
+  work (docs/writing-docs.md).
+
+On the evaluation corpus, the 7 questions in words of §10 find their
+section first. Probing with 13 natural questions put the answering
+section first for 11 and second for one ("servers that speak HTTP with
+OAuth sign-in": a related decision first); it missed one whose words the
+documents do not use ("how long does an approval last").
 
 ### 5.7 Compatibility names
 
@@ -315,6 +345,34 @@ their arguments: `outline_file`, `search_text`, `read_text_file`,
 `search_files`, `list_directory`. The `gateway-docs` server and its
 instructions can then move to `mcp-docs` without a change to roles or
 to agents' habits, and move to the new names later.
+
+### 5.8 List items as sections
+
+Documents often keep entries as list items under one heading: steps of
+a roadmap, decisions, FAQ entries. mcp-gateway's roadmap is 30 steps in
+46 KiB under `## 11. Roadmap`; no outline could split it, and an agent
+read 40 lines around a match and hoped the step ended there. With
+`list_items: true` in a collection file (or `--list-items` for the
+collections of the command line), the scanner takes as sections, one
+level below the heading they are under:
+
+- top-level list items that open with a bold title, numbered or not:
+  `30. **Landlock as a second wall** (0.18, D19; …)` is
+  `#30-landlock-as-a-second-wall`;
+- paragraphs that open with a bold title after a blank line:
+  `**D19 — Landlock as a second wall around instances.**`.
+
+Not items: a bold label ending in a colon (`**Note:**`), nested list
+items, anything in code, and items of one line (a list of short bold
+terms is no list of entries; a one-line entry is read with its
+neighbours). Items get their ids after the headings, so that an item
+never changes a heading's id (its anchor, as links have it). The
+outline marks them `(item)`; search, `find_sections` and `read_section`
+treat them as sections; `outline_file` of `--fs-compat` keeps to
+headings, as mcp-server-fs's does.
+
+It is an option because it guesses: a document that uses bold-led
+paragraphs for emphasis gets sections it did not mean.
 
 ## 6. Instructions
 
@@ -454,13 +512,13 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    yet; making it so needs mcp-docs in the distributions the gateway
    is built for, and then a `Requires` of `mcp-gateway-fs-server`.
    Moving the gateway's instructions to the new tool names follows.
-4. **Ranked search**: `find_sections` (BM25 over sections).
-5. **Long list items as sections**: mcp-gateway keeps its roadmap and
-   decisions as list items under one heading (about 34 KB and 22 KB), so
-   the outline cannot split them. An option per collection to treat
-   top-level list items that open with a bold title or a number
-   (`27. **Documentation that costs fewer tokens**`) as pseudo-headings
-   one level below their heading.
+4. **Ranked search** (done): `find_sections` (§5.6), with 7 questions
+   in words in the evaluation.
+5. **Long list items as sections** (done): `list_items` (§5.8). In the
+   evaluation, the decision question costs 1.4 KiB instead of 2.7 (the
+   decision whole instead of 40 lines around the match); the roadmap
+   question 7.1 KiB instead of 3.1, for the whole step instead of a
+   window that cut it short.
 6. **Other formats**: the scanner behind an interface (headings with
    extents, ids, metadata), so that AsciiDoc, reStructuredText or man
    pages can be collections too. Markdown only until there is a need.
@@ -483,8 +541,14 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 - **D6. Collections declared by files in `/usr` and `/etc`**, not
   discovered by walking `/usr/share/doc`: a package says its docs are
   for agents and describes them; nothing is exposed by accident.
-- **D7. No embeddings, no network.** Literal, RE2 and (later) BM25
-  search run anywhere, explain themselves, and need no model or index
-  build step.
+- **D7. No embeddings, no network.** Literal, RE2 and BM25 search run
+  anywhere, explain themselves, and need no model or index build step.
+  The cost is recall for questions in words the documents do not use;
+  headings in the readers' words make up for most of it.
 - **D8. Go, standard library, ported packages.** The same language and
   packaging as mcp-gateway, whose code the core comes from.
+- **D9. Rank a section by its own text, its title as a bonus.** A
+  chapter that holds its subsections' text would outrank them; a title
+  folded into the text loses to length normalisation.
+- **D10. List items as sections by choice, per collection.** The rule
+  guesses at authors' intent; a collection says when it fits.

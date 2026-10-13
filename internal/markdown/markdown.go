@@ -45,10 +45,25 @@ type Heading struct {
 	Line  int    `json:"line"`
 	Lines int    `json:"lines"`
 	Bytes int64  `json:"bytes"`
+	// Item marks a list item or bold-titled paragraph taken as a section
+	// (Options.ListItems), not a heading of the document.
+	Item bool `json:"item,omitempty"`
 	// Parent is the index of the enclosing heading in Outline.Headings,
 	// -1 for none.
 	Parent int `json:"-"`
 	start  int64
+}
+
+// Options change what a scan takes as sections.
+type Options struct {
+	// ListItems takes the items of a section that open with a bold title
+	// as sections one level below it: top-level list items
+	// ("27. **Title** …", "- **Title** …") and paragraphs that open with
+	// one ("**D19 — Title.**"), after a blank line. A bold label ending
+	// in a colon ("**Note:**") is not a title. For documents that keep
+	// steps, decisions or entries as list items under one heading
+	// (docs/architecture.md, §11 step 5).
+	ListItems bool
 }
 
 // End is the section's last line.
@@ -115,12 +130,21 @@ var (
 	anchorTag   = regexp.MustCompile(`(?i)<a\s+(?:[^>]*?\s)?(?:id|name)\s*=\s*["']([^"']+)["'][^>]*>\s*(?:</a>)?`)
 	htmlTag     = regexp.MustCompile(`</?[A-Za-z][^>]*>`)
 	link        = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	// A top-level list item opening with a bold title, numbered or not.
+	listItem = regexp.MustCompile(`^(?:(\d+)[.)]|[-*+])[ \t]+\*\*([^*]+?)\*\*`)
+	// A paragraph opening with a bold title.
+	boldPara = regexp.MustCompile(`^\*\*([^*]+?)\*\*`)
 )
 
 // Scan reads a document from r and returns its outline. ctx ends a long
 // scan.
 func Scan(ctx context.Context, r io.Reader) (*Outline, error) {
-	sc := &scanner{out: &Outline{}, ids: map[string]int{}}
+	return ScanWith(ctx, r, Options{})
+}
+
+// ScanWith is Scan with options.
+func ScanWith(ctx context.Context, r io.Reader, opts Options) (*Outline, error) {
+	sc := &scanner{out: &Outline{}, ids: map[string]int{}, opts: opts, blank: true}
 	br := bufio.NewReader(r)
 	var pending []string // lines of a possible front matter block
 	inFront := false
@@ -162,6 +186,8 @@ func Scan(ctx context.Context, r io.Reader) (*Outline, error) {
 	sc.replay(pending) // an unclosed front matter block is text
 	sc.end(1)
 	sc.endParagraph()
+	sc.dropShortItems()
+	sc.itemIDs()
 	return sc.out, nil
 }
 
@@ -201,6 +227,9 @@ type scanner struct {
 	n      int    // lines read
 	offset int64
 	ids    map[string]int
+	opts   Options
+	// blank: the line before was blank, a heading or the start.
+	blank bool
 	// The first paragraph: its lines so far, and whether it ended.
 	para     []string
 	paraDone bool
@@ -272,6 +301,9 @@ func (sc *scanner) mark() {
 func (sc *scanner) line(line string) {
 	sc.mark()
 	l := strings.TrimRight(line, "\r\n")
+	if sc.fence != "" || codeFence.MatchString(l) {
+		sc.blank = false // code is no blank line before a bold paragraph
+	}
 	switch m := codeFence.FindStringSubmatch(l); {
 	case sc.fence != "":
 		if m != nil && m[1][0] == sc.fence[0] && len(m[1]) >= len(sc.fence) &&
@@ -285,7 +317,12 @@ func (sc *scanner) line(line string) {
 		level, title, id := ParseHeading(l)
 		if level == 0 {
 			sc.paragraph(l)
+			if sc.opts.ListItems {
+				sc.item(l)
+			}
+			sc.blank = strings.TrimSpace(l) == ""
 		} else {
+			sc.blank = true
 			sc.endParagraph()
 			sc.end(level) // the sections it ends close on the line before
 			h := Heading{Level: level, Title: title, Line: sc.n + 1, start: sc.offset, Parent: -1}
@@ -300,6 +337,95 @@ func (sc *scanner) line(line string) {
 	sc.n++
 	sc.offset += int64(len(line))
 	sc.out.Lines, sc.out.Bytes = sc.n, sc.offset
+}
+
+// item opens a section for a list item or paragraph with a bold title,
+// one level below the innermost heading of the document.
+func (sc *scanner) item(l string) {
+	var title string
+	if m := listItem.FindStringSubmatch(l); m != nil {
+		title = strings.TrimSpace(m[2])
+		if m[1] != "" {
+			title = m[1] + ". " + title
+		}
+	} else if m := boldPara.FindStringSubmatch(l); m != nil && sc.blank {
+		title = strings.TrimSpace(m[1])
+	} else {
+		return
+	}
+	title = strings.TrimRight(title, ". ")
+	if len(title) < 3 || strings.HasSuffix(title, ":") {
+		return
+	}
+	parent := -1
+	for i := len(sc.open) - 1; i >= 0; i-- {
+		if !sc.out.Headings[sc.open[i]].Item {
+			parent = sc.open[i]
+			break
+		}
+	}
+	if parent < 0 || sc.out.Headings[parent].Level == 6 {
+		return
+	}
+	level := sc.out.Headings[parent].Level + 1
+	sc.end(level)
+	sc.out.Headings = append(sc.out.Headings, Heading{Level: level, Title: cut(title), Line: sc.n + 1,
+		start: sc.offset, Parent: parent, Item: true})
+	sc.open = append(sc.open, len(sc.out.Headings)-1)
+}
+
+// dropShortItems leaves items of one line in their parent: a list of
+// short bold terms ("- **desktop notifications** (package);") is no
+// list of entries, and a one-line entry is read with its neighbours.
+// Nothing is below a one-line item, so only indexes change.
+func (sc *scanner) dropShortItems() {
+	hs := sc.out.Headings
+	index := make([]int, len(hs)) // old index → new
+	var out []Heading
+	for i, h := range hs {
+		if h.Item && h.Lines < 2 {
+			continue
+		}
+		index[i] = len(out)
+		out = append(out, h)
+	}
+	if len(out) == len(hs) {
+		return
+	}
+	for i := range out {
+		if out[i].Parent >= 0 {
+			out[i].Parent = index[out[i].Parent]
+		}
+	}
+	sc.out.Headings = out
+}
+
+// itemIDs gives the items their ids once the headings have theirs, so
+// that items never change a heading's id (its anchor, as links have
+// it): the slug of the title, made unique against all ids.
+func (sc *scanner) itemIDs() {
+	taken := map[string]bool{}
+	for _, h := range sc.out.Headings {
+		if !h.Item {
+			taken[h.ID] = true
+		}
+	}
+	for i := range sc.out.Headings {
+		h := &sc.out.Headings[i]
+		if !h.Item {
+			continue
+		}
+		base := Slug(h.Title)
+		if base == "" {
+			base = "item"
+		}
+		id := base
+		for n := 1; taken[id]; n++ {
+			id = base + "-" + strconv.Itoa(n)
+		}
+		taken[id] = true
+		h.ID = id
+	}
 }
 
 // end closes the open sections of level or deeper on the current line.

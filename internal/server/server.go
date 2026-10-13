@@ -30,6 +30,8 @@ type Server struct {
 	// names and arguments (§5.7).
 	FSCompat bool
 	Version  string
+
+	ranked indexes
 }
 
 // tool is one tool's definition and handler. Handlers return the result
@@ -70,7 +72,7 @@ var intType = map[string]any{"type": "integer"}
 var strType = map[string]any{"type": "string"}
 
 func (s *Server) tools() []tool {
-	ts := []tool{listDocsTool(), outlineTool(), searchTool(), readSectionTool(s), readLinesTool(s)}
+	ts := []tool{listDocsTool(), outlineTool(), searchTool(), findSectionsTool(), readSectionTool(s), readLinesTool(s)}
 	if s.FSCompat {
 		ts = append(ts, compatTools(s)...)
 	}
@@ -241,7 +243,8 @@ func (s *Server) Instructions() string {
 		"- a precise term (a setting, an error message, a name): search, then read_section with the section " +
 		"of the match (or read_lines around its line);\n" +
 		"- a broad question: outline the document (maxLevel 2 for a large one), then read_section of the one " +
-		"section that answers it;\n" +
+		"section that answers it; when the document is not obvious, find_sections ranks the sections of all " +
+		"documents for the question in words;\n" +
 		"- a long section: read_section with depth 0 gives its introduction and the outline of its " +
 		"subsections; a section larger than one call comes in parts (part 2, …).\n" +
 		"Read a document whole only when the question needs all of it.")

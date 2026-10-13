@@ -43,6 +43,8 @@ func main() {
 	exts := flag.String("ext", ".md,.markdown", "extensions of documents, comma-separated")
 	configDirs := flag.String("config-dirs", "", "directories of collection files, comma-separated, later ones "+
 		"replacing earlier ones (default without --root or --collection: "+strings.Join(config.DefaultDirs, ",")+")")
+	listItems := flag.Bool("list-items", false, "in the collections of --root and --collection, take list items "+
+		"and paragraphs that open with a bold title as sections")
 	fsCompat := flag.Bool("fs-compat", false, "also offer mcp-server-fs's reading tools (outline_file, search_text, read_text_file, search_files, list_directory)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
@@ -65,11 +67,16 @@ func main() {
 	if *configDirs == "" && len(roots) == 0 && len(colls) == 0 {
 		dirs = config.DefaultDirs
 	}
-	collections, problems, err := loadCollections(dirs, roots, colls)
+	collections, problems, err := loadCollections(dirs, roots, colls, *listItems)
 	if err != nil {
 		fail(2, err.Error())
 	}
 	if len(collections) == 0 {
+		// Exiting here, before Landlock executes the program again: the
+		// reasons are printed once all the same.
+		for _, p := range problems {
+			fmt.Fprintf(os.Stderr, "%s: %v; left out\n", server.Name, p)
+		}
 		fail(2, "no collections: give --root or --collection, or install collection files in "+strings.Join(dirs, " or "))
 	}
 	var extList []string
@@ -84,12 +91,7 @@ func main() {
 
 	// The kernel keeps the server to reading its collections (Landlock,
 	// docs/architecture.md §8), whatever starts it.
-	var paths []string
-	for _, k := range collections {
-		paths = append(paths, k.Path)
-		paths = append(paths, k.Also...)
-	}
-	ll, err := landlock.Self(landlock.Rules{Read: paths})
+	ll, err := landlock.Self(landlockRules(collections, dirs))
 	if err != nil {
 		fail(1, err.Error())
 	}
@@ -116,6 +118,25 @@ func fail(code int, msg string) {
 	os.Exit(code)
 }
 
+// landlockRules are what the server may read: its collections, their
+// also documents, and the directories of collection files. Self
+// executes the program again under them, and the program reads the
+// collection files again there: without their directories it would find
+// none outside the trees Landlock always allows (/etc, /usr, /tmp).
+func landlockRules(collections []*catalog.Collection, configDirs []string) landlock.Rules {
+	var paths []string
+	for _, k := range collections {
+		paths = append(paths, k.Path)
+		paths = append(paths, k.Also...)
+	}
+	for _, d := range configDirs {
+		if abs, err := filepath.Abs(d); err == nil {
+			paths = append(paths, abs)
+		}
+	}
+	return landlock.Rules{Read: paths}
+}
+
 func splitList(s string) []string {
 	var out []string
 	for _, x := range strings.Split(s, ",") {
@@ -130,11 +151,14 @@ func splitList(s string) []string {
 // collections of the command line, which replace files' of the same
 // name. A collection file that cannot be used, or whose directory is
 // missing, is a problem and left out; the command line's must be right.
-func loadCollections(dirs, roots, colls []string) ([]*catalog.Collection, []error, error) {
+func loadCollections(dirs, roots, colls []string, listItems bool) ([]*catalog.Collection, []error, error) {
 	files, problems := config.Load(dirs)
 	cli, err := parseCollections(roots, colls)
 	if err != nil {
 		return nil, problems, err
+	}
+	for _, c := range cli {
+		c.ListItems = listItems
 	}
 	var out []*catalog.Collection
 	for _, f := range files {
@@ -150,7 +174,8 @@ func loadCollections(dirs, roots, colls []string) ([]*catalog.Collection, []erro
 			continue
 		}
 		out = append(out, &catalog.Collection{Name: f.Name, Title: f.Title, Path: f.Root, Description: f.Description,
-			Instructions: f.Instructions, IndexName: f.Index, Include: f.Include, Exclude: f.Exclude, Also: f.Also})
+			Instructions: f.Instructions, IndexName: f.Index, Include: f.Include, Exclude: f.Exclude, Also: f.Also,
+			ListItems: f.ListItems})
 	}
 	return append(out, cli...), problems, nil
 }

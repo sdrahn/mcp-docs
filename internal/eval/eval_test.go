@@ -32,8 +32,13 @@ type question struct {
 	// the section that answers (outline, outline of a section, …,
 	// read_section).
 	Path []string
+	// Find: the question in words (find_sections across the collection,
+	// then the best section, or the lines around its best line when it is
+	// large).
+	Find string
 	// Doc limits a search to a document; it is the document of an
-	// outline.
+	// outline; for find, it only names the document whose whole reading
+	// is the baseline.
 	Doc string
 	// Want is the id of the section that answers; Text is in the
 	// answer.
@@ -63,7 +68,7 @@ var questions = []question{
 	{Ask: "Do token scopes limit what a role allows?", Doc: "mcp-gateway/architecture.md",
 		Path: []string{"6. Policy model", "6.7 Token scopes as a ceiling"}, Want: "67-token-scopes-as-a-ceiling", Text: "scope"},
 	{Ask: "What did decision D13 decide?", Query: "**D13", Doc: "mcp-gateway/architecture.md",
-		Want: "9-decisions", Text: "D13"},
+		Want: "d13--path-arguments-are-constrained-as-strings", Text: "D13"},
 	{Ask: "Which metrics does the gateway export?", Doc: "mcp-gateway/user-guide/10-operations.md",
 		Path: []string{"Monitoring", "Metrics"}, Want: "metrics", Text: "mcp_"},
 	{Ask: "What must I back up?", Query: "backup", Doc: "mcp-gateway/user-guide/10-operations.md",
@@ -73,7 +78,24 @@ var questions = []question{
 	{Ask: "How do I give a server a secret?", Doc: "mcp-gateway/user-guide/04-mcp-servers.md",
 		Path: []string{"Secrets"}, Want: "secrets", Text: "credentials"},
 	{Ask: "What is the roadmap step on Landlock?", Query: "**Landlock as a second wall**", Doc: "mcp-gateway/architecture.md",
-		Want: "11-roadmap", Text: "Landlock"},
+		Want: "30-landlock-as-a-second-wall", Text: "Landlock"},
+
+	// Questions in words, where the document is not obvious.
+	{Ask: "How do I back up the gateway's state?", Find: "back up the gateway's state",
+		Doc: "mcp-gateway/user-guide/10-operations.md", Want: "state-and-backup", Text: "/var/lib/mcp-gateway"},
+	{Ask: "What happens to pending approvals when the gateway restarts?",
+		Find: "pending approvals when the gateway restarts", Doc: "mcp-gateway/user-guide/07-approvals.md",
+		Want: "pending-approvals-across-disconnects-and-restarts", Text: "restart"},
+	{Ask: "How do I give a server a password?", Find: "give a server a secret or password",
+		Doc: "mcp-gateway/user-guide/04-mcp-servers.md", Want: "secrets", Text: "credentials"},
+	{Ask: "How do I upgrade the gateway?", Find: "upgrade to a new version",
+		Doc: "mcp-gateway/user-guide/10-operations.md", Want: "upgrades", Text: "upgrade"},
+	{Ask: "A server's instances do not start: what now?", Find: "an instance does not start",
+		Doc: "mcp-gateway/user-guide/10-operations.md", Want: "instances-do-not-start", Text: "journal"},
+	{Ask: "Do token scopes limit what roles allow?", Find: "token scopes limit roles",
+		Doc: "mcp-gateway/architecture.md", Want: "d17--token-scopes-limit-what-an-agent-may-do-they-never-grant", Text: "scope"},
+	{Ask: "How do I get desktop notifications for approvals?", Find: "desktop notifications for approvals",
+		Doc: "mcp-gateway/user-guide/07-approvals.md", Want: "desktop-notifications", Text: "mcp-gateway-notify"},
 }
 
 type step struct {
@@ -93,8 +115,10 @@ type outcome struct {
 
 func newServer(t *testing.T) *server.Server {
 	t.Helper()
+	// List items as sections: the roadmap's steps and the decisions are
+	// list items and bold paragraphs under one heading each.
 	k := &catalog.Collection{Name: "mcp-gateway", Path: abs(t, "testdata/mcp-gateway"),
-		Description: "mcp-gateway's documentation (a snapshot)"}
+		Description: "mcp-gateway's documentation (a snapshot)", ListItems: true}
 	return &server.Server{Cat: catalog.New([]*catalog.Collection{k}, []string{".md"}, 10000),
 		MaxRead: 32 << 10, MaxFile: 16 << 20, Version: "eval"}
 }
@@ -208,6 +232,31 @@ func run(t *testing.T, s *server.Server, q question) outcome {
 }
 
 func (c *session) answer(q question, o *outcome) (string, error) {
+	if q.Find != "" {
+		_, st, err := c.call("find_sections", map[string]any{"query": q.Find, "maxResults": 5})
+		if err != nil {
+			return "", err
+		}
+		var res struct {
+			Sections []struct {
+				Doc, Section, Version string
+				Bytes                 int64
+				MatchLine             int
+			}
+		}
+		if err := json.Unmarshal(st, &res); err != nil || len(res.Sections) == 0 {
+			return "", fmt.Errorf("find_sections %q: nothing", q.Find)
+		}
+		f := res.Sections[0]
+		o.got = f.Section
+		if f.Bytes > largeSection && f.MatchLine > 0 {
+			text, _, err := c.call("read_lines", map[string]any{"doc": f.Doc, "offset": max(f.MatchLine-3, 1),
+				"limit": aroundLines, "version": f.Version})
+			return text, err
+		}
+		text, _, err := c.call("read_section", map[string]any{"doc": f.Doc, "section": f.Section})
+		return text, err
+	}
 	if q.Query != "" {
 		args := map[string]any{"query": q.Query, "maxResults": 5}
 		if q.Doc != "" {

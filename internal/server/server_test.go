@@ -477,7 +477,7 @@ func TestToolList(t *testing.T) {
 			t.Errorf("%s: annotations %v", tl["name"], a)
 		}
 	}
-	if strings.Join(names, ",") != "list_docs,outline,search,read_section,read_lines" {
+	if strings.Join(names, ",") != "list_docs,outline,search,find_sections,read_section,read_lines" {
 		t.Errorf("tools: %v", names)
 	}
 }

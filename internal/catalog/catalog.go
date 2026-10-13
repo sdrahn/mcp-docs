@@ -49,6 +49,9 @@ type Collection struct {
 	// Also are single documents elsewhere (absolute paths), named by
 	// their base names in the collection.
 	Also []string
+	// ListItems takes list items and paragraphs that open with a bold
+	// title as sections (markdown.Options.ListItems).
+	ListItems bool
 
 	once sync.Once
 	root *os.Root
@@ -340,7 +343,7 @@ func (c *Catalog) Load(ctx context.Context, d Doc) (*Entry, error) {
 	if sample, _ := br.Peek(8192); IsBinary(sample) {
 		return nil, fmt.Errorf("%s: not a text file", d.Address())
 	}
-	o, err := markdown.Scan(ctx, br)
+	o, err := markdown.ScanWith(ctx, br, markdown.Options{ListItems: d.Coll.ListItems})
 	if err != nil {
 		return nil, Explain(d, err)
 	}

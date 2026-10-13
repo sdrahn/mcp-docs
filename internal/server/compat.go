@@ -121,7 +121,7 @@ func outlineFile(s *Server, ctx context.Context, args json.RawMessage) (*result,
 	}
 	shown := []heading{}
 	for _, h := range o.Headings {
-		if h.Level <= a.MaxLevel {
+		if h.Level <= a.MaxLevel && !h.Item { // mcp-server-fs's outline: headings only
 			shown = append(shown, heading{h.Level, h.Title, h.Line, h.Lines, h.Bytes})
 		}
 	}

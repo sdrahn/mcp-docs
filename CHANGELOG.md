@@ -25,3 +25,17 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
 - Packaging for openSUSE and SLES (`packaging/suse`), and an evaluation
   of what answers cost on a fixed corpus (`make eval`).
 - A guide to writing Markdown for agents (`docs/writing-docs.md`).
+- `find_sections`: sections ranked for a question in words, across the
+  documents of all collections or one (BM25 over each section's own
+  text, a bonus for the words of its title), with the best-matching
+  line of each.
+- `list_items: true` in a collection file (`--list-items` on the command
+  line): list items and paragraphs that open with a bold title are
+  sections, for documents that keep steps or decisions as entries under
+  one heading.
+- `search` results give each section's size in bytes (`sectionBytes`).
+- Fixed: collection files in directories other than below `/etc`,
+  `/usr` or `/tmp` (`--config-dirs`) were not found: mcp-docs reads them
+  again after restricting itself with Landlock, which did not allow
+  their directories. When no collection is left, the reasons are now
+  printed.

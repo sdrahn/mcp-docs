@@ -10,11 +10,11 @@ It generalises the `gateway-docs` server of
 27 and 28: `search_text`, `outline_file`, ranged reads) to any set of
 documents.
 
-Status: steps 1 to 3 are implemented: the core, collection files and
-metadata, and packaging for openSUSE Tumbleweed, openSUSE Leap 16 and
-SLES 16 ([packaging/suse](packaging/suse/README.md)); ranked search and
-long list items are to come. See
-[docs/architecture.md](docs/architecture.md).
+Status: steps 1 to 5 are implemented: the core, collection files and
+metadata, packaging for openSUSE Tumbleweed, openSUSE Leap 16 and SLES
+16 ([packaging/suse](packaging/suse/README.md)), ranked search
+(`find_sections`) and list items as sections. Other formats than
+Markdown are to come. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs
 or anything that reads by section:
@@ -48,6 +48,7 @@ Options:
 | `--max-file N` | 16 MiB | the largest document search reads |
 | `--max-entries N` | 10000 | documents a listing or search covers |
 | `--ext LIST` | `.md,.markdown` | extensions of documents |
+| `--list-items` | off | in the collections of `--root` and `--collection`, take list items and paragraphs that open with a bold title as sections |
 | `--fs-compat` | off | also offer mcp-server-fs's `outline_file`, `search_text`, `read_text_file`, `search_files`, `list_directory` |
 
 ### Collection files
@@ -56,7 +57,9 @@ A package makes its documentation readable by agents by installing a
 collection file in `/usr/share/mcp-docs/collections.d/`
 ([example](examples/collections.d/mcp-gateway.yaml)): the directory,
 a title and description, the index, include and exclude patterns,
-single documents elsewhere (`also`), and instructions for the agent.
+single documents elsewhere (`also`), instructions for the agent, and
+`list_items: true` for documents that keep entries (steps, decisions)
+as list items under one heading.
 A file of the same name in `/etc/mcp-docs/collections.d/` replaces it;
 an empty one disables it. A file that cannot be used is logged and left
 out.
@@ -114,6 +117,7 @@ make build && make install DESTDIR=/tmp/root
 | Which document? | `list_docs`, or the collection's index |
 | A precise term (a setting, an error message) | `search` → `read_section` of the match |
 | A broad question | `outline` → `read_section` |
+| A question in words, document unknown | `find_sections` → `read_section` |
 | A long section | `read_section` with `depth: 0` (intro and sub-outline), then the subsection, or `part: 2` |
 
 ## Tools
@@ -123,6 +127,6 @@ make build && make install DESTDIR=/tmp/root
 | `list_docs` | collections, or a collection's documents with titles, descriptions and sizes |
 | `outline` | a document's headings with section ids, lines and sizes |
 | `search` | lines matching a text or RE2 expression, grouped by section |
+| `find_sections` | sections ranked for a question in words, across documents, with their best line |
 | `read_section` | one section by id or heading path, in parts when large |
 | `read_lines` | lines by number, checked against the document's version |
-| `find_sections` | (later) sections ranked for a question in words |

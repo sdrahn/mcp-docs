@@ -218,3 +218,69 @@ func TestMeta(t *testing.T) {
 		t.Errorf("no paragraph: %q", o.Description())
 	}
 }
+
+// With ListItems, list items and paragraphs that open with a bold title
+// are sections one level below their heading; one-line items stay in
+// it; headings keep their ids.
+func TestListItems(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Doc",                               // 1
+		"## 11. Roadmap",                      // 2
+		"1. **Design doc** (this document).",  // 3
+		"2. **Skeleton:** Go module, layout.", // 4: a label, not a title: still item 1
+		"27. **Documentation that costs fewer tokens** (0.16; done):", // 5
+		"    - the problem: …",                  // 6
+		"    - **nested** is not an item",       // 7
+		"- **Roadmap** again",                   // 8: the slug of a heading below
+		"  continued",                           // 9
+		"- **one line**, left in the section",   // 10
+		"## 9. Decisions",                       // 11
+		"",                                      // 12
+		"**D13 — Symlinks through os.Root.**",   // 13
+		"Text.",                                 // 14
+		"**Note:** a label.",                    // 15: no blank line before, and a label
+		"",                                      // 16
+		"**Note:** a label after a blank line.", // 17
+		"```",                                   // 18
+		"```",                                   // 19
+		"**After a fence**",                     // 20: no blank line before
+		"### Roadmap",                           // 21
+		"text",                                  // 22
+	}, "\n") + "\n"
+	o, err := ScanWith(context.Background(), strings.NewReader(doc), Options{ListItems: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, h := range o.Headings {
+		parent := ""
+		if h.Parent >= 0 {
+			parent = o.Headings[h.Parent].ID
+		}
+		got = append(got, fmt.Sprintf("%d %s #%s %d+%d item=%v in=%s", h.Level, h.Title, h.ID, h.Line, h.Lines, h.Item, parent))
+	}
+	want := []string{
+		"1 Doc #doc 1+22 item=false in=",
+		"2 11. Roadmap #11-roadmap 2+9 item=false in=doc",
+		"3 1. Design doc #1-design-doc 3+2 item=true in=11-roadmap",
+		"3 27. Documentation that costs fewer tokens #27-documentation-that-costs-fewer-tokens 5+3 item=true in=11-roadmap",
+		"3 Roadmap #roadmap-1 8+2 item=true in=11-roadmap",
+		"2 9. Decisions #9-decisions 11+12 item=false in=doc",
+		"3 D13 — Symlinks through os.Root #d13--symlinks-through-osroot 13+8 item=true in=9-decisions",
+		"3 Roadmap #roadmap 21+2 item=false in=9-decisions",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("items:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// Without the option, the same document has its headings only, with
+	// the same ids.
+	plain := scan(t, doc)
+	if len(plain.Headings) != 4 || plain.Headings[3].ID != "roadmap" {
+		t.Errorf("plain: %+v", briefs(plain))
+	}
+	// Items need a heading to be below.
+	o, _ = ScanWith(context.Background(), strings.NewReader("1. **First item**\nmore\n"), Options{ListItems: true})
+	if len(o.Headings) != 0 {
+		t.Errorf("an item without a heading: %+v", o.Headings)
+	}
+}
