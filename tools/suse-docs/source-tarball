@@ -1,0 +1,31 @@
+#!/bin/sh
+# Makes the source tarball of SUSE's documentation that a package build
+# converts (packaging/suse-docs): doc-modular-SHORTREV.tar.xz, the tree of
+# SUSE/doc-modular at REV under doc-modular-SHORTREV/, without what the
+# conversion does not read (images, translations, templates). The OBS
+# service of the package (packaging/suse-docs/*/_service) makes the same.
+#
+#   tools/suse-docs/source-tarball [REV [DIR]]
+#
+# REV defaults to the revision tools/suse-docs/convert pins; DIR (default
+# build) receives the tarball, whose path is printed. The sources are
+# cloned into build/doc-modular, as convert does.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+rev=${1:-$(sed -n 's/^rev=//p' "$here/convert")}
+branch=$(sed -n 's/^branch=//p' "$here/convert")
+dir=${2:-build}
+src=build/doc-modular
+
+if [ ! -d "$src/.git" ]; then
+	mkdir -p build
+	git clone -q --filter=blob:none --no-checkout https://github.com/SUSE/doc-modular "$src"
+fi
+git -C "$src" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$src" fetch -q origin "$branch"
+short=$(git -C "$src" rev-parse --short=7 "$rev")
+mkdir -p "$dir"
+git -C "$src" archive --format=tar --prefix="doc-modular-$short/" "$rev" -- . \
+	':!images' ':!l10n' ':!templates' ':!SmartDocs-Cheatsheet.*' |
+	xz -9 >"$dir/doc-modular-$short.tar.xz"
+echo "$dir/doc-modular-$short.tar.xz"

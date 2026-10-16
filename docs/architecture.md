@@ -534,9 +534,9 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    Markdown collections, so that the documentation of
    documentation.suse.com is served offline, a section at a time. All 48
    SLES 16.0 articles convert (`tools/suse-docs/convert`), every source
-   link checked against the site; next, the package per product version
-   and the container image, SLES for SAP and SLE HA 16.0, SLE 15 guides
-   after.
+   link checked against the site, and are packaged
+   (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
+   image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
 
 ## 12. Decisions
 
@@ -713,8 +713,9 @@ the evaluation (§14.5) decides if that is wrong.
 
 ### 14.4 Delivery
 
-- **A package per product version**, built on OBS, for example
-  `suse-docs-mcp-sles-16.0`: the converter runs at build time on a
+- **A package per product version**, built on OBS:
+  `suse-docs-mcp-sles-16.0` ([packaging/suse-docs](../packaging/suse-docs/README.md),
+  built, linted, installed and served in CI); the converter runs at build time on a
   pinned source revision; the package installs the documents below
   `/usr/share/mcp-docs/docs/suse/sles-16.0`, the collection file, and
   the license. Offline, air-gapped, updated with maintenance updates.

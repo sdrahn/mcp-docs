@@ -40,7 +40,7 @@ jobs:
       - name: Install tools
         run: >
           zypper -n --gpg-auto-import-keys in --no-recommends
-          git tar gzip rpm-build rpmlint curl 'python3dist(packaging)'
+          git tar gzip xz rpm-build rpmlint curl 'python3dist(packaging)'
       - uses: actions/checkout@v4
       - name: Install build dependencies (from the spec, as OBS does)
         run: |
@@ -68,6 +68,16 @@ jobs:
         run: |
           rpm -ivh ~/rpmbuild/RPMS/*/mcp-docs-[0-9]*.rpm ~/rpmbuild/RPMS/*/mcp-docs-convert-[0-9]*.rpm
           packaging/suse/smoke-test.sh "$version"
+      # A documentation package built with the converter just installed, as
+      # OBS builds it (offline, from the source tarball its _service makes).
+      - name: Documentation package (suse-docs-mcp-sles-16.0)
+        run: |
+          spec=packaging/suse-docs/sles-16.0/suse-docs-mcp-sles-16.0.spec
+          cp "$(tools/suse-docs/source-tarball)" ~/rpmbuild/SOURCES/
+          rpmbuild -bb --define "_topdir $HOME/rpmbuild" "$spec"
+          rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
+          rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
+          packaging/suse-docs/smoke-test.sh
 
   # The container image (packaging/container), built as a user builds it,
   # then run as a container runtime runs it: read-only, any user.

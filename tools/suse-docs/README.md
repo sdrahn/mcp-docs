@@ -13,7 +13,10 @@ tools/suse-docs/convert build/sles-16.0 /usr/share/mcp-docs/docs/suse/sles-16.0
 ```
 
 In a package build, which has no network, `SRC` names the unpacked
-sources of the pinned revision instead of a clone; installed with the
+sources instead of a clone, and `REV` their revision (default: the
+pinned one); `source-tarball` makes that tarball,
+`doc-modular-<rev>.tar.xz`, without images and translations
+([packaging/suse-docs](../../packaging/suse-docs/README.md)). Installed with the
 package `mcp-docs-convert`, the script is
 `/usr/share/mcp-docs-convert/suse-docs/convert` and uses the installed
 converter ([packaging/suse](../../packaging/suse/README.md)).
