@@ -2,24 +2,35 @@
 // on a system a part at a time (docs/architecture.md): the documents of
 // its collections, their outlines, search that answers with sections,
 // and reads of one section or a range of lines. It speaks MCP on
-// stdin/stdout, only reads, and restricts itself with Landlock to
-// reading its collections.
+// stdin/stdout, or with --listen over Streamable HTTP (stateless:
+// POST /mcp), only reads, and restricts itself with Landlock to reading
+// its collections and, over HTTP, to binding its port.
 //
 //	mcp-docs                                  # the collections of /usr/share/mcp-docs/collections.d and /etc/mcp-docs/collections.d
 //	mcp-docs --root /usr/share/mcp-gateway/docs
 //	mcp-docs --collection 'gateway=/usr/share/mcp-gateway/docs:The MCP gateway' --collection kit=/usr/share/doc/kit
+//	mcp-docs --listen :8080                     # http://host:8080/mcp, health at /healthz
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
 	"github.com/sdrahn/mcp-docs/internal/config"
 	"github.com/sdrahn/mcp-docs/internal/landlock"
+	"github.com/sdrahn/mcp-docs/internal/mcphttp"
 	"github.com/sdrahn/mcp-docs/internal/mcpserver"
 	"github.com/sdrahn/mcp-docs/internal/server"
 )
@@ -33,7 +44,7 @@ func (l *listFlag) String() string     { return strings.Join(*l, ",") }
 func (l *listFlag) Set(v string) error { *l = append(*l, v); return nil }
 
 func main() {
-	var roots, colls listFlag
+	var roots, colls, origins listFlag
 	flag.Var(&roots, "root", "a directory of documents, a collection named after it (repeatable)")
 	flag.Var(&colls, "collection", "a collection: name=/path[:description] (repeatable)")
 	about := flag.String("instructions", "", "what the documents are, for the client's model (opens the server's instructions)")
@@ -46,9 +57,14 @@ func main() {
 	listItems := flag.Bool("list-items", false, "in the collections of --root and --collection, take list items "+
 		"and paragraphs that open with a bold title as sections")
 	fsCompat := flag.Bool("fs-compat", false, "also offer mcp-server-fs's reading tools (outline_file, search_text, read_text_file, search_files, list_directory)")
+	listen := flag.String("listen", "", "serve MCP over Streamable HTTP on this address (\":8080\", \"127.0.0.1:8080\") "+
+		"instead of stdin/stdout: POST /mcp, health at /healthz")
+	flag.Var(&origins, "allow-origin", "with --listen, a browser origin (\"https://app.example\") requests may come from "+
+		"(repeatable); requests without an Origin header are always served")
+	maxConcurrent := flag.Int("max-concurrent", 32, "with --listen, requests handled at once")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s [options]\n\nAn MCP server for the documentation on this system, on stdin/stdout.\n\n", server.Name)
+		fmt.Fprintf(os.Stderr, "usage: %s [options]\n\nAn MCP server for the documentation on this system, on stdin/stdout or HTTP (--listen).\n\n", server.Name)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -60,7 +76,16 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if *maxRead < 4096 || *maxFile <= 0 || *maxEntries <= 0 {
+	port := -1 // stdio: no TCP port
+	if *listen != "" {
+		var err error
+		if port, err = listenPort(*listen); err != nil {
+			fail(2, "--listen: "+err.Error())
+		}
+	} else if len(origins) > 0 {
+		fail(2, "--allow-origin needs --listen")
+	}
+	if *maxRead < 4096 || *maxFile <= 0 || *maxEntries <= 0 || *maxConcurrent <= 0 {
 		fail(2, "the limits must be positive, --max-read at least 4096")
 	}
 	dirs := splitList(*configDirs)
@@ -91,7 +116,8 @@ func main() {
 
 	// The kernel keeps the server to reading its collections (Landlock,
 	// docs/architecture.md §8), whatever starts it.
-	ll, err := landlock.Self(landlockRules(collections, dirs))
+	rules := landlockRules(collections, dirs, port)
+	ll, err := landlock.Self(rules)
 	if err != nil {
 		fail(1, err.Error())
 	}
@@ -104,13 +130,63 @@ func main() {
 	for _, k := range collections {
 		names = append(names, k.Name+"="+k.Path)
 	}
-	fmt.Fprintf(os.Stderr, "%s: serving %s; %s\n", server.Name, strings.Join(names, ", "), ll)
+	fmt.Fprintf(os.Stderr, "%s: serving %s; %s%s\n", server.Name, strings.Join(names, ", "), ll, tcpNote(ll, rules))
 
 	s := &server.Server{Cat: catalog.New(collections, extList, *maxEntries), About: *about, MaxRead: *maxRead,
 		MaxFile: *maxFile, FSCompat: *fsCompat, Version: version}
-	if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
+	if *listen == "" {
+		if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
+			fail(1, err.Error())
+		}
+		return
+	}
+	if err := serveHTTP(*listen, s.Handle, mcphttp.Options{AllowedOrigins: origins, MaxConcurrent: *maxConcurrent}); err != nil {
 		fail(1, err.Error())
 	}
+}
+
+// listenPort is the TCP port of a --listen address, for the Landlock
+// rule that allows binding it; 0 for a port the kernel chooses (which no
+// rule can name: binding is then not restricted).
+func listenPort(addr string) (int, error) {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 0 || n > 65535 {
+		return 0, fmt.Errorf("port %q: give a number", p)
+	}
+	return n, nil
+}
+
+// serveHTTP serves MCP over HTTP until SIGTERM or SIGINT, then lets the
+// requests in progress finish (a container's stop).
+func serveHTTP(addr string, h mcpserver.Handler, o mcphttp.Options) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: mcphttp.Handler(h, o), ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 2 * time.Minute,
+		MaxHeaderBytes: 64 << 10}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+	fmt.Fprintf(os.Stderr, "%s: listening on http://%s/mcp\n", server.Name, ln.Addr())
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	fmt.Fprintf(os.Stderr, "%s: stopping\n", server.Name)
+	shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdown); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
 }
 
 func fail(code int, msg string) {
@@ -123,18 +199,49 @@ func fail(code int, msg string) {
 // executes the program again under them, and the program reads the
 // collection files again there: without their directories it would find
 // none outside the trees Landlock always allows (/etc, /usr, /tmp).
-func landlockRules(collections []*catalog.Collection, configDirs []string) landlock.Rules {
+//
+// TCP: no connection to anywhere (the server needs none), and binding
+// only the port of --listen (port > 0); none at all on stdin/stdout
+// (port < 0). Kernels before Landlock ABI 4 leave TCP to the container
+// or unit (reported, not fatal).
+func landlockRules(collections []*catalog.Collection, configDirs []string, port int) landlock.Rules {
 	var paths []string
 	for _, k := range collections {
 		paths = append(paths, k.Path)
 		paths = append(paths, k.Also...)
 	}
 	for _, d := range configDirs {
+		// A missing directory has nothing to read (and would be logged as
+		// missing: /etc/mcp-docs/collections.d in most containers).
 		if abs, err := filepath.Abs(d); err == nil {
-			paths = append(paths, abs)
+			if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
+				paths = append(paths, abs)
+			}
 		}
 	}
-	return landlock.Rules{Read: paths}
+	r := landlock.Rules{Read: paths, TCPConnect: []int{}}
+	switch {
+	case port < 0:
+		r.TCPBind = []int{}
+	case port > 0:
+		r.TCPBind = []int{port}
+	}
+	return r
+}
+
+// tcpNote says what Landlock does to TCP, where it does it (ABI 4 and
+// later; before, the result names TCP as not supported).
+func tcpNote(ll landlock.Result, r landlock.Rules) string {
+	if ll.ABI < 4 {
+		return ""
+	}
+	switch {
+	case r.TCPBind == nil:
+		return "; TCP: no connections"
+	case len(r.TCPBind) == 0:
+		return "; TCP: no connections, no listening"
+	}
+	return fmt.Sprintf("; TCP: no connections, listening on port %d only", r.TCPBind[0])
 }
 
 func splitList(s string) []string {

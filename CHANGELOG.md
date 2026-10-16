@@ -34,6 +34,15 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   sections, for documents that keep steps or decisions as entries under
   one heading.
 - `search` results give each section's size in bytes (`sectionBytes`).
+- `--listen ADDR`: MCP over Streamable HTTP, stateless (one JSON-RPC
+  message per POST to `/mcp`, no sessions, no event streams), with
+  `/healthz`, `Origin` checks (`--allow-origin`), protocol version
+  checks, bounds on body size, concurrency (`--max-concurrent`) and
+  time, and a graceful stop on SIGTERM.
+- Landlock also restricts TCP (kernels with ABI 4): no connections, and
+  no listening on stdin/stdout or listening on the `--listen` port only.
+- A container image (`packaging/container`): BCI micro, port 8080, any
+  user, read-only root file system; built and queried in CI.
 - Fixed: collection files in directories other than below `/etc`,
   `/usr` or `/tmp` (`--config-dirs`) were not found: mcp-docs reads them
   again after restricting itself with Landlock, which did not allow

@@ -40,7 +40,7 @@ jobs:
       - name: Install tools
         run: >
           zypper -n --gpg-auto-import-keys in --no-recommends
-          git tar gzip rpm-build rpmlint 'python3dist(packaging)'
+          git tar gzip rpm-build rpmlint curl 'python3dist(packaging)'
       - uses: actions/checkout@v4
       - name: Install build dependencies (from the spec, as OBS does)
         run: |
@@ -68,3 +68,26 @@ jobs:
         run: |
           rpm -ivh ~/rpmbuild/RPMS/*/mcp-docs-[0-9]*.rpm
           packaging/suse/smoke-test.sh "$version"
+
+  # The container image (packaging/container), built as a user builds it,
+  # then run as a container runtime runs it: read-only, any user.
+  container:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -f packaging/container/Containerfile --build-arg VERSION=ci -t mcp-docs:ci .
+      - name: Run and query
+        run: |
+          set -eu
+          docker run -d --name mcp-docs --read-only -p 8080:8080 mcp-docs:ci
+          for _ in $(seq 20); do curl -sf http://127.0.0.1:8080/healthz && break; sleep 0.5; done
+          curl -sS -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_sections","arguments":{"query":"stateless HTTP"}}}' \
+            http://127.0.0.1:8080/mcp | tee /tmp/answer.json
+          grep -q 'mcp-docs/architecture.md' /tmp/answer.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/mcp)" = 405
+          docker logs mcp-docs 2>&1 | tee /tmp/logs
+          grep -q 'listening on http://0.0.0.0:8080/mcp' /tmp/logs
+          docker stop -t 30 mcp-docs
+          test "$(docker inspect -f '{{.State.ExitCode}}' mcp-docs)" = 0

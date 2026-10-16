@@ -83,4 +83,19 @@ cp /usr/share/mcp-docs/collections.d/mcp-docs.yaml "$confdir/"
 } | timeout 30 mcp-docs --config-dirs "$confdir" >/tmp/smoke.out 2>/tmp/smoke.err || fail "--config-dirs $confdir: $(cat /tmp/smoke.err)"
 expect 'section(s) for'
 
-echo "smoke-test: mcp-docs $version works ($(grep -o 'Landlock[^;]*$' /tmp/smoke.err || echo 'Landlock: not reported'))"
+# Over HTTP: one POST per message, health at /healthz.
+mcp-docs --config-dirs "$confdir" --listen 127.0.0.1:18080 2>/tmp/smoke-http.err &
+pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	curl -sf http://127.0.0.1:18080/healthz >/dev/null 2>&1 && break
+	sleep 0.5
+done
+curl -sS -H 'Content-Type: application/json' \
+	-d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_docs","arguments":{}}}' \
+	http://127.0.0.1:18080/mcp >/tmp/smoke.out || fail "HTTP: $(cat /tmp/smoke-http.err)"
+kill -TERM "$pid"
+wait "$pid" || fail "HTTP: did not stop cleanly: $(cat /tmp/smoke-http.err)"
+expect 'mcp-docs/architecture.md'
+grep -q 'listening on http://127.0.0.1:18080/mcp' /tmp/smoke-http.err || fail "HTTP: $(cat /tmp/smoke-http.err)"
+
+echo "smoke-test: mcp-docs $version works ($(grep -o 'Landlock.*$' /tmp/smoke.err | head -n 1 || echo 'Landlock: not reported'))"
