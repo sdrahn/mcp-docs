@@ -269,25 +269,56 @@ For documentation installed on a system and served by mcp-docs:
 
 ## Checking a document
 
-See your document as an agent does: its outline, with sizes.
+See your document as an agent does: its outline, with sizes. mcp-docs
+answers in JSON; `jq` prints the outline's text.
 
 ```sh
 { echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"outline","arguments":{"doc":"docs/guide.md"}}}'
-  sleep 1; } | mcp-docs --root docs
+  sleep 1; } | mcp-docs --root docs 2>/dev/null | jq -r '.result.content[0].text'
 ```
 
 (MCP over stdin: the server ends when its input does, without answering
-what is still running, hence the pause. It prints JSON; the outline is
-the `text` of its `content`.)
+what is still running, hence the pause.)
 
-Then look for:
+For a guide to a backup tool with the usual problems, the outline is:
 
-- sections over 8 KiB that readers would look up in parts: split them;
-- long text under the `#` title before the first `##`: move it down;
-- headings that do not say what the section answers;
-- duplicate titles (ids ending in `-1`);
-- a heading you expected and do not see: an unclosed fence above it, a
-  setext heading, or a missing space after `#`.
+```text
+docs/guide.md: 238 lines, 14.9 KiB (~3.8k tokens), version caefcbf3812c
+  1  # Backup tool  #backup-tool  [238 lines, 14.9 KiB]
+ 28  ## Installing  #installing  [14 lines, 288 B]
+ 36  ### Example  #example  [6 lines, 218 B]
+ 42  ## Configuring  #configuring  [11 lines, 349 B]
+ 46  ### Example  #example-1  [7 lines, 286 B]
+ 53  ## Notes  #notes  [9 lines, 419 B]
+ 62  ## Reference  #reference  [163 lines, 11.8 KiB]
+225  ## Restoring  #restoring  [14 lines, 435 B]
+(read a section: read_section with doc and its id)
+```
+
+Each column: the line a section starts on, its heading, its id, and its
+size to the next heading of the same or a higher level. What this one
+shows:
+
+- **A long introduction.** The title is on line 1 and the first `##` on
+  line 28: 26 lines that belong to the title's section, the whole
+  document. A search that matches there gives the agent all 14.9 KiB.
+  Keep a short paragraph under the title and move the rest under `##`
+  headings.
+- **Duplicate titles.** Two `### Example` sections: the second is
+  `#example-1`, and neither says what it shows. Name them ("Example: a
+  nightly backup", "Example: excluding caches").
+- **A heading that does not say what the section answers.** `## Notes`
+  tells the agent nothing before it reads. Say what the notes are
+  about, or move each into the section it belongs to.
+- **A section too large to read whole.** `## Reference` is 11.8 KiB
+  without subsections, over the 8 KiB an agent reads at once. Split it
+  with `###` headings (one per group of options), or a table per group.
+- **A heading missing.** The guide has a `## Troubleshooting` section
+  that the outline does not list, and `## Restoring` runs to the end of
+  the file. The code fence under "Restoring" is never closed, so
+  everything after it is code. Close the fence. Other causes of a
+  missing heading: a setext heading (underlined with `---`) or no space
+  after `#`.
 
 For a set of documents that matters, write down the questions readers
 ask and the section that answers each, and measure what answering them
