@@ -12,6 +12,12 @@ tools/suse-docs/convert                    # build/sles-16.0, served from there
 tools/suse-docs/convert build/sles-16.0 /usr/share/mcp-docs/docs/suse/sles-16.0
 ```
 
+In a package build, which has no network, `SRC` names the unpacked
+sources of the pinned revision instead of a clone; installed with the
+package `mcp-docs-convert`, the script is
+`/usr/share/mcp-docs-convert/suse-docs/convert` and uses the installed
+converter ([packaging/suse](../../packaging/suse/README.md)).
+
 The second argument is where the documents will be installed; the
 collection file `sles-16.0.yaml` names it as the root. To try the
 collection without installing it:

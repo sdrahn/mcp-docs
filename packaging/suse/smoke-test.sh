@@ -1,9 +1,11 @@
 #!/bin/sh
-# smoke-test.sh: check an installed mcp-docs package, as root, on a
-# system it may change (CI's openSUSE containers): the program, the
-# directories it owns, and an MCP session on a collection file that
-# serves mcp-docs' documentation (from the checkout it runs in: container
-# images may install packages without their %doc files).
+# smoke-test.sh: check the installed mcp-docs and mcp-docs-convert
+# packages, as root, on a system it may change (CI's openSUSE
+# containers): the program, the directories it owns, and an MCP session
+# on a collection file that serves mcp-docs' documentation (from the
+# checkout it runs in: container images may install packages without
+# their %doc files); then the converter on the article the checkout's
+# tests use, served.
 #
 #   packaging/suse/smoke-test.sh <version>
 set -eu
@@ -18,7 +20,7 @@ src=$(cd "$(dirname "$0")/../.." && pwd)
 confdir=$src/.smoke-collections.d
 cleanup() {
 	rm -f /usr/share/mcp-docs/collections.d/mcp-docs.yaml /etc/mcp-docs/collections.d/broken.yaml
-	rm -rf "$docdir" "$confdir"
+	rm -rf "$docdir" "$confdir" /tmp/smoke-converted
 }
 cleanup
 trap cleanup EXIT
@@ -97,5 +99,21 @@ kill -TERM "$pid"
 wait "$pid" || fail "HTTP: did not stop cleanly: $(cat /tmp/smoke-http.err)"
 expect 'mcp-docs/architecture.md'
 grep -q 'listening on http://127.0.0.1:18080/mcp' /tmp/smoke-http.err || fail "HTTP: $(cat /tmp/smoke-http.err)"
+
+# The converter: its files, and SUSE's SELinux article (the checkout's
+# test sources) converted and served.
+mcp-docs-convert --version | grep -qx "mcp-docs-convert $version" || fail "mcp-docs-convert --version: $(mcp-docs-convert --version)"
+for f in /usr/bin/mcp-docs-convert /usr/share/mcp-docs-convert/suse-docs/convert /usr/share/mcp-docs-convert/suse-docs/sles-16.0; do
+	rpm -qf "$f" | grep -q '^mcp-docs-convert-' || fail "$f is not owned by mcp-docs-convert"
+done
+mcp-docs-convert --strict --src "$src/internal/docbook/testdata/doc-modular" --dc DC-SLES-SELinux \
+	--out /tmp/smoke-converted --name sles-16.0 --site-url 'https://documentation.suse.com/sles/16.0/html/%s/' \
+	2>/tmp/smoke.err || fail "mcp-docs-convert: $(cat /tmp/smoke.err)"
+{
+	echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_sections","arguments":{"query":"make a domain permissive"}}}'
+	sleep 2
+} | timeout 30 mcp-docs --collection sles-16.0=/tmp/smoke-converted >/tmp/smoke.out 2>/tmp/smoke.err || fail "the converted article: $(cat /tmp/smoke.err)"
+expect 'sles-16.0/topics/selinux-permissive-domains.md'
+expect '#setting-permissive-domain'
 
 echo "smoke-test: mcp-docs $version works ($(grep -o 'Landlock.*$' /tmp/smoke.err | head -n 1 || echo 'Landlock: not reported'))"

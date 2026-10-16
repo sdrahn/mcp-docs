@@ -10,25 +10,41 @@
 # the collection file; ROOT (default OUT's absolute path) is where the
 # collection file says the documents are, for example
 # /usr/share/mcp-docs/docs/suse/sles-16.0 when they are installed there.
-# The sources are cloned into build/doc-modular.
+#
+# The sources are cloned into build/doc-modular, or, with SRC set, read
+# from that tree as it is (an unpacked tarball of the pinned revision, as
+# in a package build, which has no network). In a checkout of mcp-docs the
+# converter is built from it; installed (package mcp-docs-convert, below
+# /usr/share/mcp-docs-convert/suse-docs), it is the installed one.
 set -eu
 
 rev=a9f708401da072b024e66994c8f15d91250b836e
 branch=maintenance/SLE16.0
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-build/sles-16.0}
-src=build/doc-modular
 
-if [ ! -d "$src/.git" ]; then
-	mkdir -p build
-	git clone -q --filter=blob:none --no-checkout https://github.com/SUSE/doc-modular "$src"
+if [ -n "${SRC:-}" ]; then
+	src=$SRC
+else
+	src=build/doc-modular
+	if [ ! -d "$src/.git" ]; then
+		mkdir -p build
+		git clone -q --filter=blob:none --no-checkout https://github.com/SUSE/doc-modular "$src"
+	fi
+	git -C "$src" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$src" fetch -q origin "$branch"
+	git -C "$src" checkout -q --detach "$rev"
 fi
-git -C "$src" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$src" fetch -q origin "$branch"
-git -C "$src" checkout -q --detach "$rev"
+
+convert=mcp-docs-convert
+repo=$(cd "$here/../.." && pwd)
+if [ -d "$repo/cmd/mcp-docs-convert" ]; then
+	(cd "$repo" && go build -o bin/mcp-docs-convert ./cmd/mcp-docs-convert)
+	convert=$repo/bin/mcp-docs-convert
+fi
 
 rm -rf "$out"
 mkdir -p "$out"
-go run ./cmd/mcp-docs-convert --strict --src "$src" --dcs "$here/sles-16.0" --out "$out" \
+"$convert" --strict --src "$src" --dcs "$here/sles-16.0" --out "$out" \
 	--name sles-16.0 --title "SUSE Linux Enterprise Server 16.0" \
 	--description "The documentation of SUSE Linux Enterprise Server 16.0 from documentation.suse.com, converted from its DocBook sources." \
 	--site-url "https://documentation.suse.com/sles/16.0/html/%s/" \

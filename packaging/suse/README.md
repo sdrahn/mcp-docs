@@ -3,8 +3,8 @@
 `mcp-docs.spec` and `_service` are ready to be used in an Open Build
 Service project. CI builds the same spec in openSUSE Tumbleweed and
 openSUSE Leap 16.0 containers (job `opensuse` in
-`.github/workflows/ci.yml`), runs rpmlint, installs the package and runs
-`smoke-test.sh` on it.
+`.github/workflows/ci.yml`), runs rpmlint, installs the packages
+(mcp-docs and mcp-docs-convert) and runs `smoke-test.sh` on them.
 
 Build targets:
 
@@ -80,6 +80,28 @@ workflow runs the same check before it builds anything.
 | `/usr/share/mcp-docs/collections.d/` | collection files shipped by packages (owned by mcp-docs; packages that ship one own it too, with `%dir`) |
 | `/etc/mcp-docs/collections.d/` | the administrator's collection files: one of the same name replaces a package's, an empty one disables it |
 | `/usr/share/doc/packages/mcp-docs/` | README, CHANGELOG, architecture, `examples/collections.d/` |
+
+The spec builds a second package from the same sources, `mcp-docs-convert`
+(MIT; it links only the Go standard library). It is for building
+packages of SUSE's documentation, as a build requirement, and needs
+neither mcp-docs nor network access:
+
+| Path | What |
+|---|---|
+| `/usr/bin/mcp-docs-convert` | the converter of SUSE's DocBook sources into collections ([docs/architecture.md](../../docs/architecture.md), §14) |
+| `/usr/share/mcp-docs-convert/suse-docs/` | `convert`, which converts SLES 16.0's articles, their list `sles-16.0`, and its README |
+
+A documentation package ships the sources of the pinned revision as a
+tarball and converts them in `%build`:
+
+```spec
+Source1:        doc-modular-a9f7084.tar.gz
+BuildRequires:  mcp-docs-convert
+
+%build
+SRC=doc-modular-a9f7084 %{_datadir}/mcp-docs-convert/suse-docs/convert \
+    build/sles-16.0 %{_datadir}/mcp-docs/docs/suse/sles-16.0
+```
 
 ## Making a package's documentation available to agents
 
