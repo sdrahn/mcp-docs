@@ -12,8 +12,8 @@ gateway's own documentation (that project's `docs/architecture.md`,
 roadmap steps 27 and 28) into a server for any set of Markdown
 documents.
 
-Status: steps 1 to 5 of the plan (section 11) are implemented; step 6
-is design. Figures in the examples are from mcp-gateway's docs; elided ones
+Status: steps 1 to 5 and 7 of the plan (section 11) are implemented;
+steps 6 and 8 are design. Figures in the examples are from mcp-gateway's docs; elided ones
 are marked `…`.
 
 ## 1. The problem
@@ -529,6 +529,13 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
+8. **SUSE documentation** (design, §14): a converter,
+   `mcp-docs-convert`, from SUSE's DocBook sources to Markdown
+   collections, so that the documentation of documentation.suse.com is
+   served offline, a section at a time. First the SLES 16.0 SELinux
+   article end to end, with golden tests and evaluation questions; then
+   all SLES 16 articles, packaged per product version and as a container
+   image; SLE 15 guides after.
 
 ## 12. Decisions
 
@@ -564,6 +571,11 @@ Tools stay the main way in: a resource read cannot carry `depth`,
   request stands alone, any number of instances serve one endpoint, and
   a restart loses nothing. Authentication and TLS belong to what is in
   front of it.
+- **D12. SUSE documentation converted from its sources, ahead of time.**
+  Not fetched per call (network in a server that has none, a round trip
+  per read, no index) and not scraped from the published HTML (its
+  layout is not an interface): the DocBook sources carry the structure,
+  the ids and the metadata, and the conversion runs once per release.
 
 ## 13. HTTP and containers
 
@@ -613,3 +625,123 @@ collection `mcp-docs`; an image for a product's documentation builds on
 it and adds its documents and collection file (the converted SUSE
 documentation, for one), so that the image's tag names the
 documentation's version and updating it is a rebuild.
+
+## 14. SUSE documentation (step 8, design)
+
+documentation.suse.com publishes SUSE's product documentation as HTML
+and PDF, built from DocBook sources on GitHub. An agent on a SUSE
+system asks about that documentation most of all. Step 8 makes it a
+collection: converted ahead of time from the sources into Markdown that
+mcp-docs serves like any other (D12), so that all its tools work on it
+and the server stays offline and read-only.
+
+### 14.1 The sources
+
+| Products | Repository | Shape |
+|---|---|---|
+| SLE 16 family, SUSE Linux Micro | `SUSE/doc-modular`, `main` | "Smart Docs": about 1,400 DocBook 5.2 files; task, concept, reference and glue topics (`tasks/`, `concepts/`, `references/`, `glues/`) assembled into about 108 articles (`articles/*.asm.xml`) |
+| SLE 15, SLE 12, SLE Micro, openSUSE Leap | `SUSE/doc-sle`, `main` and `maintenance/SLE15SPx` | DocBook guides (`xml/`, about 470 files), one book per guide |
+
+Both are under the GNU Free Documentation License 1.2 or later, with an
+invariant section (the copyright notice): converted copies may be
+distributed with the license text and that notice.
+
+What the converter reads in doc-modular:
+
+- **Build definitions**, `DC-*`: `MAIN` (the assembly), `SRC_DIR`, and
+  the profiling values (`PROFOS="sles"`) that select a product's text
+  from shared sources.
+- **Assemblies**: `<resources>` maps resource ids to topic files;
+  `<structure renderas="article" xml:id="…">` is the article, whose
+  `<merge>` gives its title and `<meta>` fields (`title`,
+  `description`, `productname`, `architecture`, `task`, `series`); its
+  nested `<module resourceref="…" renderas="section">` give the topics'
+  order and nesting, a `<merge>` in a module overriding a title.
+- **Topics**: `<topic xml:id="…">` with `<info>` (title, meta) and
+  `<section xml:id="…">`; a few KB each (3.3 KB for "Changing the
+  SELinux mode").
+- **Entities**: `common/generic-entities.ent`,
+  `product-entities.ent`, `network-entities.ent` (`&selnx;`,
+  `&prompt.root;`, product names).
+
+### 14.2 The converter
+
+`mcp-docs-convert` (in this repository, Go, `encoding/xml`): source
+tree and DC file in, Markdown documents and a collection file out.
+
+1. **Entities** resolved from the `.ent` files the sources declare;
+   an unresolved one is an error, not text left as `&x;`.
+2. **Profiling**: elements whose `os`, `arch` and other profiling
+   attributes do not match the DC's values are left out.
+3. **Structure** from the assembly: the article's modules in order, a
+   module's nesting as heading levels, merged titles applied.
+4. **Elements**: titles to ATX headings; `para` to paragraphs;
+   `screen` and `programlisting` to fenced code (with the language when
+   given); `itemizedlist`, `orderedlist`, `procedure`/`step` to lists;
+   `variablelist` to bold terms with their text; simple tables to pipe
+   tables, others to lists of rows; `note`, `tip`, `important`,
+   `warning` to quoted paragraphs that open with their kind;
+   `command`, `option`, `filename`, `literal` to code spans,
+   `replaceable` to `<NAME>` in them; images to their alt text or
+   caption only. An element it does not know is reported, so that none
+   is dropped silently.
+5. **Ids**: every `xml:id` of a topic or section becomes an explicit
+   anchor (`## Changing the SELinux mode {#selinux-switching-modes}`),
+   so that mcp-docs' section ids are SUSE's ids; `xref` and `link`
+   become links to `document#id`, or to documentation.suse.com when the
+   target is outside the collection.
+6. **Front matter** per document: `title`, `description` (the
+   article's or topic's meta), `tags` (the topic type, the article's
+   `task` values), and `source`, the page on documentation.suse.com.
+
+### 14.3 Documents and collections
+
+- **One document per topic**, named by its id
+  (`selinux-switching-modes.md`), so that a topic that several articles
+  reuse is found once by `search` and `find_sections`;
+- **one index document per article** (`articles/selinux.md`): its title,
+  description, and its topics in order as links, so that an agent who
+  wants the article reads it in order;
+- **one collection per product version** (`sles-16.0`), its index a
+  generated list of the articles with their descriptions, and
+  instructions that name the product version and the license.
+
+The open choice is the other one, one document per article: closer to
+the site's pages, duplicate matches for reused topics. Topics first;
+the evaluation (§14.5) decides if that is wrong.
+
+### 14.4 Delivery
+
+- **A package per product version**, built on OBS, for example
+  `suse-docs-mcp-sles-16.0`: the converter runs at build time on a
+  pinned source revision; the package installs the documents below
+  `/usr/share/mcp-docs/docs/suse/sles-16.0`, the collection file, and
+  the license. Offline, air-gapped, updated with maintenance updates.
+  It does not require mcp-docs (without it, the files do nothing).
+- **A container image** on the image of §13, with the same documents:
+  its tag names the product and documentation version.
+- **Later, a sync timer** (`mcp-docs-sync`) for systems that want the
+  current documentation between releases: it fetches the sources (the
+  network is the timer's, never the server's), converts the product and
+  version of `/etc/os-release` into `/var/lib/mcp-docs`, and the server
+  reads collection files from `/var/lib/mcp-docs/collections.d` too.
+
+What mcp-docs itself needs: the `source` front matter shown by
+`outline`, `list_docs` and `find_sections`, so that agents cite the
+official page; the third directory of collection files for the sync.
+
+### 14.5 Testing
+
+- **Golden tests**: a few topics and an assembly from doc-modular as
+  fixtures (with the license), converted and compared with the expected
+  Markdown.
+- **Checks on a whole conversion**: every `xml:id` an anchor, no
+  unresolved entity, no unknown element, every internal link resolving.
+- **Evaluation questions** on the converted SLES 16 documentation, as
+  §10 has for mcp-gateway's: "how do I switch SELinux to permissive
+  until the next boot?", with the section that answers each.
+- **Not verified yet**: how documentation.suse.com names pages and
+  anchors (for `source` and for links out of a collection). The site
+  was not reachable from where this was written; the converter's first
+  version checks its URLs against the site.
+
