@@ -76,7 +76,7 @@ workflow runs the same check before it builds anything.
 
 | Path | What |
 |---|---|
-| `/usr/bin/mcp-docs` | the server (MCP on stdin/stdout) |
+| `/usr/bin/mcp-docs` | the server (MCP on stdin/stdout, or HTTP with `--listen`) |
 | `/usr/share/mcp-docs/collections.d/` | collection files shipped by packages (owned by mcp-docs; packages that ship one own it too, with `%dir`) |
 | `/etc/mcp-docs/collections.d/` | the administrator's collection files: one of the same name replaces a package's, an empty one disables it |
 | `/usr/share/doc/packages/mcp-docs/` | README, CHANGELOG, architecture, `examples/collections.d/` |

@@ -1,0 +1,9 @@
+# The image's own documentation, so that it answers out of the box. An
+# image built on this one disables it with an empty
+# /etc/mcp-docs/collections.d/mcp-docs.yaml.
+title: mcp-docs documentation
+root: /usr/share/mcp-docs/docs/mcp-docs
+description: >
+  The server itself: how it reads documents a section at a time, its
+  design and decisions, and how to write Markdown for agents.
+index: README.md

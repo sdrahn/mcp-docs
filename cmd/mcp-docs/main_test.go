@@ -66,10 +66,43 @@ func TestLoadCollections(t *testing.T) {
 // files there: their directories must be readable, wherever they are.
 func TestLandlockRulesHaveConfigDirs(t *testing.T) {
 	k := &catalog.Collection{Name: "k", Path: "/srv/docs", Also: []string{"/opt/x/CHANGELOG.md"}}
-	r := landlockRules([]*catalog.Collection{k}, []string{"rel/collections.d", "/etc/mcp-docs/collections.d"})
+	conf := t.TempDir()
+	if err := os.Mkdir(filepath.Join(conf, "collections.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	wd, _ := os.Getwd()
-	want := []string{"/srv/docs", "/opt/x/CHANGELOG.md", filepath.Join(wd, "rel/collections.d"), "/etc/mcp-docs/collections.d"}
+	rel, err := filepath.Rel(wd, filepath.Join(conf, "collections.d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A relative directory is made absolute; a missing one is left out.
+	r := landlockRules([]*catalog.Collection{k}, []string{rel, filepath.Join(conf, "missing")}, -1)
+	want := []string{"/srv/docs", "/opt/x/CHANGELOG.md", filepath.Join(conf, "collections.d")}
 	if strings.Join(r.Read, " ") != strings.Join(want, " ") || r.Write != nil {
 		t.Errorf("rules %+v, want read %v", r, want)
+	}
+	// TCP: none on stdin/stdout; over HTTP, binding its port only; no
+	// connection either way; a port the kernel chooses cannot be named.
+	if r.TCPBind == nil || len(r.TCPBind) != 0 || r.TCPConnect == nil || len(r.TCPConnect) != 0 {
+		t.Errorf("stdio TCP: %+v", r)
+	}
+	if r := landlockRules(nil, nil, 8080); len(r.TCPBind) != 1 || r.TCPBind[0] != 8080 || len(r.TCPConnect) != 0 || r.TCPConnect == nil {
+		t.Errorf("HTTP TCP: %+v", r)
+	}
+	if r := landlockRules(nil, nil, 0); r.TCPBind != nil {
+		t.Errorf("port 0: %+v", r)
+	}
+}
+
+func TestListenPort(t *testing.T) {
+	for addr, want := range map[string]int{":8080": 8080, "127.0.0.1:9": 9, "[::1]:443": 443, "localhost:0": 0} {
+		if got, err := listenPort(addr); err != nil || got != want {
+			t.Errorf("%s: %d %v", addr, got, err)
+		}
+	}
+	for _, bad := range []string{"8080", "host:http", ":70000", ""} {
+		if _, err := listenPort(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
 	}
 }

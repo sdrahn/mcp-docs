@@ -1,0 +1,4 @@
+.git
+bin
+*.rpm
+.smoke-collections.d

@@ -76,7 +76,7 @@ having:
 
 ```
               agent (Claude Code, Kit, …)
-                     │ MCP (stdio; or through mcp-gateway)
+                     │ MCP (stdio, Streamable HTTP §13; or through mcp-gateway)
               ┌──────▼───────────────────────────────┐
               │ mcp-docs                              │
               │                                       │
@@ -104,12 +104,13 @@ and `golang.org/x/sys` for Landlock):
 
 | Package | Does |
 |---|---|
-| `cmd/mcp-docs` | flags, configuration, sandbox, serve on stdio |
+| `cmd/mcp-docs` | flags, configuration, sandbox, serve on stdio or HTTP |
 | `internal/markdown` | the scanner: headings, fences, front matter, anchors, section extents, in one streamed pass |
 | `internal/catalog` | collections, their documents, the cache keyed by file identity |
 | `internal/search` | literal and RE2 line search; later the ranked section index |
 | `internal/server` | MCP: tools, resources, instructions, limits |
 | `internal/mcpserver` | JSON-RPC over stdio, ported from mcp-gateway's (no dependencies, already in use there) |
+| `internal/mcphttp` | the same handler over Streamable HTTP, stateless (§13) |
 | `internal/landlock` | ported from mcp-gateway |
 
 Ported rather than imported: mcp-gateway's packages are `internal/`.
@@ -424,7 +425,10 @@ The server only reads, and only its roots:
 - **Landlock**: after reading its configuration, the process restricts
   itself to reading its roots (and the `also` files), as
   `mcp-server-fs` does; a kernel without Landlock is logged, not fatal;
-- no network: it opens no socket; under mcp-gateway, `network: false`;
+- no network on stdio: it opens no socket, and Landlock (ABI 4) allows
+  it no TCP connection and no listening; under mcp-gateway,
+  `network: false`. Over HTTP (§13) it listens on its one port, which
+  Landlock allows it to bind, and still connects nowhere;
 - runs as anyone: under mcp-gateway, `run_as: dynamic`; under systemd,
   `DynamicUser=yes`, `ProtectHome=yes` unless a root is in a home;
 - SELinux: the `mcpsrv_docs_t` domain of mcp-gateway reads `usr_t` and
@@ -522,6 +526,9 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 6. **Other formats**: the scanner behind an interface (headings with
    extents, ids, metadata), so that AsciiDoc, reStructuredText or man
    pages can be collections too. Markdown only until there is a need.
+7. **HTTP and containers** (done): `--listen`, stateless Streamable
+   HTTP (§13); a container image (`packaging/container`), built and
+   queried in CI.
 
 ## 12. Decisions
 
@@ -552,3 +559,57 @@ Tools stay the main way in: a resource read cannot carry `depth`,
   folded into the text loses to length normalisation.
 - **D10. List items as sections by choice, per collection.** The rule
   guesses at authors' intent; a collection says when it fits.
+- **D11. Stateless HTTP.** No sessions, no event streams: the tools
+  need no state between calls and send nothing unasked, so every
+  request stands alone, any number of instances serve one endpoint, and
+  a restart loses nothing. Authentication and TLS belong to what is in
+  front of it.
+
+## 13. HTTP and containers
+
+For an agent on the same machine, stdio is the transport: the agent
+starts the server, and no port, address or authentication is involved.
+That holds for a container too (`podman run -i --rm image` as the
+command). For one server that many agents reach over a network (the
+documentation of a product, in a container on a cluster), mcp-docs
+speaks MCP's Streamable HTTP with `--listen ADDR`:
+
+- **One endpoint**, `/mcp`. A client POSTs one JSON-RPC message per
+  request (`Content-Type: application/json`); a request gets its
+  response as JSON (`200`), a notification or response `202` with no
+  body. `GET` and `DELETE` are `405`: there is no stream for the server
+  to send on and no session to end. Batches (removed in 2025-06-18) are
+  refused.
+- **Stateless** (D11): `initialize` is answered without
+  `Mcp-Session-Id`; every later request stands alone. A cancellation
+  is the client closing its request, which cancels the handler's
+  context; `notifications/cancelled` has nothing to do.
+- **Checks the specification asks for:** an `Origin` header (from a
+  browser) must be one of `--allow-origin` (none by default; clients
+  that are not browsers send none and are served), against DNS
+  rebinding; `MCP-Protocol-Version` must be a version spoken (none means
+  2025-03-26).
+- **Bounds:** a body of 1 MiB, `--max-concurrent` requests at once (32;
+  more wait while their client does), 60 s per request, and the HTTP
+  server's header, read, write and idle timeouts.
+- **`/healthz`** answers `200` for health checks and load balancers.
+- **Stopping:** SIGTERM or SIGINT stops accepting and lets requests in
+  progress finish (up to 30 s), as a container runtime stops it.
+- **Not its job:** TLS and authentication, which an ingress or reverse
+  proxy in front of it does (mTLS, OAuth, tokens). The documents are
+  read-only and often public; MCP's own authorization flow is worth
+  building only for a server exposed on its own.
+- **Landlock:** binding only the port of `--listen`, connecting nowhere
+  (a port the kernel chooses, `:0`, cannot be named: binding is then
+  not restricted).
+
+### The container image
+
+`packaging/container/Containerfile` builds a static binary in SUSE
+BCI's Go image and runs it on BCI micro (or `scratch`): `ENTRYPOINT
+mcp-docs --listen :8080`, user 65532, nothing written, so the root file
+system can be read-only. It serves mcp-docs' own documentation as the
+collection `mcp-docs`; an image for a product's documentation builds on
+it and adds its documents and collection file (the converted SUSE
+documentation, for one), so that the image's tag names the
+documentation's version and updating it is a rebuild.

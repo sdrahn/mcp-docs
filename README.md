@@ -36,6 +36,26 @@ It speaks MCP on stdin/stdout. In Claude Code:
 claude mcp add docs -- /usr/bin/mcp-docs --root /usr/share/mcp-gateway/docs
 ```
 
+### Over HTTP, and in a container
+
+For a server that many agents reach over the network, `--listen`
+serves MCP's Streamable HTTP, statelessly: one JSON-RPC message per
+POST to `/mcp`, health at `/healthz`. TLS and authentication belong to
+the ingress or proxy in front of it.
+
+```sh
+bin/mcp-docs --listen :8080 --root /usr/share/mcp-gateway/docs
+claude mcp add --transport http docs http://docs.example:8080/mcp
+```
+
+The container image ([packaging/container](packaging/container/README.md))
+runs it on port 8080 as any user on a read-only root file system:
+
+```sh
+podman build -f packaging/container/Containerfile -t mcp-docs .
+podman run --rm -p 8080:8080 --read-only mcp-docs
+```
+
 Options:
 
 | Option | Default | |
@@ -49,6 +69,9 @@ Options:
 | `--max-entries N` | 10000 | documents a listing or search covers |
 | `--ext LIST` | `.md,.markdown` | extensions of documents |
 | `--list-items` | off | in the collections of `--root` and `--collection`, take list items and paragraphs that open with a bold title as sections |
+| `--listen ADDR` | | serve Streamable HTTP on this address (`:8080`) instead of stdin/stdout |
+| `--allow-origin URL` | | with `--listen`, a browser origin requests may come from (repeatable); requests without `Origin` are always served |
+| `--max-concurrent N` | 32 | with `--listen`, requests handled at once |
 | `--fs-compat` | off | also offer mcp-server-fs's `outline_file`, `search_text`, `read_text_file`, `search_files`, `list_directory` |
 
 ### Collection files
@@ -82,8 +105,9 @@ than one read comes as its first part. The prompt `answer_from_docs`
 documentation the way the instructions teach.
 
 The server only reads. It restricts itself with Landlock to reading
-its collections, and a symbolic link that leads out of a collection is
-refused.
+its collections, to no TCP connection, and to listening on its
+`--listen` port only (none on stdin/stdout); a symbolic link that leads
+out of a collection is refused.
 
 ### Behind mcp-gateway
 

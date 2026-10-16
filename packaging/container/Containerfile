@@ -1,0 +1,44 @@
+# mcp-docs as a container: MCP over Streamable HTTP on port 8080
+# (POST /mcp, health at /healthz), serving the collections of
+# /usr/share/mcp-docs/collections.d. Build from the repository's top:
+#
+#   podman build -f packaging/container/Containerfile --build-arg VERSION=0.1.0 -t mcp-docs .
+#   podman run --rm -p 8080:8080 mcp-docs
+#
+# The image serves mcp-docs' own documentation as the collection
+# "mcp-docs", so that it answers out of the box. An image for other
+# documentation builds on it (packaging/container/README.md):
+#
+#   FROM mcp-docs
+#   COPY sles16/ /usr/share/mcp-docs/docs/sles16/
+#   COPY sles16.yaml /usr/share/mcp-docs/collections.d/
+#
+# BUILDER is the Go toolchain; BASE the image the program runs in: SUSE
+# BCI micro, or "scratch" (the program is static and needs nothing).
+ARG BUILDER=registry.suse.com/bci/golang:1.24
+ARG BASE=registry.suse.com/bci/bci-micro:16.0
+
+FROM ${BUILDER} AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /out/mcp-docs ./cmd/mcp-docs
+
+FROM ${BASE}
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="mcp-docs" \
+      org.opencontainers.image.description="MCP server for Markdown documentation, a section at a time" \
+      org.opencontainers.image.source="https://github.com/sdrahn/mcp-docs" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
+COPY --from=build /out/mcp-docs /usr/bin/mcp-docs
+COPY LICENSE /usr/share/licenses/mcp-docs/LICENSE
+COPY README.md docs/architecture.md docs/writing-docs.md /usr/share/mcp-docs/docs/mcp-docs/
+COPY packaging/container/mcp-docs.yaml /usr/share/mcp-docs/collections.d/mcp-docs.yaml
+# Any user; the documents are world-readable and nothing is written.
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/mcp-docs", "--listen", ":8080"]
