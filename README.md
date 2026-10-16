@@ -14,9 +14,9 @@ Status: steps 1 to 5 and 7 are implemented: the core, collection files
 and metadata, packaging for openSUSE Tumbleweed, openSUSE Leap 16 and
 SLES 16 ([packaging/suse](packaging/suse/README.md)), ranked search
 (`find_sections`), list items as sections, and HTTP with a container
-image. Designed, not built: other formats than Markdown, and a
-converter for SUSE's documentation (documentation.suse.com) from its
-DocBook sources. See [docs/architecture.md](docs/architecture.md).
+image. A prototype converts SUSE's documentation (documentation.suse.com)
+from its DocBook sources (`mcp-docs-convert`, one article so far); other
+formats than Markdown are designed, not built. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs
 or anything that reads by section:

@@ -83,6 +83,19 @@ func TestSearch(t *testing.T) {
 	if hits, _ := ix.Search("zebra", 5); len(hits) != 0 {
 		t.Errorf("no match: %v", ids(hits))
 	}
+	// Front matter is no text: a document whose only text before its
+	// first heading is front matter has no such unit.
+	write(t, filepath.Join(dir, "fm.md"), "---\ntitle: Quartz\ndescription: Quartz clocks and their care.\n---\n\n# Quartz\n## Care\nWind it.\n")
+	ix, _ = Build(context.Background(), cat, k, 1<<20)
+	if hits, _ := ix.Search("quartz clocks care", 5); len(hits) == 0 || ids(hits)[0] == "fm.md#" {
+		t.Errorf("front matter ranked: %v", ids(hits))
+	} else {
+		for _, id := range ids(hits) {
+			if id == "fm.md#" {
+				t.Errorf("front matter ranked: %v", ids(hits))
+			}
+		}
+	}
 	if _, err := ix.Search("how is it?", 5); err != ErrNoTerms {
 		t.Errorf("stopwords only: %v", err)
 	}

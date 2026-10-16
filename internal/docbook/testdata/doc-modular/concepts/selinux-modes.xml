@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic
+[
+  <!ENTITY % entities SYSTEM "../common/generic-entities.ent">
+    %entities;
+]>
+<!-- refers to legacy doc: <add github link to legacy doc piece, if applicable> -->
+<!-- point back to this document with a similar comment added to your legacy doc piece -->
+<!-- refer to README.md for file and id naming conventions -->
+<!-- metadata is dealt with on the assembly level -->
+<topic xml:id="selinux-modes"
+ role="concept" xml:lang="en"
+ xmlns="http://docbook.org/ns/docbook" version="5.2"
+ xmlns:its="http://www.w3.org/2005/11/its"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:trans="http://docbook.org/ns/transclusion">
+  <info>
+    <title>&selnx; modes</title>
+    <!-- can be changed via merge in the assembly -->
+    <!--add author's email address-->
+    <meta name="maintainer" content="jsindelarova@suse.com" its:translate="no"/>
+
+  </info>
+  <para>
+   &selnx; can run in <literal>enforcing</literal> or <literal>permissive</literal> mode:
+
+  </para>
+ <variablelist>
+ <varlistentry>
+    <term><literal>enforcing</literal></term>
+    <listitem>
+     <para>
+    The security policy is enforced. Any access that is not explicitly allowed by the policy is denied.</para>
+    </listitem>
+         </varlistentry>
+   <varlistentry>
+    <term><literal>permissive</literal></term>
+    <listitem>
+     <para>
+    &selnx; is active, the security policy is loaded, the file system is labeled and access denial entries are logged. However, the policy is not enforced, and no access is denied. </para>
+    </listitem>
+         </varlistentry>
+  </variablelist>
+
+<para os="sles">The default in &productnameshort; &productnumber; is <literal>enforcing</literal> mode.</para>
+<para> <phrase os="sles4sap"> The default in &productname; &productnumber; is enabled in <literal>permissive</literal> mode, if &sap; patterns are installed. </phrase></para>
+  <para>
+    For information about switching between &selnx; modes, refer to
+    <xref linkend="selinux-switching-modes"/>.
+  </para>
+</topic>

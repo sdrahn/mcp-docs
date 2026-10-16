@@ -13,6 +13,7 @@ all: build
 
 build:
 	$(GO) build -trimpath -buildmode=$(BUILDMODE) -ldflags "-X main.version=$(VERSION)" -o bin/mcp-docs ./cmd/mcp-docs
+	$(GO) build -trimpath -buildmode=$(BUILDMODE) -o bin/mcp-docs-convert ./cmd/mcp-docs-convert
 
 test:
 	$(GO) test ./...
