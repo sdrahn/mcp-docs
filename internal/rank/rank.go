@@ -98,6 +98,9 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 		tf[i] = map[string]float64{}
 	}
 	for n, l := range lines {
+		if n < o.FrontMatter {
+			continue // metadata (its title and description are in list_docs), not text
+		}
 		u := o.At(n+1) + 1
 		for _, t := range Tokens(l) {
 			tf[u][t]++

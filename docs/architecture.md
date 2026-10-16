@@ -529,13 +529,13 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (design, §14): a converter,
+8. **SUSE documentation** (§14; prototype done, §14.6): a converter,
    `mcp-docs-convert`, from SUSE's DocBook sources to Markdown
    collections, so that the documentation of documentation.suse.com is
-   served offline, a section at a time. First the SLES 16.0 SELinux
-   article end to end, with golden tests and evaluation questions; then
-   all SLES 16 articles, packaged per product version and as a container
-   image; SLE 15 guides after.
+   served offline, a section at a time. The SELinux article converts
+   end to end, with golden tests and questions served by mcp-docs; next,
+   all SLES 16 articles from `maintenance/SLE16.0`, packaged per product
+   version and as a container image; SLE 15 guides after.
 
 ## 12. Decisions
 
@@ -639,7 +639,7 @@ and the server stays offline and read-only.
 
 | Products | Repository | Shape |
 |---|---|---|
-| SLE 16 family, SUSE Linux Micro | `SUSE/doc-modular`, `main` | "Smart Docs": about 1,400 DocBook 5.2 files; task, concept, reference and glue topics (`tasks/`, `concepts/`, `references/`, `glues/`) assembled into about 108 articles (`articles/*.asm.xml`) |
+| SLE 16 family, SUSE Linux Micro | `SUSE/doc-modular`: `main` is the version in development (16.1 at the time of writing), `maintenance/SLE16.0` the released 16.0 | "Smart Docs": about 1,400 DocBook 5.2 files; task, concept, reference and glue topics (`tasks/`, `concepts/`, `references/`, `glues/`) assembled into about 108 articles (`articles/*.asm.xml`) |
 | SLE 15, SLE 12, SLE Micro, openSUSE Leap | `SUSE/doc-sle`, `main` and `maintenance/SLE15SPx` | DocBook guides (`xml/`, about 470 files), one book per guide |
 
 Both are under the GNU Free Documentation License 1.2 or later, with an
@@ -745,3 +745,42 @@ official page; the third directory of collection files for the sync.
   was not reachable from where this was written; the converter's first
   version checks its URLs against the site.
 
+### 14.6 The prototype
+
+`cmd/mcp-docs-convert` and `internal/docbook` convert one article (a
+build definition) of doc-modular:
+
+```sh
+mcp-docs-convert --src doc-modular --dc DC-SLES-SELinux --out /usr/share/mcp-docs/docs/suse/sles-16.1 \
+    --name sles-16.1 --title "SUSE Linux Enterprise Server 16.1" --revision c66ed55
+```
+
+It writes `topics/ID.md` per topic, `articles/ID.md` for the article and
+`README.md` for the collection, and reports what it could not convert
+(`--strict` makes that an error). On "Understanding SELinux Basics"
+(`internal/docbook/testdata`, doc-modular `main` at c66ed55, under the
+GFDL): 26 topics and the legal notices, no unknown element, no
+unresolved entity, no broken link; SLE Micro's and SAP's text left out
+by `PROFOS="sles"`. Served by mcp-docs, seven questions in words find
+the answering section first ("make a domain permissive" →
+`#setting-permissive-domain`), and `read_section` takes SUSE's ids.
+
+What it showed:
+
+- `main` documents the version in development: `&productnumber;` is
+  16.1. Released documentation comes from the maintenance branches.
+- Ids on elements that are not headings (an example, a variable list)
+  are link targets too: a link to one goes to the section that holds
+  it, under the element's own title (`[Common options](#sec-semanage-command)`).
+- An assembly's resources can include topics its structure does not
+  use; only those in the structure are converted.
+- Entities hold markup that profiling must see (`&productname;` is a
+  phrase per product), so they are expanded before parsing.
+- A fix in mcp-docs itself: `find_sections` ranked front matter as the
+  text before a document's first heading; front matter is metadata now,
+  not ranked.
+
+Not yet: `source` points to the source file on GitHub until the site's
+page names are checked; topics' titles overridden by an article are
+shown in the article's index only; tables, figures and other formats of
+doc-sle are written but untested on real sources.

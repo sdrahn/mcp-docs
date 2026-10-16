@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic
+[
+  <!ENTITY % entities SYSTEM "../common/generic-entities.ent">
+    %entities;
+]>
+<!-- refers to legacy doc: <add github link to legacy doc piece, if applicable> -->
+<!-- point back to this document with a similar comment added to your legacy doc piece -->
+<!-- refer to README.md for file and id naming conventions -->
+<!-- metadata is dealt with on the assembly level -->
+<topic xml:id="selinux-booleans"
+ role="concept" xml:lang="en"
+ xmlns="http://docbook.org/ns/docbook" version="5.2"
+ xmlns:its="http://www.w3.org/2005/11/its"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:trans="http://docbook.org/ns/transclusion">
+  <info>
+    <title>&selnx; Booleans</title>
+    <!-- can be changed via merge in the assembly -->
+    <!--add author's email address-->
+    <meta name="maintainer" content="jsindelarova@suse.com" its:translate="no"/>
+    <abstract>
+      <para>
+        The topic describes the basics of &selnx; Booleans.
+      </para>
+    </abstract>
+  </info>
+  <!-- can be changed via merge in the assembly -->
+  <para>
+    Instead of requiring the development and compilation of custom policy rules,
+    booleans encapsulate predefined policy adjustments.
+    Their primary purpose is to accommodate common operational workloads that,
+    if permitted by default in the main policy, could potentially reduce the
+    baseline security posture of a general-purpose system.
+  </para>
+  <para>
+    Instead of requiring the development and compilation of custom policy rules,
+    booleans encapsulate predefined policy adjustments.
+    This allows selectively enabling or disabling specific functionalities on
+    an as-needed basis.
+  </para>
+  <para>
+    These changes can be applied at runtime and take effect immediately.
+    Administrators can configure Booleans to be effective temporarily for the
+    current session or persistently across reboots.
+  </para>
+</topic>

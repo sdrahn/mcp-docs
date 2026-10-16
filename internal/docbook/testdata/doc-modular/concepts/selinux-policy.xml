@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic
+[
+  <!ENTITY % entities SYSTEM "../common/generic-entities.ent">
+    %entities;
+]>
+<!-- refers to legacy doc: <add github link to legacy doc piece, if applicable> -->
+<!-- point back to this document with a similar comment added to your legacy doc piece -->
+<!-- refer to README.md for file and id naming conventions -->
+<!-- metadata is dealt with on the assembly level -->
+<topic xml:id="selinux-policy"
+ role="concept" xml:lang="en"
+ xmlns="http://docbook.org/ns/docbook" version="5.2"
+ xmlns:its="http://www.w3.org/2005/11/its"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:trans="http://docbook.org/ns/transclusion">
+  <info>
+    <title>&selnx; policy overview</title>
+    <!-- can be changed via merge in the assembly -->
+    <!--add author's email address-->
+    <meta name="maintainer" content="jsindelarova@suse.com" its:translate="no"/>
+    <abstract>
+      <!-- can be changed via merge in the assembly -->
+      <para>
+        The topic describes the &selnx; policy basics.
+      </para>
+    </abstract>
+  </info>
+  <para>
+    The policy is the key component of &selnx;. In &selnx;, Mandatory Access Control (MAC) is implemented through security labels known as &selnx; contexts.
+    Each process and system resource is assigned a unique &selnx; security context, also referred to as an &selnx; label.
+    An &selnx; context is an identifier that focuses only on the security properties of the entity.
+    This provides a consistent and unambiguous method for referencing objects within the &selnx; policy.
+  </para>
+  <para>
+    An &selnx; policy contains a huge number of security contexts and access rules between those
+    security contexts. These are split into modules.
+    This allows the administrator to customize policies for different parts of the
+    system.
+  </para>
+  <para>For SAP workloads:</para>
+  <para> The <literal>selinux-policy-sapenablement</literal> package is for &selnx; policy changes for running &sap;.
+    Currently it sets the settings that are needed to run SAP applications in an unconfined context, but still sets &selnx; to <literal>permissive</literal> mode.
+    This package is installed by default.</para>
+</topic>

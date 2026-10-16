@@ -48,3 +48,7 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   again after restricting itself with Landlock, which did not allow
   their directories. When no collection is left, the reasons are now
   printed.
+- `mcp-docs-convert` (prototype): converts an article of SUSE's DocBook
+  sources (SUSE/doc-modular) into a Markdown collection: entities and
+  profiling resolved, every xml:id an anchor, one document per topic,
+  an index per article, front matter with the source.

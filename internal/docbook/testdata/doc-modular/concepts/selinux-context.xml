@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE topic
+[
+  <!ENTITY % entities SYSTEM "../common/generic-entities.ent">
+    %entities;
+]>
+<!-- refers to legacy doc: <add github link to legacy doc piece, if applicable> -->
+<!-- point back to this document with a similar comment added to your legacy doc piece -->
+<!-- refer to README.md for file and id naming conventions -->
+<!-- metadata is dealt with on the assembly level -->
+<topic xml:id="selinux-context"
+ role="concept" xml:lang="en"
+ xmlns="http://docbook.org/ns/docbook" version="5.2"
+ xmlns:its="http://www.w3.org/2005/11/its"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xmlns:trans="http://docbook.org/ns/transclusion">
+  <info>
+    <title>SELinux security context</title>
+    <!-- can be changed via merge in the assembly -->
+    <!--add author's email address-->
+    <meta name="maintainer" content="jsindelarova@suse.com" its:translate="no"/>
+    <abstract>
+      <!-- can be changed via merge in the assembly -->
+      <para>
+        The topic covers the &selnx; context parts - type, role, user, level
+        and category.
+      </para>
+    </abstract>
+  </info>
+  <para>
+    The security context is a set of information assigned to a file or a
+    process. It consists of &selnx; user, role, type, level and category. This
+    information is used to make access control decisions.
+  </para>
+  <para>A &selnx; context looks like this:</para>
+<screen>user_u:role_r:type_t:level:category</screen>
+  <tip>
+   <title>Focus on the SELinux type</title>
+   <para>
+    For beginners working with SELinux, it is recommended to focus first on the &selnx; type, which is <literal>type_t</literal>.
+    This is because SELinux rules mainly use the SELinux type to define allowed access, a core concept known as <emphasis>Type Enforcement</emphasis>.
+   </para>
+   <para>
+    An understanding of SELinux types is critical, as they are frequently modified during SELinux administration.
+   </para>
+  </tip>
+  <variablelist>
+    <title>&selnx; context fields</title>
+    <varlistentry>
+      <term>&selnx; user</term>
+      <listitem>
+        <para>
+          An identity defined in the policy that is authorized for a specific
+          set of roles and for a specific <emphasis>level</emphasis> range.
+          Each Linux user is mapped to only one &selnx; user. However, one
+          &selnx; user can have several roles.
+        </para>
+        <para>
+          &selnx; does not use the list of user accounts maintained by Linux in
+          <filename>/etc/passwd</filename>, but uses its own database and
+          mapping. By convention, the identity name is suffixed with
+          <literal>_u</literal>, for example, <literal>user_u</literal>.
+        </para>
+        <para>
+          When a new Linux account is created and the &selnx; user is not
+          assigned to the account, the default &selnx; user is used. Usually,
+          the default value is <literal>unconfined_u</literal>. For a procedure
+          on how to change the default value, refer to
+          <xref linkend="semanage-login-command"/>.
+        </para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>role</term>
+      <listitem>
+        <para>
+          Defines a set of permissions that a user can be granted. A role
+          defines which <emphasis>types</emphasis> a user assigned to this role
+          can access. By convention, the role name is suffixed with
+          <literal>_r</literal>, for example, <literal>system_r</literal>.
+        </para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>type</term>
+      <listitem>
+        <para>
+          The type conveys information about how particular files and processes
+          can interact. SELinux policy rules define which types are allowed
+          to access each other. This concept is called <emphasis>Type Enforcement</emphasis>.
+          In the context of processes, this is also sometimes called a <emphasis>domain</emphasis>.
+          By convention, the type name is suffixed with <literal>_t</literal>, for example,
+          <literal>var_t</literal>.
+        </para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>level</term>
+      <listitem>
+        <para>
+          An optional attribute that specifies the range of levels of clearance
+          in the multilevel security.
+        </para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>category</term>
+      <listitem>
+        <para>
+          An optional attribute that allows you to add categories to processes,
+          files and users. A user can then access files that have the same
+          category.
+        </para>
+      </listitem>
+    </varlistentry>
+  </variablelist>
+  <para>
+    To check the current security context of a file, you can list the file with <command>ls -Z</command>.
+    The following example lists the security context of the file <filename>/etc/shadow</filename>:
+  </para>
+<screen>
+&prompt.root; ls -Z /etc/shadow
+system_u:object_r:shadow_t:s0 /etc/shadow
+</screen>
+  <para>
+    To check the current security context of a process, you can display the current
+    process state with <command>ps -Z</command>. The following example lists the
+    security context of the &systemd; process:
+  </para>
+  <screen>
+&prompt.root; ps -eZ | grep systemd
+system_u:system_r:init_t:s0           1 ?        00:00:01 systemd
+...
+  </screen>
+  <tip>
+   <title>The <command>-Z</command> flag convention</title>
+   <para>
+    Many command-line tools, such as <command>ls</command>, <command>ps</command>, <command>mkdir</command>,
+    <command>id</command>, <command>cp</command>, and many more, implement their explicit SELinux handling by adding a <command>-Z</command> flag or option. To check for explicit SELinux handling, refer
+    to the man page of the tool and look out for <command>-Z</command>.
+   </para>
+  </tip>
+</topic>
