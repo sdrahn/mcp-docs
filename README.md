@@ -10,11 +10,13 @@ It generalises the `gateway-docs` server of
 27 and 28: `search_text`, `outline_file`, ranged reads) to any set of
 documents.
 
-Status: steps 1 to 5 are implemented: the core, collection files and
-metadata, packaging for openSUSE Tumbleweed, openSUSE Leap 16 and SLES
-16 ([packaging/suse](packaging/suse/README.md)), ranked search
-(`find_sections`) and list items as sections. Other formats than
-Markdown are to come. See [docs/architecture.md](docs/architecture.md).
+Status: steps 1 to 5 and 7 are implemented: the core, collection files
+and metadata, packaging for openSUSE Tumbleweed, openSUSE Leap 16 and
+SLES 16 ([packaging/suse](packaging/suse/README.md)), ranked search
+(`find_sections`), list items as sections, and HTTP with a container
+image. Designed, not built: other formats than Markdown, and a
+converter for SUSE's documentation (documentation.suse.com) from its
+DocBook sources. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs
 or anything that reads by section:
