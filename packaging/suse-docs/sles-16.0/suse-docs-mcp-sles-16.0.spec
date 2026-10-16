@@ -50,6 +50,13 @@ SRC=$PWD REV=%{rev} %{_datadir}/mcp-docs-convert/suse-docs/convert \
 install -d %{buildroot}%{_datadir}/mcp-docs/docs/suse %{buildroot}%{_datadir}/mcp-docs/collections.d
 cp -a build/%{coll} %{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
 mv %{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}/%{coll}.yaml %{buildroot}%{_datadir}/mcp-docs/collections.d/%{coll}.yaml
+# The license and legal notice are documents of the collection, which
+# links them; the license directory points to them rather than holding
+# copies.
+install -d %{buildroot}%{_licensedir}/%{name}
+for f in doc-gfdl-license.md legal-disclaimer.md; do
+	ln -s ../../mcp-docs/docs/suse/%{coll}/topics/$f %{buildroot}%{_licensedir}/%{name}/$f
+done
 
 %check
 d=%{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
@@ -58,9 +65,14 @@ grep -qx 'root: %{_datadir}/mcp-docs/docs/suse/%{coll}' %{buildroot}%{_datadir}/
 grep -q '^source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html#selinux-switching-modes"' \
 	"$d/topics/selinux-switching-modes.md"
 grep -q 'revision %{shortrev}' "$d/README.md"
+for f in doc-gfdl-license.md legal-disclaimer.md; do
+	test -s "%{buildroot}%{_licensedir}/%{name}/$f"
+done
 
 %files
-%license build/%{coll}/topics/doc-gfdl-license.md build/%{coll}/topics/legal-disclaimer.md
+%dir %{_licensedir}/%{name}
+%license %{_licensedir}/%{name}/doc-gfdl-license.md
+%license %{_licensedir}/%{name}/legal-disclaimer.md
 %dir %{_datadir}/mcp-docs
 %dir %{_datadir}/mcp-docs/collections.d
 %dir %{_datadir}/mcp-docs/docs

@@ -21,7 +21,7 @@ serves it from its collection file and answers questions from it.
 |---|---|
 | `/usr/share/mcp-docs/collections.d/sles-16.0.yaml` | the collection file: mcp-docs serves the collection `sles-16.0` once the package is installed |
 | `/usr/share/mcp-docs/docs/suse/sles-16.0/` | `README.md` (the articles, source and license), `articles/` (an index per article), `topics/` (a document per topic) |
-| `/usr/share/licenses/suse-docs-mcp-sles-16.0/` | the GNU Free Documentation License and SUSE's legal notice, the documentation's invariant section |
+| `/usr/share/licenses/suse-docs-mcp-sles-16.0/` | the GNU Free Documentation License and SUSE's legal notice, the documentation's invariant section: symlinks to the collection's documents of them (`topics/doc-gfdl-license.md`, `topics/legal-disclaimer.md`), which its README links |
 
 It does not require mcp-docs: without it, the files do nothing. The
 version is the product's and the sources' revision,
