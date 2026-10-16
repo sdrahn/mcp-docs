@@ -13,7 +13,7 @@ all: build
 
 build:
 	$(GO) build -trimpath -buildmode=$(BUILDMODE) -ldflags "-X main.version=$(VERSION)" -o bin/mcp-docs ./cmd/mcp-docs
-	$(GO) build -trimpath -buildmode=$(BUILDMODE) -o bin/mcp-docs-convert ./cmd/mcp-docs-convert
+	$(GO) build -trimpath -buildmode=$(BUILDMODE) -ldflags "-X main.version=$(VERSION)" -o bin/mcp-docs-convert ./cmd/mcp-docs-convert
 
 test:
 	$(GO) test ./...
@@ -28,16 +28,20 @@ check:
 eval:
 	$(GO) test -count=1 -run TestCost -v ./internal/eval
 
-# The program, and the directories of collection files: packages ship
+# The programs, and the directories of collection files: packages ship
 # theirs below $(DATADIR)/mcp-docs/collections.d, the administrator's go
-# to $(SYSCONFDIR)/mcp-docs/collections.d.
+# to $(SYSCONFDIR)/mcp-docs/collections.d. The converter comes with what
+# converts SUSE's documentation (tools/suse-docs), for packages of it.
 # It installs what build built (with its VERSION), building only if
 # nothing was.
 install:
-	test -x bin/mcp-docs || $(MAKE) build
+	test -x bin/mcp-docs -a -x bin/mcp-docs-convert || $(MAKE) build
 	install -D -m 0755 bin/mcp-docs $(DESTDIR)$(BINDIR)/mcp-docs
 	install -d -m 0755 $(DESTDIR)$(DATADIR)/mcp-docs/collections.d
 	install -d -m 0755 $(DESTDIR)$(SYSCONFDIR)/mcp-docs/collections.d
+	install -D -m 0755 bin/mcp-docs-convert $(DESTDIR)$(BINDIR)/mcp-docs-convert
+	install -D -m 0755 tools/suse-docs/convert $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/convert
+	install -m 0644 tools/suse-docs/sles-16.0 tools/suse-docs/README.md $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/
 
 clean:
 	rm -rf bin

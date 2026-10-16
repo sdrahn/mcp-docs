@@ -718,7 +718,11 @@ the evaluation (§14.5) decides if that is wrong.
   pinned source revision; the package installs the documents below
   `/usr/share/mcp-docs/docs/suse/sles-16.0`, the collection file, and
   the license. Offline, air-gapped, updated with maintenance updates.
-  It does not require mcp-docs (without it, the files do nothing).
+  It does not require mcp-docs (without it, the files do nothing). The
+  converter comes from mcp-docs' spec as its own package,
+  `mcp-docs-convert`, the documentation package's build requirement,
+  with `tools/suse-docs` (`SRC=` an unpacked tarball of the sources:
+  OBS builds have no network).
 - **A container image** on the image of §13, with the same documents:
   its tag names the product and documentation version.
 - **Later, a sync timer** (`mcp-docs-sync`) for systems that want the

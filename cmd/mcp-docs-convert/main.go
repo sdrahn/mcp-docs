@@ -21,6 +21,9 @@ import (
 	"github.com/sdrahn/mcp-docs/internal/docbook"
 )
 
+// version is set at build time (-ldflags "-X main.version=...").
+var version = "dev"
+
 // list is a flag that can be given more than once.
 type list []string
 
@@ -43,7 +46,12 @@ func main() {
 		"(https://documentation.suse.com/sles/16.0/html/%s/); documents' sources are then their pages there")
 	flag.StringVar(&o.Revision, "revision", "", "the sources' revision, named in the collection's index")
 	strict := flag.Bool("strict", false, "fail when an element, entity or link could not be converted")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("mcp-docs-convert", version)
+		return
+	}
 	o.DCs = dcs
 	if *dcFile != "" {
 		names, err := readList(*dcFile)

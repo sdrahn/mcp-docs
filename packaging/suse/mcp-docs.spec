@@ -35,6 +35,24 @@ Packages make their documentation available to agents by installing a
 collection file in %{_datadir}/mcp-docs/collections.d; the administrator
 overrides or disables one in %{_sysconfdir}/mcp-docs/collections.d.
 
+%package convert
+Summary:        Converter of SUSE's DocBook documentation into collections for mcp-docs
+# Only the Go standard library is linked in.
+License:        MIT
+Group:          Development/Tools/Doc Generators
+
+%description convert
+mcp-docs-convert converts articles of SUSE's DocBook documentation
+sources (SUSE/doc-modular) into Markdown collections that mcp-docs
+serves a section at a time: entities and profiling resolved, one
+document per topic under the sources' ids, each linked to its page on
+documentation.suse.com.
+
+It is for building packages of SUSE's documentation, as a build
+requirement: %{_datadir}/mcp-docs-convert/suse-docs/convert converts
+the documentation of SUSE Linux Enterprise Server 16.0 from a source
+tree of the pinned revision.
+
 %prep
 %autosetup -p1 -a1
 
@@ -49,6 +67,7 @@ export GOFLAGS="-mod=vendor"
 export GOFLAGS="-mod=vendor"
 go test ./...
 ./bin/mcp-docs --version | grep -qx 'mcp-docs %{version}'
+./bin/mcp-docs-convert --version | grep -qx 'mcp-docs-convert %{version}'
 
 %files
 %license LICENSE
@@ -58,5 +77,10 @@ go test ./...
 %dir %{_datadir}/mcp-docs/collections.d
 %dir %{_sysconfdir}/mcp-docs
 %dir %{_sysconfdir}/mcp-docs/collections.d
+
+%files convert
+%license LICENSE
+%{_bindir}/mcp-docs-convert
+%{_datadir}/mcp-docs-convert
 
 %changelog

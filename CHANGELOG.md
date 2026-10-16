@@ -63,3 +63,9 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
 - `tools/suse-docs/convert`: SUSE Linux Enterprise Server 16.0's 48
   articles from SUSE/doc-modular `maintenance/SLE16.0`, at a pinned
   revision, into a collection with its collection file.
+- Package `mcp-docs-convert` (from the same spec): the converter and
+  `tools/suse-docs` (below `/usr/share/mcp-docs-convert/suse-docs`), a
+  build requirement for packages of SUSE's documentation; `convert`
+  takes the sources from `SRC=` without network, and uses the installed
+  converter outside a checkout. `mcp-docs-convert --version`. CI installs
+  and smoke-tests it.
