@@ -529,13 +529,14 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (§14; prototype done, §14.6): a converter,
-   `mcp-docs-convert`, from SUSE's DocBook sources to Markdown
-   collections, so that the documentation of documentation.suse.com is
-   served offline, a section at a time. The SELinux article converts
-   end to end, with golden tests and questions served by mcp-docs; next,
-   all SLES 16 articles from `maintenance/SLE16.0`, packaged per product
-   version and as a container image; SLE 15 guides after.
+8. **SUSE documentation** (§14; SLES 16.0 converted, §14.7): a
+   converter, `mcp-docs-convert`, from SUSE's DocBook sources to
+   Markdown collections, so that the documentation of
+   documentation.suse.com is served offline, a section at a time. All 48
+   SLES 16.0 articles convert (`tools/suse-docs/convert`), every source
+   link checked against the site; next, the package per product version
+   and the container image, SLES for SAP and SLE HA 16.0, SLE 15 guides
+   after.
 
 ## 12. Decisions
 
@@ -626,7 +627,7 @@ it and adds its documents and collection file (the converted SUSE
 documentation, for one), so that the image's tag names the
 documentation's version and updating it is a rebuild.
 
-## 14. SUSE documentation (step 8, design)
+## 14. SUSE documentation (step 8)
 
 documentation.suse.com publishes SUSE's product documentation as HTML
 and PDF, built from DocBook sources on GitHub. An agent on a SUSE
@@ -740,10 +741,8 @@ official page; the third directory of collection files for the sync.
 - **Evaluation questions** on the converted SLES 16 documentation, as
   §10 has for mcp-gateway's: "how do I switch SELinux to permissive
   until the next boot?", with the section that answers each.
-- **Not verified yet**: how documentation.suse.com names pages and
-  anchors (for `source` and for links out of a collection). The site
-  was not reachable from where this was written; the converter's first
-  version checks its URLs against the site.
+- **The site**: every `source` checked against documentation.suse.com,
+  its page fetched and its anchor found (§14.7).
 
 ### 14.6 The prototype
 
@@ -784,3 +783,67 @@ Not yet: `source` points to the source file on GitHub until the site's
 page names are checked; topics' titles overridden by an article are
 shown in the article's index only; tables, figures and other formats of
 doc-sle are written but untested on real sources.
+
+### 14.7 SLES 16.0
+
+The site names an article's page by its build definition: `DC-NAME`
+is `https://documentation.suse.com/PRODUCT/VERSION/html/NAME/index.html`
+(`/sles/16.0/html/SLES-SELinux/index.html`), and a PDF beside it
+(`/sles/16.0/pdf/NAME_en.pdf`). An article is one page, except for its
+appendices and glossaries, which are pages of their own named by their
+id (`doc-gfdl-license.html`, `vt-glossary.html`). The anchors are the
+sources' `xml:id`s. Which product and version an article is published
+under is the site's configuration, not the sources': the converter is
+told (`--site-url https://documentation.suse.com/sles/16.0/html/%s/`)
+and the list of articles is the site's (`tools/suse-docs/sles-16.0`,
+from its `sitemap.xml`: 48 build definitions in `maintenance/SLE16.0`,
+of its 167). The site's pages carry `cache-control: max-age=300` and no
+`Last-Modified` or `ETag`, only a `dcterms.modified` meta.
+
+`tools/suse-docs/convert` clones doc-modular, checks out a pinned
+revision of `maintenance/SLE16.0` (a9f7084) and converts the 48
+articles into one collection with its collection file:
+
+```sh
+tools/suse-docs/convert build/sles-16.0 /usr/share/mcp-docs/docs/suse/sles-16.0
+```
+
+The result: 48 articles, 386 topics, 435 documents, 2.8 MB, in ten
+seconds; no unknown element, unresolved entity, broken link or
+conflict. Every one of the 434 `source` URLs is a page of the site with
+the anchor in it; every section heading of the site's pages is an
+anchor of the collection, except one the branch has removed since the
+site was built (the site lags the branch) and the article's groups
+below. Served, 14 of 16 questions across the articles find the
+answering section first (`TestSLES16`, run with `MCP_DOCS_SLES16` set);
+in the other two the article's index comes first and the answer next.
+
+What the whole product needed beyond the prototype:
+
+- **Several articles, one collection**: `--dc` more than once or
+  `--dcs FILE`; an article's index is `articles/NAME.md`, by its build
+  definition, because build definitions share assemblies (the Agama
+  installation article is one assembly for x86-64, POWER and IBM Z).
+- **Topic variants**: a topic that articles profile differently (an
+  architecture's steps) is one document per variant,
+  `topics/ID--ARTICLE.md`, named by the first article that has it; one
+  they profile alike is one document. A topic profiled alike whose links
+  lead to different variants is split by its rendered text, until no
+  document differs between articles. Two different topics with one id
+  (`task-example` in two articles) come out as variants too.
+- **`STRUCTID`**: an assembly can hold several articles; the build
+  definition names the one it builds.
+- **Groups**: a module without a topic is a heading of its own in the
+  article (a title, an abstract, an id over its topics); it is an item
+  of the article's index, and a link to its id goes to the index.
+- **XInclude**: snippets (`snippets/*.xml`, with their own entities)
+  are included before profiling.
+- **Callouts**: a listing's `co` marks are numbered `(1)`, `(2)` in the
+  code, the `calloutlist` after it renders as `(1) …` paragraphs.
+- **Glossaries**, simple lists and a procedure's result.
+- **Profiling values as given**: the converter matches values
+  exactly. Some build definitions select `PROFARCH="x86-64"` where most
+  sources mark `arch="x86_64"`; in SLES 16.0 the one article that does
+  (the PXE client) has no text for either, so it does not matter yet.
+  Whether to treat them as one is the build tool's call (DAPS), to
+  check before an article needs it.

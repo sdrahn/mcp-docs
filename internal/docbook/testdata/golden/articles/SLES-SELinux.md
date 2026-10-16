@@ -2,7 +2,7 @@
 title: "Understanding SELinux Basics"
 description: "Learn about the basic components and functionality of SELinux"
 tags: ["article","Security","Configuration"]
-source: "https://github.com/SUSE/doc-modular/blob/main/articles/SELinux.asm.xml"
+source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html"
 ---
 
 # Understanding SELinux Basics {#selinux-article-sles}

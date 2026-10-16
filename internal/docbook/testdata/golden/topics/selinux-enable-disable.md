@@ -2,7 +2,7 @@
 title: "Disabling and reenabling SELinux"
 description: "The topic covers enabling and disabling SELinux via the kernel command-line."
 tags: ["task"]
-source: "https://github.com/SUSE/doc-modular/blob/main/tasks/selinux-enable-disable.xml"
+source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html#selinux-enable-disable"
 ---
 
 # Disabling and reenabling SELinux {#selinux-enable-disable}
@@ -13,7 +13,7 @@ The topic covers enabling and disabling SELinux via the kernel command-line.
 >
 > It is not recommended to disable SELinux. If SELinux is possibly causing issues to your system, switch to the `permissive` mode to debug your system.
 
-SELinux is enabled by default in SLES 16.1. To disable or reenable SELinux requires a modification of the kernel command-line. This can be done temporarily for one boot or permanently by modifying the boot loader configuration.
+SELinux is enabled by default in SLES 16.0. To disable or reenable SELinux requires a modification of the kernel command-line. This can be done temporarily for one boot or permanently by modifying the boot loader configuration.
 
 ## Modify the kernel command-line via the GRUB boot loader configuration {#selinux-enable-disable-grub}
 

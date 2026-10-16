@@ -237,6 +237,9 @@ func (r *renderer) title(n *Node) string {
 			return r.inline(t.Children)
 		}
 	}
+	if g := n.Child("glossterm"); g != nil && n.Name == "glossentry" {
+		return r.inline(g.Children)
+	}
 	return ""
 }
 
@@ -254,7 +257,8 @@ func (r *renderer) block(n *Node, level int) []block {
 			out = append(out, block{"**" + t + "**"})
 		}
 		return append(out, r.blocks(n.Children, level)...)
-	case "section", "topic", "sect1", "sect2", "sect3", "simplesect", "chapter", "appendix", "article", "legalnotice":
+	case "section", "topic", "sect1", "sect2", "sect3", "simplesect", "chapter", "appendix", "article", "legalnotice",
+		"glossary", "glossdiv":
 		return r.section(n, level+1)
 	case "itemizedlist", "stepalternatives":
 		return r.list(n, "listitem", func(int) string { return "- " }, level)
@@ -284,7 +288,34 @@ func (r *renderer) block(n *Node, level int) []block {
 		}
 		return out
 	case "screen", "programlisting", "synopsis", "literallayout", "cmdsynopsis":
-		return []block{fenced(plain(n), n.Attr["language"])}
+		return []block{fenced(verbatim(n), n.Attr["language"])}
+	case "calloutlist":
+		// The callouts explain the marks (1), (2)… of the listing before.
+		out := []block{}
+		if t := r.title(n); t != "" {
+			out = append(out, block{"**" + t + "**"})
+		}
+		return append(out, r.list(n, "callout", func(i int) string { return "(" + strconv.Itoa(i+1) + ") " }, level)...)
+	case "simplelist":
+		return r.list(n, "member", func(int) string { return "- " }, level)
+	case "glossentry":
+		var terms []string
+		for _, t := range n.Elements("glossterm") {
+			terms = append(terms, r.inline(t.Children))
+		}
+		body := []block{{"**" + strings.Join(terms, ", ") + "**"}}
+		for _, d := range n.Elements("glossdef") {
+			body = append(body, r.blocks(d.Children, level)...)
+		}
+		for _, see := range n.Elements("glosssee") {
+			body = append(body, block{"See " + r.seeAlso(see)})
+		}
+		for _, see := range n.Elements("glossseealso") {
+			body = append(body, block{"See also " + r.seeAlso(see)})
+		}
+		return []block{item("- ", body)}
+	case "result":
+		return r.blocks(n.Children, level)
 	case "note", "tip", "important", "warning", "caution":
 		label := strings.ToUpper(n.Name[:1]) + n.Name[1:]
 		if t := r.title(n); t != "" {
@@ -321,7 +352,7 @@ func (r *renderer) block(n *Node, level int) []block {
 		return []block{quote(r.blocks(n.Children, level))}
 	case "bridgehead":
 		return []block{{"**" + r.inline(n.Children) + "**"}}
-	case "listitem", "step", "textobject":
+	case "listitem", "step", "textobject", "callout", "member":
 		return r.blocks(n.Children, level)
 	}
 	r.unknown[n.Name]++
@@ -398,6 +429,38 @@ func quote(body []block) block {
 		}
 	}
 	return out
+}
+
+// seeAlso renders a glossary cross-reference: a link to its entry, or
+// its text.
+func (r *renderer) seeAlso(n *Node) string {
+	if id := n.Attr["otherterm"]; id != "" {
+		return r.ref(id, r.inline(n.Children))
+	}
+	return r.inline(n.Children)
+}
+
+// verbatim is the text of a listing, its callout marks (co) numbered
+// (1), (2)… in order, as the calloutlist after it counts them.
+func verbatim(n *Node) string {
+	var b strings.Builder
+	i := 0
+	var w func(*Node)
+	w = func(n *Node) {
+		switch {
+		case n.Name == "":
+			b.WriteString(n.Text)
+		case n.Name == "co":
+			i++
+			fmt.Fprintf(&b, "(%d)", i)
+		default:
+			for _, c := range n.Children {
+				w(c)
+			}
+		}
+	}
+	w(n)
+	return b.String()
 }
 
 func fenced(text, lang string) block {

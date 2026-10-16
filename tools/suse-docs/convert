@@ -1,0 +1,54 @@
+#!/bin/sh
+# Converts the documentation of SUSE Linux Enterprise Server 16.0 into a
+# collection for mcp-docs: the articles that documentation.suse.com
+# publishes for it (tools/suse-docs/sles-16.0), from SUSE/doc-modular at
+# a pinned revision of its maintenance/SLE16.0 branch.
+#
+#   tools/suse-docs/convert [OUT [ROOT]]
+#
+# OUT (default build/sles-16.0) receives the documents and sles-16.0.yaml,
+# the collection file; ROOT (default OUT's absolute path) is where the
+# collection file says the documents are, for example
+# /usr/share/mcp-docs/docs/suse/sles-16.0 when they are installed there.
+# The sources are cloned into build/doc-modular.
+set -eu
+
+rev=a9f708401da072b024e66994c8f15d91250b836e
+branch=maintenance/SLE16.0
+here=$(cd "$(dirname "$0")" && pwd)
+out=${1:-build/sles-16.0}
+src=build/doc-modular
+
+if [ ! -d "$src/.git" ]; then
+	mkdir -p build
+	git clone -q --filter=blob:none --no-checkout https://github.com/SUSE/doc-modular "$src"
+fi
+git -C "$src" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$src" fetch -q origin "$branch"
+git -C "$src" checkout -q --detach "$rev"
+
+rm -rf "$out"
+mkdir -p "$out"
+go run ./cmd/mcp-docs-convert --strict --src "$src" --dcs "$here/sles-16.0" --out "$out" \
+	--name sles-16.0 --title "SUSE Linux Enterprise Server 16.0" \
+	--description "The documentation of SUSE Linux Enterprise Server 16.0 from documentation.suse.com, converted from its DocBook sources." \
+	--site-url "https://documentation.suse.com/sles/16.0/html/%s/" \
+	--source-url "https://github.com/SUSE/doc-modular/blob/$rev/%s" \
+	--revision "$(echo "$rev" | cut -c1-7)"
+
+root=${2:-$(cd "$out" && pwd)}
+cat >"$out/sles-16.0.yaml" <<YAML
+title: SUSE Linux Enterprise Server 16.0
+root: $root
+description: >
+  SUSE's documentation of SUSE Linux Enterprise Server 16.0, the articles
+  of documentation.suse.com: installation, administration, security,
+  virtualization, containers. One document per topic, under the ids of
+  the site's sections.
+index: README.md
+instructions: >
+  Each document's source front matter is its page on
+  documentation.suse.com: cite it. articles/ lists each article's topics
+  in order; a topic named ID--ARTICLE.md is that article's variant (an
+  architecture's, for example).
+YAML
+echo "$out/sles-16.0.yaml"

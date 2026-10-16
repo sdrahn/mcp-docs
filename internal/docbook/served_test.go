@@ -14,7 +14,7 @@ import (
 // section that answers them first, and SUSE's ids address sections.
 func TestServed(t *testing.T) {
 	out, _ := convert(t)
-	s := &server.Server{Cat: catalog.New([]*catalog.Collection{{Name: "sles-16.1", Path: out}}, []string{".md"}, 1000),
+	s := &server.Server{Cat: catalog.New([]*catalog.Collection{{Name: "sles-16.0", Path: out}}, []string{".md"}, 1000),
 		MaxRead: 32 << 10, MaxFile: 1 << 20, Version: "test"}
 	call := func(tool string, args map[string]any) (string, json.RawMessage) {
 		t.Helper()
@@ -49,14 +49,14 @@ func TestServed(t *testing.T) {
 			t.Errorf("%q: %+v, want #%s first", q, r.Sections, want)
 		}
 	}
-	text, _ := call("read_section", map[string]any{"doc": "sles-16.1/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes"})
+	text, _ := call("read_section", map[string]any{"doc": "sles-16.0/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes"})
 	if !strings.HasPrefix(text, "## Changing the SELinux mode temporarily {#sellinux-temporary-mode-changes}") ||
 		!strings.Contains(text, "# setenforce MODE_ID") {
 		t.Errorf("read_section: %s", text)
 	}
 	text, _ = call("list_docs", map[string]any{})
-	if !strings.Contains(text, "sles-16.1/README.md — SUSE Linux Enterprise Server 16.1 (in development) (index: read it first)") ||
-		!strings.Contains(text, "sles-16.1/topics/selinux-switching-modes.md — Changing the SELinux mode") {
+	if !strings.Contains(text, "sles-16.0/README.md — SUSE Linux Enterprise Server 16.0 (index: read it first)") ||
+		!strings.Contains(text, "sles-16.0/topics/selinux-switching-modes.md — Changing the SELinux mode") {
 		t.Errorf("list_docs: %s", text)
 	}
 }
