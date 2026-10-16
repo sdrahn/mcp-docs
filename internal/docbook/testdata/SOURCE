@@ -1,6 +1,7 @@
 doc-modular/ is a copy of the files of one article of SUSE's
-documentation sources, https://github.com/SUSE/doc-modular at commit
-c66ed55eddf549a35c34d047929fe422f9a1fb94: the build definition
+documentation sources, https://github.com/SUSE/doc-modular, branch
+maintenance/SLE16.0 (SUSE Linux Enterprise Server 16.0) at commit
+a9f708401da072b024e66994c8f15d91250b836e: the build definition
 DC-SLES-SELinux, the assembly articles/SELinux.asm.xml, the topics and
 legal notices it names, and the entity files in common/.
 

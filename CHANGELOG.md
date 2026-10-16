@@ -52,3 +52,14 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   sources (SUSE/doc-modular) into a Markdown collection: entities and
   profiling resolved, every xml:id an anchor, one document per topic,
   an index per article, front matter with the source.
+- `mcp-docs-convert` converts many articles into one collection
+  (`--dc` more than once, `--dcs FILE`): a topic that articles profile
+  differently is one document per variant (`topics/ID--ARTICLE.md`),
+  article indexes are named by their build definition
+  (`articles/SLES-SELinux.md`). `--site-url` makes each document's
+  `source` its page and anchor on documentation.suse.com. New:
+  `STRUCTID`, XInclude, callouts, glossaries, simple lists, results,
+  modules without a topic.
+- `tools/suse-docs/convert`: SUSE Linux Enterprise Server 16.0's 48
+  articles from SUSE/doc-modular `maintenance/SLE16.0`, at a pinned
+  revision, into a collection with its collection file.

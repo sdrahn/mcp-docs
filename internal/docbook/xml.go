@@ -236,6 +236,35 @@ func (n *Node) Elements(name string) []*Node {
 	return out
 }
 
+// String serializes the tree: names, attributes in order, text; equal
+// trees, equal strings.
+func (n *Node) String() string {
+	var b strings.Builder
+	var w func(*Node)
+	w = func(n *Node) {
+		if n.Name == "" {
+			b.WriteString(n.Text)
+			return
+		}
+		b.WriteString("<" + n.Name)
+		keys := make([]string, 0, len(n.Attr))
+		for k := range n.Attr {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, " %s=%q", k, n.Attr[k])
+		}
+		b.WriteString(">")
+		for _, c := range n.Children {
+			w(c)
+		}
+		b.WriteString("</" + n.Name + ">")
+	}
+	w(n)
+	return b.String()
+}
+
 // Walk calls fn for n and every element below it.
 func (n *Node) Walk(fn func(*Node)) {
 	if n.Name == "" {

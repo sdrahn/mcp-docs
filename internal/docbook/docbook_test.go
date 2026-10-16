@@ -66,9 +66,10 @@ func TestProfile(t *testing.T) {
 func convert(t *testing.T) (string, *Report) {
 	t.Helper()
 	out := t.TempDir()
-	rep, err := Convert(Options{Src: "testdata/doc-modular", DC: "DC-SLES-SELinux", Out: out, Name: "sles-16.1",
-		Title: "SUSE Linux Enterprise Server 16.1 (in development)", Description: "SELinux on SLES, converted from SUSE's sources.",
-		Revision: "c66ed55"})
+	rep, err := Convert(Options{Src: "testdata/doc-modular", DCs: []string{"DC-SLES-SELinux"}, Out: out, Name: "sles-16.0",
+		Title: "SUSE Linux Enterprise Server 16.0", Description: "SELinux on SLES, converted from SUSE's sources.",
+		SourceURL: "https://github.com/SUSE/doc-modular/blob/maintenance/SLE16.0/%s",
+		SiteURL:   "https://documentation.suse.com/sles/16.0/html/%s/", Revision: "a9f7084"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func convert(t *testing.T) (string, *Report) {
 func TestGolden(t *testing.T) {
 	out, _ := convert(t)
 	for _, f := range []string{"topics/selinux-switching-modes.md", "topics/selinux-enable-disable.md",
-		"articles/selinux-article-sles.md", "README.md"} {
+		"articles/SLES-SELinux.md", "README.md"} {
 		got, err := os.ReadFile(filepath.Join(out, f))
 		if err != nil {
 			t.Fatal(err)

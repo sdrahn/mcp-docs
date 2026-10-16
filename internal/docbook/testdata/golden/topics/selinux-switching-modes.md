@@ -2,7 +2,7 @@
 title: "Changing the SELinux mode"
 description: "The topic covers switching of modes using the setenforce command and by changing the permanent configuration."
 tags: ["task"]
-source: "https://github.com/SUSE/doc-modular/blob/main/tasks/selinux-switching-modes.xml"
+source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html#selinux-switching-modes"
 ---
 
 # Changing the SELinux mode {#selinux-switching-modes}
