@@ -16,7 +16,8 @@ SLES 16 ([packaging/suse](packaging/suse/README.md)), ranked search
 (`find_sections`), list items as sections, and HTTP with a container
 image. `mcp-docs-convert` converts SUSE's documentation
 (documentation.suse.com) from its DocBook sources: all of SLES 16.0
-([tools/suse-docs](tools/suse-docs/README.md)); other formats than
+([tools/suse-docs](tools/suse-docs/README.md)), packaged as
+`suse-docs-mcp-sles-16.0` ([packaging/suse-docs](packaging/suse-docs/README.md)); other formats than
 Markdown are designed, not built. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs

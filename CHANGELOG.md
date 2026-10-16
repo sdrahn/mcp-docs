@@ -69,3 +69,10 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   takes the sources from `SRC=` without network, and uses the installed
   converter outside a checkout. `mcp-docs-convert --version`. CI installs
   and smoke-tests it.
+- Package `suse-docs-mcp-sles-16.0` (`packaging/suse-docs`): SUSE Linux
+  Enterprise Server 16.0's documentation as the collection `sles-16.0`,
+  converted at build time from a source tarball of SUSE/doc-modular
+  (`_service`, or `tools/suse-docs/source-tarball`). CI builds it with
+  the mcp-docs-convert package, lints, installs and queries it.
+  `tools/suse-docs/convert` takes `REV=` with `SRC=`, so that a package
+  names the revision it converts.

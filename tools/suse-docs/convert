@@ -12,8 +12,10 @@
 # /usr/share/mcp-docs/docs/suse/sles-16.0 when they are installed there.
 #
 # The sources are cloned into build/doc-modular, or, with SRC set, read
-# from that tree as it is (an unpacked tarball of the pinned revision, as
-# in a package build, which has no network). In a checkout of mcp-docs the
+# from that tree as it is (an unpacked tarball, as in a package build,
+# which has no network; tools/suse-docs/source-tarball makes it). REV
+# names the revision of SRC (default: the pinned one), cited in the
+# collection's index and its source links. In a checkout of mcp-docs the
 # converter is built from it; installed (package mcp-docs-convert, below
 # /usr/share/mcp-docs-convert/suse-docs), it is the installed one.
 set -eu
@@ -25,6 +27,7 @@ out=${1:-build/sles-16.0}
 
 if [ -n "${SRC:-}" ]; then
 	src=$SRC
+	rev=${REV:-$rev}
 else
 	src=build/doc-modular
 	if [ ! -d "$src/.git" ]; then

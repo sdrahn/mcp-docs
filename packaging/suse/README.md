@@ -91,15 +91,16 @@ neither mcp-docs nor network access:
 | `/usr/bin/mcp-docs-convert` | the converter of SUSE's DocBook sources into collections ([docs/architecture.md](../../docs/architecture.md), §14) |
 | `/usr/share/mcp-docs-convert/suse-docs/` | `convert`, which converts SLES 16.0's articles, their list `sles-16.0`, and its README |
 
-A documentation package ships the sources of the pinned revision as a
-tarball and converts them in `%build`:
+A documentation package ships the sources of a revision as a tarball
+and converts them in `%build`; `suse-docs-mcp-sles-16.0` does
+([packaging/suse-docs](../suse-docs/README.md)):
 
 ```spec
-Source1:        doc-modular-a9f7084.tar.gz
+Source0:        doc-modular-%{shortrev}.tar.xz
 BuildRequires:  mcp-docs-convert
 
 %build
-SRC=doc-modular-a9f7084 %{_datadir}/mcp-docs-convert/suse-docs/convert \
+SRC=$PWD REV=%{rev} %{_datadir}/mcp-docs-convert/suse-docs/convert \
     build/sles-16.0 %{_datadir}/mcp-docs/docs/suse/sles-16.0
 ```
 
