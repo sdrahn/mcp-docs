@@ -26,6 +26,9 @@ const (
 	// result: a larger section comes as its introduction and the outline
 	// of its subsections (§15).
 	findReadBudget = 4 << 10
+	// maxOtherParts bounds the lines for a large best section's other
+	// parts.
+	maxOtherParts = 15
 )
 
 // indexes are the rank indexes of the collections, by name, built when
@@ -145,6 +148,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	}
 	out := []found{}
 	var entries []string // one per hit: its line, and its match
+	var addrs []string   // one per hit: doc#id
 	for i, h := range hits {
 		o := h.Entry.Outline
 		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version}
@@ -175,6 +179,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		if f.Section != "" {
 			addr += "#" + f.Section
 		}
+		addrs = append(addrs, addr)
 		entry := fmt.Sprintf("%d. %s  %s  (%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes))
 		if f.MatchLine > 0 {
 			entry += fmt.Sprintf("   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
@@ -188,18 +193,41 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		return &result{text: text.String(), structured: structured}, nil
 	}
 	fmt.Fprintf(&text, "%d section(s) for %q, best first:\n", len(hits), a.Query)
-	// The best section's text, so that one call answers (§15).
-	var readText string
+	// The best section's text, so that one call answers (§15); of a
+	// large one, its best part.
+	var readText, partLine, others string
+	listed := map[string]bool{} // what the text already shows, doc#id
 	if best := out[0]; read && best.Section != "" {
 		budget := min(int64(findReadBudget), max(s.MaxRead-1024, 1024))
-		args := map[string]any{"doc": best.Doc, "section": best.Section}
-		if best.Bytes > budget {
-			args["depth"] = 0
-		}
-		raw, _ := json.Marshal(args)
-		if r, err := s.sectionText(ctx, raw, budget); err == nil {
-			readText = r.text
-			structured["read"] = map[string]any{"doc": best.Doc, "section": best.Section, "text": r.text}
+		sec, t, err := s.bestPart(ctx, hits[0], a.Query, terms, budget)
+		if err == nil {
+			readText = t
+			listed[best.Doc+"#"+sec] = true
+			structured["read"] = map[string]any{"doc": best.Doc, "section": sec, "text": t}
+			if sec != best.Section {
+				o := hits[0].Entry.Outline
+				i, _ := findSection(hits[0].Doc, o, sec)
+				partLine = fmt.Sprintf("   its best part: %s#%s  %s  (%s)\n", best.Doc, sec,
+					strings.Join(shortPath(o, i), " > "), size(o.Headings[i].Bytes))
+				// The section's other parts, in case the answer is in one
+				// of them: a line each.
+				var b strings.Builder
+				n := 0
+				for j, c := range o.Headings {
+					if c.Parent != hits[0].Heading || j == i {
+						continue
+					}
+					if n++; n > maxOtherParts {
+						fmt.Fprintf(&b, "   … (outline %s#%s lists them all)\n", best.Doc, best.Section)
+						break
+					}
+					fmt.Fprintf(&b, "   #%s  %s  (%s)\n", c.ID, c.Title, size(c.Bytes))
+					listed[best.Doc+"#"+c.ID] = true
+				}
+				if b.Len() > 0 {
+					others = fmt.Sprintf("Its other parts (%s#id):\n%s", best.Doc, b.String())
+				}
+			}
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -207,15 +235,21 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	if readText != "" {
 		// The best one's line, its text; the others as one-liners.
 		text.WriteString(strings.SplitAfterN(entries[0], "\n", 2)[0])
+		text.WriteString(partLine)
 		text.WriteString(readText)
 		if !strings.HasSuffix(readText, "\n") {
 			text.WriteString("\n")
 		}
-		if len(entries) > 1 {
-			text.WriteString("Also:\n")
-			for _, e := range entries[1:] {
-				text.WriteString(e)
+		text.WriteString(others)
+		var also []string
+		for i, e := range entries[1:] {
+			if !listed[addrs[i+1]] {
+				also = append(also, e)
 			}
+		}
+		if len(also) > 0 {
+			text.WriteString("Also:\n")
+			text.WriteString(strings.Join(also, ""))
 		}
 	} else {
 		for _, e := range entries {
@@ -225,6 +259,141 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	text.WriteString("(read one: read_section doc#id)")
 	return &result{text: text.String(), structured: structured}, nil
 
+}
+
+// bestPart is the text find_sections includes of its best section,
+// within budget: the section whole if it fits; else the subsection that
+// best matches the query (at any depth; the section itself when none
+// does), whole if it fits, else its own text and the outline of its
+// subsections, else the passage of its own text that matches best. It
+// returns the id of the section the text is of.
+func (s *Server) bestPart(ctx context.Context, h rank.Hit, query string, terms map[string]bool, budget int64) (string, string, error) {
+	o := h.Entry.Outline
+	u := h.Heading
+	if o.Headings[u].Bytes > budget {
+		ix, err := s.index(ctx, h.Doc.Coll)
+		if err != nil {
+			return "", "", err
+		}
+		if sub, err := ix.Within(query, h.Doc, u, 1); err == nil && len(sub) > 0 {
+			u = sub[0].Heading
+		}
+	}
+	hd := o.Headings[u]
+	args := map[string]any{"doc": h.Doc.Address(), "section": hd.ID}
+	own := hd.Bytes
+	for _, c := range o.Headings[u+1:] {
+		if c.Parent == u {
+			own -= c.Bytes
+		}
+	}
+	switch {
+	case hd.Bytes <= budget:
+	case own <= budget:
+		args["depth"] = 0
+	default:
+		// A passage needs less than a section to answer: half.
+		t, err := s.passage(h, u, terms, budget/2)
+		return hd.ID, t, err
+	}
+	raw, _ := json.Marshal(args)
+	r, err := s.sectionText(ctx, raw, budget)
+	if err != nil {
+		return "", "", err
+	}
+	return hd.ID, r.text, nil
+}
+
+// passage is the part of a section's own text, within budget, around
+// its block (a paragraph, a list item, a code block) with the most of
+// the query's words: that block, then the blocks around it.
+func (s *Server) passage(h rank.Hit, heading int, terms map[string]bool, budget int64) (string, error) {
+	o := h.Entry.Outline
+	hd := o.Headings[heading]
+	first, last := rank.OwnLines(o, heading)
+	lines, err := s.Cat.Lines(h.Doc, h.Entry, first, last)
+	if err != nil {
+		return "", err
+	}
+	// Blocks: runs of lines between blank lines, a fenced code block
+	// whole. The heading is a block.
+	var blocks [][2]int // [from, to) in lines
+	start, fence := 0, ""
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case fence != "":
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+		case strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~"):
+			fence = t[:3]
+		case t == "" || i == 1:
+			if i > start {
+				blocks = append(blocks, [2]int{start, i})
+			}
+			start = i
+		}
+	}
+	blocks = append(blocks, [2]int{start, len(lines)})
+	bytes := func(b [2]int) int64 {
+		var n int64
+		for _, l := range lines[b[0]:b[1]] {
+			n += int64(len(l))
+		}
+		return n
+	}
+	best, bestN := 0, -1
+	for i, b := range blocks {
+		seen := map[string]bool{}
+		for _, l := range lines[b[0]:b[1]] {
+			for _, t := range rank.Tokens(l) {
+				if terms[t] {
+					seen[t] = true
+				}
+			}
+		}
+		if i > 0 && len(seen) > bestN {
+			best, bestN = i, len(seen)
+		}
+	}
+	lo, hi := best, best+1
+	n := bytes(blocks[best])
+	for grew := true; grew; {
+		grew = false
+		if hi < len(blocks) && n+bytes(blocks[hi]) <= budget {
+			n += bytes(blocks[hi])
+			hi++
+			grew = true
+		}
+		if lo > 0 && n+bytes(blocks[lo-1]) <= budget {
+			lo--
+			n += bytes(blocks[lo])
+			grew = true
+		}
+	}
+	var out strings.Builder
+	if lo > 0 {
+		out.WriteString(lines[0]) // the heading, for context
+		out.WriteString("…\n")
+	}
+	// One block larger than the budget is cut.
+	from, to := blocks[lo][0], blocks[hi-1][1]
+	var w int64
+	for k := from; k < to; k++ {
+		if w+int64(len(lines[k])) > budget && k > from {
+			to = k
+			break
+		}
+		w += int64(len(lines[k]))
+		out.WriteString(lines[k])
+	}
+	if !strings.HasSuffix(out.String(), "\n") {
+		out.WriteString("\n")
+	}
+	fmt.Fprintf(&out, "[§ #%s, lines %d-%d of %d: a passage of %s; read_lines for more, read_section for all]",
+		hd.ID, first+from, first+to-1, o.Lines, size(hd.Bytes))
+	return out.String(), nil
 }
 
 // excerptWidth is about how much of a matching line find_sections

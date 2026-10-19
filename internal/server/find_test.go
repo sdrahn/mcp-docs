@@ -34,19 +34,47 @@ func TestFindSections(t *testing.T) {
 		t.Errorf("find_sections, read false:\n%s", got)
 	}
 
-	// A best section larger than find_sections reads comes as its
-	// introduction and the outline of its subsections.
+	// Of a best section larger than find_sections reads, its subsection
+	// that matches best.
 	var big strings.Builder
 	big.WriteString("# Restore\n## Restore from a backup {#restore-backup}\nRestore the keys first.\n")
 	for i := 0; i < 6; i++ {
 		fmt.Fprintf(&big, "### Step %d\n%s\n", i, strings.Repeat("Copy the files back and check them. ", 30))
+		if i == 3 {
+			big.WriteString("Then load the database dump with pg_restore.\n")
+		}
 	}
 	write(t, filepath.Join(dirs["app"], "restore.md"), big.String())
-	got = mustOK(t, call(t, s, "find_sections", map[string]any{"query": "restore from a backup", "collection": "app"}))
-	if !strings.Contains(got, "1. app/restore.md#restore-backup  Restore from a backup") || !strings.Contains(got, "Restore the keys first.") ||
-		!strings.Contains(got, "… ### Step 5  #step-5") || strings.Contains(got, "Copy the files back") {
+	r = call(t, s, "find_sections", map[string]any{"query": "restore the database dump from a backup", "collection": "app"})
+	got = mustOK(t, r)
+	if !strings.Contains(got, "1. app/restore.md#restore-backup  Restore from a backup  (6.5 KiB)\n"+
+		"   its best part: app/restore.md#step-3  Restore from a backup > Step 3  (1.1 KiB)\n### Step 3\n") ||
+		!strings.Contains(got, "pg_restore") || strings.Contains(got, "### Step 4") ||
+		!strings.Contains(got, "Its other parts (app/restore.md#id):\n   #step-0  Step 0  (1.1 KiB)\n") ||
+		strings.Contains(got, "#step-3  Step 3") || strings.Contains(got, "2. app/restore.md#step-3") {
 		t.Errorf("a large best section:\n%s", got)
 	}
+	if rd := r.Structured["read"].(map[string]any); rd["section"] != "step-3" {
+		t.Errorf("structured read of a part: %v", rd)
+	}
+	// Of a large section without subsections, the passage that matches
+	// best, and where it is.
+	var long strings.Builder
+	long.WriteString("# Storage\n## Key care\n")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&long, "Paragraph %d about storing things safely and well, in places that are dry, dark, cool and locked, away from the light.\n\n", i)
+		if i == 25 {
+			long.WriteString("To rotate the encryption keys, run keyctl rotate.\n\n```\nkeyctl rotate --all\n```\n\n")
+		}
+	}
+	write(t, filepath.Join(dirs["other"], "keys.md"), long.String())
+	got = mustOK(t, call(t, s, "find_sections", map[string]any{"query": "rotate the encryption keys", "collection": "other"}))
+	if !strings.Contains(got, "1. other/keys.md#key-care") || !strings.Contains(got, "## Key care\n…\n") ||
+		!strings.Contains(got, "To rotate the encryption keys") || !strings.Contains(got, "keyctl rotate --all\n```") ||
+		strings.Contains(got, "Paragraph 0 ") || !strings.Contains(got, ": a passage of 4.8 KiB; read_lines for more") {
+		t.Errorf("a passage:\n%s", got)
+	}
+	r = call(t, s, "find_sections", map[string]any{"query": "how do I back up the keys?", "collection": "app", "read": false})
 	sec := r.Structured["sections"].([]any)[0].(map[string]any)
 	if sec["doc"] != "app/ops.md" || sec["section"] != "backup" || sec["matchLine"].(float64) != 3 || sec["version"] == "" {
 		t.Errorf("structured: %v", sec)

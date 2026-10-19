@@ -543,7 +543,7 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
    image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
-9. **Token cost** (§15; phases 1 to 3 done, §15.3 to §15.5, measured in §15.6): a result
+9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
    in one call; shorter tool descriptions and `--tools`; the eval
@@ -908,6 +908,8 @@ fixed surface, nothing large unasked.
 | 5 | **Documents shaped for sections.** A compact collection index (article titles grouped by task); legal topics out of the ranking; the converter reports sections over a size; the writing guide's section sizes | 3 (sizes: 1) |
 | 6 | **Measured.** `make eval` reports the cost as text and as JSON-forwarding clients receive it, with budgets for the fixed cost per session | 1 |
 | 7 | **Upstream, optional.** Propose to Kit that it forward a result's text content, unescaped, when there is one: every MCP server would gain. Not ours to change; an issue for the owner to post | — |
+| 8 | **The best part of a large section.** Of a best section over the budget, `find_sections` returns the subsection that matches best, or the passage, with a line for each of the section's other parts | 4 |
+| 9 | **Navigation out of the ranking.** The converter's article indexes carry `rank: false`: their titles of every topic outranked the topic that answers | 4 |
 
 The footer of a result ("read one: read_section doc#id") stays,
 shortened: it costs about 15 tokens and helps clients that do not pass
@@ -1074,7 +1076,60 @@ falls from ~820k to ~245k tokens (−70%): the copy as JSON never reached
 it. With prompt caching, the re-sent part of each turn is a cache read
 and costs less; the proportion stays.
 
-### 15.7 Compatibility
+### 15.7 Phase 4, as built
+
+Where the cost was left after phase 3: three of the 16 SLES questions
+had a best section over 4 KiB and cost half of all the questions (34 KB
+of 64 KB); two of the 16 had an article's index first, an index of
+links, not the answer.
+
+- **The best part of a large section.** When the best section is
+  larger than `find_sections` reads (4 KiB), it ranks the section's
+  subsections, at any depth, for the question (`rank.Index.Within`,
+  the same BM25 over their own text and titles) and returns the best:
+  whole if it fits; else its own text and the outline of its
+  subsections; else, when its own text is too large (a long section
+  without subsections), a passage of at most 2 KiB: the block (a
+  paragraph, a list item, a code block whole) with the most of the
+  question's words and the blocks around it, with its lines for
+  `read_lines`. Under the part, a line for each of the large section's
+  other parts (id, title, size): the ranking within a section is weaker
+  than across sections, and with these lines the agent's next read is
+  the right one. "Also:" leaves out what the text already lists.
+- **Article indexes out of the ranking.** The converter writes
+  `rank: false` into each article's index (`articles/NAME.md`): they
+  list the titles of all their topics, and outranked the topic that
+  answers ("NetworkManager network is not running" found the article,
+  not `#networkmanager-nmcli-troubleshoot-verify-status`). They remain
+  the way to an article's topics, from the collection's index and
+  `list_docs`.
+- **Not built: holding the text back when the ranking is unsure.** The
+  ratio of the second score to the first does not separate right from
+  wrong first sections on SLES (the two wrong at 0.95 and 0.94, right
+  ones from 0.61 to 0.99): withholding the text below a threshold
+  would have cost a second call on most right answers.
+
+Measured as in §15.6, with phase 4's own collection; where the part
+`find_sections` returned did not answer (GRUB 2's requirements for
+"configure GRUB 2 for PXE boot", catching up on missed runs for
+"systemd timer does not run"), the read of the subsection its list of
+other parts names is counted:
+
+| | Before | Phase 3 | Phase 4 |
+|---|---:|---:|---:|
+| 16 questions | 123,350 B, 32 calls | 63,845 B, 19 calls | 37,744 B, 18 calls |
+| A question, on average | 7,709 B | 3,990 B | 2,359 B |
+| "configure GRUB 2 for PXE boot" | 27,829 B, 2 calls | 18,483 B, 2 calls | 5,762 B, 2 calls |
+| "create a snapshot of a VM with virsh" | 8,598 B, 2 calls | 7,864 B, 2 calls | 1,487 B, 1 call |
+| The session's input | ~1.37M tokens | ~256k tokens | ~170k tokens |
+| Questions answered from the right section first | 14 of 16 | 14 of 16 | 15 of 16 |
+
+Instructions, tool definitions and orientation are as in phase 3. For a
+client that passes the model only the text: ~820k, ~245k, ~162k tokens.
+The eval's corpus (mcp-gateway's documentation) is unchanged at
+70.6 KiB: none of its questions in words has a best section over 4 KiB.
+
+### 15.8 Compatibility
 
 A client that reads `structuredContent` needs `--structured` from this
 release on (CHANGELOG). The text of every tool is unchanged in what it

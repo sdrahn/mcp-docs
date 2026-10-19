@@ -179,6 +179,29 @@ var ErrNoTerms = errors.New("query: no words to look for (only common words and 
 
 // Search returns the n sections that best match the query, best first.
 func (ix *Index) Search(query string, n int) ([]Hit, error) {
+	return ix.search(query, n, nil)
+}
+
+// Within returns the n subsections of a document's section (heading
+// index; at any depth, not the section itself) that best match the
+// query, best first: where in a large section the answer is.
+func (ix *Index) Within(query string, d catalog.Doc, heading, n int) ([]Hit, error) {
+	addr := d.Address()
+	return ix.search(query, n, func(u *unit) bool {
+		if u.heading <= heading || u.doc.Address() != addr {
+			return false
+		}
+		hs := u.entry.Outline.Headings
+		for p := hs[u.heading].Parent; p >= 0; p = hs[p].Parent {
+			if p == heading {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (ix *Index) search(query string, n int, keep func(*unit) bool) ([]Hit, error) {
 	terms := unique(Tokens(query))
 	if len(terms) == 0 {
 		return nil, ErrNoTerms
@@ -193,6 +216,9 @@ func (ix *Index) Search(query string, n int) ([]Hit, error) {
 		idf := math.Log(1 + (N-float64(len(ps))+0.5)/(float64(len(ps))+0.5))
 		for _, p := range ps {
 			u := ix.units[p.unit]
+			if keep != nil && !keep(&u) {
+				continue
+			}
 			norm := k1 * (1 - b + b*u.length/ix.avgLen)
 			scores[p.unit] += idf * p.tf * (k1 + 1) / (p.tf + norm)
 			if u.title[t] {

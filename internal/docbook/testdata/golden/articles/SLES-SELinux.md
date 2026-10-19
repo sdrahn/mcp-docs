@@ -2,6 +2,7 @@
 title: "Understanding SELinux Basics"
 description: "Learn about the basic components and functionality of SELinux"
 tags: ["article","Security","Configuration"]
+rank: false
 source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html"
 ---
 
