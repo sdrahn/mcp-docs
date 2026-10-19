@@ -96,6 +96,15 @@ func TestSearch(t *testing.T) {
 			}
 		}
 	}
+	// "rank: false" keeps a document out of the ranking.
+	write(t, filepath.Join(dir, "license.md"), "---\nrank: false\n---\n# License\nPermission to copy the keys.\n")
+	ix, _ = Build(context.Background(), cat, k, 1<<20)
+	if hits, _ := ix.Search("copy keys license", 5); len(hits) != 1 || ids(hits)[0] != "backup.md#" {
+		t.Errorf("unranked: %v", ids(hits))
+	}
+	if !ix.Current(context.Background(), cat, k) {
+		t.Error("an unranked document makes the index stale")
+	}
 	if _, err := ix.Search("how is it?", 5); err != ErrNoTerms {
 		t.Errorf("stopwords only: %v", err)
 	}

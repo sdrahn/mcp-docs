@@ -30,6 +30,12 @@ mkdir -p build/conf && cp build/sles-16.0/sles-16.0.yaml build/conf/
 bin/mcp-docs --config-dirs build/conf
 ```
 
+The converter prints what it could not convert (with `--strict`, an
+error) and the sections over 8 KiB of their own text, which agents read
+in parts (`--max-section`): candidates for splitting in the sources.
+The collection's `README.md` lists the articles by task; the legal
+notices carry `rank: false`, out of `find_sections`' ranking.
+
 `sles-16.0` lists the build definitions of the articles the site
 publishes under `/sles/16.0/html/`, from its `sitemap.xml`. To update
 it, or the pinned revision in `convert`, run the conversion and the

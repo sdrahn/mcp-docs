@@ -101,3 +101,10 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
     only those (`find_sections,read_section,outline`: 2.5 KB);
   - README: keeping token cost down, on the server, in the client (Kit's
     `allowedTools`) and behind mcp-gateway.
+- Documents shaped for sections (§15, phase 3):
+  - `rank: false` in front matter keeps a document (a license, a
+    changelog) out of `find_sections`;
+  - `mcp-docs-convert` writes a compact collection index, the articles'
+    titles grouped by task (SLES 16.0: 5.2 KB instead of 9.6 KB), marks
+    the legal notices `rank: false`, and reports sections over
+    `--max-section` (8 KiB) of their own text.

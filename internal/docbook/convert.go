@@ -3,6 +3,7 @@ package docbook
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sdrahn/mcp-docs/internal/markdown"
 )
 
 // Options of a conversion.
@@ -34,6 +37,9 @@ type Options struct {
 	// Revision names the sources' revision in the collection's
 	// instructions ("c66ed55").
 	Revision string
+	// MaxSection, when set, is the size in bytes of a section's own
+	// text (to the next heading) over which the report names it.
+	MaxSection int
 }
 
 // Report says what a conversion did and what it could not.
@@ -48,6 +54,11 @@ type Report struct {
 	// Conflicts are topics whose text still differs between articles
 	// that share their document.
 	Conflicts []string
+	// Large are the sections whose own text is over Options.MaxSection
+	// ("topics/ID.md#SECTION (12.3 KiB)"): agents read them in parts. A
+	// note for the sources' authors, not a loss.
+	Large      []string
+	MaxSection int
 }
 
 // OK reports whether nothing was lost.
@@ -72,6 +83,9 @@ func (r *Report) String() string {
 	}
 	if len(r.Conflicts) > 0 {
 		s += "; topics that differ between articles: " + strings.Join(r.Conflicts, ", ")
+	}
+	if len(r.Large) > 0 {
+		s += fmt.Sprintf("; sections over %s of their own text: %s", kib(int64(r.MaxSection)), strings.Join(r.Large, ", "))
 	}
 	return s
 }
@@ -447,6 +461,7 @@ func Convert(o Options) (*Report, error) {
 	}
 	written := map[string]bool{}
 	docs := 0
+	var large []string
 	for _, a := range arts {
 		r := a.renderer
 		for _, t := range a.topics {
@@ -467,11 +482,26 @@ func Convert(o Options) (*Report, error) {
 			if role := t.src.root.Attr["role"]; role != "" {
 				fields = append(fields, [2]any{"tags", []string{role}})
 			}
+			if legalTopic(t) {
+				// Licenses and disclaimers answer no question: out of
+				// find_sections' ranking.
+				fields = append(fields, [2]any{"rank", false})
+			}
 			fields = append(fields, [2]any{"source", c.sourceOf(a, t.src.rel, t.page, t.id)})
-			if err := os.WriteFile(filepath.Join(o.Out, t.file), []byte(frontMatter(fields)+t.body), 0o644); err != nil {
+			text := frontMatter(fields) + t.body
+			if err := os.WriteFile(filepath.Join(o.Out, t.file), []byte(text), 0o644); err != nil {
 				return nil, err
 			}
 			docs++
+			if o.MaxSection > 0 && !legalTopic(t) {
+				l, err := largeSections(text, int64(o.MaxSection))
+				if err != nil {
+					return nil, err
+				}
+				for _, sec := range l {
+					large = append(large, t.file+sec)
+				}
+			}
 		}
 
 		// The article's index: its topics in order and nesting.
@@ -517,16 +547,38 @@ func Convert(o Options) (*Report, error) {
 		docs++
 	}
 
-	// The collection's index.
+	// The collection's index: the articles' titles, grouped by their
+	// first task ("Security"), short enough to read whole; the articles'
+	// descriptions are in their own front matter (list_docs).
 	var readme strings.Builder
 	readme.WriteString(frontMatter([][2]any{{"title", o.Title}, {"description", o.Description}}))
-	fmt.Fprintf(&readme, "# %s\n\n%s\n\n## Articles\n\n", o.Title, o.Description)
+	fmt.Fprintf(&readme, "# %s\n\n%s\n\n## Articles\n", o.Title, o.Description)
+	groups := map[string][]*article{}
 	for _, a := range arts {
-		fmt.Fprintf(&readme, "- [%s](%s)", a.title, a.file)
-		if a.desc != "" {
-			fmt.Fprintf(&readme, ": %s", a.desc)
+		g := "Other"
+		if len(a.tasks) > 0 {
+			g = a.tasks[0]
+		}
+		groups[g] = append(groups[g], a)
+	}
+	order := make([]string, 0, len(groups))
+	for g := range groups {
+		if g != "Other" {
+			order = append(order, g)
+		}
+	}
+	sort.Strings(order)
+	if groups["Other"] != nil {
+		order = append(order, "Other")
+	}
+	for _, g := range order {
+		if len(groups) > 1 {
+			fmt.Fprintf(&readme, "\n### %s\n", g)
 		}
 		readme.WriteString("\n")
+		for _, a := range groups[g] {
+			fmt.Fprintf(&readme, "- [%s](%s)\n", a.title, a.file)
+		}
 	}
 	readme.WriteString("\n## Source and license\n\n")
 	dcs := make([]string, len(o.DCs))
@@ -553,7 +605,7 @@ func Convert(o Options) (*Report, error) {
 	seen := map[string]bool{}
 	for _, a := range arts {
 		for _, t := range a.topics {
-			if strings.HasPrefix(t.src.rel, "common/") && !seen[t.file] {
+			if legalTopic(t) && !seen[t.file] {
 				seen[t.file] = true
 				legal = append(legal, fmt.Sprintf("[%s](%s)", a.renderer.links[t.id].Title, t.file))
 			}
@@ -568,7 +620,8 @@ func Convert(o Options) (*Report, error) {
 	}
 	docs++
 
-	rep := &Report{Articles: len(arts), Documents: docs, Unknown: unknown, Conflicts: conflicts}
+	rep := &Report{Articles: len(arts), Documents: docs, Unknown: unknown, Conflicts: conflicts,
+		Large: large, MaxSection: o.MaxSection}
 	for u := range c.unresolved {
 		rep.Unresolved = append(rep.Unresolved, u)
 	}
@@ -579,6 +632,34 @@ func Convert(o Options) (*Report, error) {
 	sort.Strings(rep.Broken)
 	return rep, nil
 }
+
+// legalTopic reports whether a topic is a legal notice: the sources'
+// shared files (common/), the license and the disclaimer.
+func legalTopic(t *topic) bool { return strings.HasPrefix(t.src.rel, "common/") }
+
+// largeSections are the ids ("#ID (12.3 KiB)") of the sections of a
+// document whose own text, to the next heading, is over max bytes.
+func largeSections(text string, max int64) ([]string, error) {
+	o, err := markdown.Scan(context.Background(), strings.NewReader(text))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for i, h := range o.Headings {
+		own := h.Bytes
+		for _, c := range o.Headings[i+1:] {
+			if c.Parent == i {
+				own -= c.Bytes
+			}
+		}
+		if own > max {
+			out = append(out, fmt.Sprintf("#%s (%s)", h.ID, kib(own)))
+		}
+	}
+	return out, nil
+}
+
+func kib(n int64) string { return fmt.Sprintf("%.1f KiB", float64(n)/1024) }
 
 // sourceOf is where a document comes from: its page and anchor on
 // documentation.suse.com, or else its source file.

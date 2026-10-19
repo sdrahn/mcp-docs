@@ -543,12 +543,12 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
    image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
-9. **Token cost** (§15; phases 1 and 2 done, §15.3, §15.4): a result
+9. **Token cost** (§15; phases 1 to 3 done, §15.3 to §15.5): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
    in one call; shorter tool descriptions and `--tools`; the eval
-   measuring both ways clients forward results. Next, phase 3: compact
-   indexes and documents.
+   measuring both ways clients forward results; `rank: false`, the
+   converter's compact index and its report of large sections.
 
 ## 12. Decisions
 
@@ -778,7 +778,8 @@ mcp-docs-convert --src doc-modular --dc DC-SLES-SELinux --out /usr/share/mcp-doc
 
 It writes `topics/ID.md` per topic, `articles/ID.md` for the article and
 `README.md` for the collection, and reports what it could not convert
-(`--strict` makes that an error). On "Understanding SELinux Basics"
+(`--strict` makes that an error) and the sections larger than agents
+read whole (`--max-section`, §15.5). On "Understanding SELinux Basics"
 (`internal/docbook/testdata`, doc-modular `main` at c66ed55, under the
 GFDL): 26 topics and the legal notices, no unknown element, no
 unresolved entity, no broken link; SLE Micro's and SAP's text left out
@@ -904,7 +905,7 @@ fixed surface, nothing large unasked.
 | 2 | **One call per answer.** `find_sections` returns the best section's text (bounded) with two alternatives as one-liners; 3 results by default | 2 |
 | 3 | **Nothing large by default.** `list_docs` a page at a time with filters; large outlines start at two levels; `--max-read` 16 KiB | 1 |
 | 4 | **A small fixed surface.** Shorter tool descriptions with the guidance once in the instructions; `--tools LIST` to offer fewer, the instructions naming only those; client and gateway filters documented (Kit's `allowedTools`, gateway roles) | 2 |
-| 5 | **Documents shaped for sections.** A compact collection index (titles grouped by article); legal topics out of the ranking; the converter reports topics over a size; the writing guide's section sizes | 3 |
+| 5 | **Documents shaped for sections.** A compact collection index (article titles grouped by task); legal topics out of the ranking; the converter reports sections over a size; the writing guide's section sizes | 3 (sizes: 1) |
 | 6 | **Measured.** `make eval` reports the cost as text and as JSON-forwarding clients receive it, with budgets for the fixed cost per session | 1 |
 | 7 | **Upstream, optional.** Propose to Kit that it forward a result's text content, unescaped, when there is one: every MCP server would gain. Not ours to change; an issue for the owner to post | — |
 
@@ -962,7 +963,7 @@ result as a JSON-forwarding client receives it:
 | **the session (initialize, tools, 8 calls)** | **115.6 KB, ~29k tokens** | **32.3 KB, ~8k tokens** |
 
 The collection's index (`README.md`, 9.8 KB) is the largest result
-left: item 5.
+left: item 5, phase 3.
 
 ### 15.4 Phase 2, as built
 
@@ -1007,7 +1008,37 @@ On the SLES 16.0 collection, as a JSON-forwarding client receives it:
 | "make a SELinux domain permissive" | 5,971 B, 2 calls | 2,977 B, 2 calls | 2,174 B, 1 call |
 | Instructions + tool definitions | 11,378 B | 9,067 B | 7,053 B (3,959 B with the smallest `--tools`) |
 
-### 15.5 Compatibility
+### 15.5 Phase 3, as built
+
+- **`rank: false`** in a document's front matter keeps it out of
+  `find_sections`' ranking: licenses, legal notices, changelogs, text
+  that matches many questions in words and answers none. It is still
+  listed, searched (`search`) and read, and the index stays current
+  across it. A front matter field, not a pattern in the collection file:
+  it travels with the document, and a converter, which knows what a
+  document is, sets it.
+- **The converter's collection index** lists the articles' titles under
+  their first task ("Administration", "Security", from the sources'
+  `meta name="task"`; "Other" without one), without their descriptions,
+  which stay in each article's front matter for `list_docs`. Read whole,
+  it is the way into the collection.
+- **The converter's legal topics** (the sources' `common/`: the GFDL and
+  the legal notice) carry `rank: false`.
+- **`--max-section N`** (default 8 KiB, the writing guide's limit for a
+  section read whole) reports the sections whose own text, to the next
+  heading, is larger, the legal topics aside. They are the sources'
+  authors' to split; the report is a note, not a loss, so `--strict`
+  does not fail on it.
+
+Measured on the SLES 16.0 collection (still 14 of the 16 `TestSLES16`
+questions answered first):
+
+| | Phase 2 | Phase 3 |
+|---|---:|---:|
+| The collection's index, read whole (as a JSON-forwarding client receives it) | 9,802 B | 5,392 B |
+| Sections over 8 KiB of their own text | — | 4, of which `vm-host-network-default` 17.0 KiB |
+
+### 15.6 Compatibility
 
 A client that reads `structuredContent` needs `--structured` from this
 release on (CHANGELOG). The text of every tool is unchanged in what it

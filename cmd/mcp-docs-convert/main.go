@@ -45,6 +45,7 @@ func main() {
 	flag.StringVar(&o.SiteURL, "site-url", "", "URL of an article on documentation.suse.com, %s its build definition without DC- "+
 		"(https://documentation.suse.com/sles/16.0/html/%s/); documents' sources are then their pages there")
 	flag.StringVar(&o.Revision, "revision", "", "the sources' revision, named in the collection's index")
+	flag.IntVar(&o.MaxSection, "max-section", 8<<10, "report sections whose own text is over this many bytes (0: none)")
 	strict := flag.Bool("strict", false, "fail when an element, entity or link could not be converted")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()

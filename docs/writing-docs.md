@@ -135,6 +135,11 @@ tags: [upgrade, migration]
 ---
 ```
 
+`rank: false` keeps a document out of the ranking of `find_sections`
+(it is still listed, searched and read): for a license, a legal notice
+or a changelog, text that shares many words with questions and answers
+none of them.
+
 Without front matter, the first `#` heading is the title and the first
 paragraph is the description, cut to 200 characters. Then make that
 paragraph a summary: what the document is about and for whom. Badges,
