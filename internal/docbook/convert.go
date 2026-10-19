@@ -511,7 +511,10 @@ func Convert(o Options) (*Report, error) {
 		if a.desc != "" {
 			fields = append(fields, [2]any{"description", a.desc})
 		}
-		fields = append(fields, [2]any{"tags", append([]string{"article"}, a.tasks...)},
+		// An article's index is the way to its topics, not an answer:
+		// out of find_sections' ranking, where its titles of every topic
+		// outranked the topic that answers.
+		fields = append(fields, [2]any{"tags", append([]string{"article"}, a.tasks...)}, [2]any{"rank", false},
 			[2]any{"source", c.sourceOf(a, a.asmRel, "index.html", "")})
 		idx.WriteString(frontMatter(fields))
 		fmt.Fprintf(&idx, "# %s {#%s}\n\n", a.title, a.st.Attr["id"])

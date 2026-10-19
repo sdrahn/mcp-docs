@@ -101,6 +101,14 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
     only those (`find_sections,read_section,outline`: 2.5 KB);
   - README: keeping token cost down, on the server, in the client (Kit's
     `allowedTools`) and behind mcp-gateway.
+- The best part of a large section (§15, phase 4):
+  - `find_sections`, when its best section is over 4 KiB, returns the
+    subsection that matches best (or a passage of at most 2 KiB) and a
+    line for each of the section's other parts, instead of the
+    section's introduction and outline;
+  - `mcp-docs-convert` marks the articles' indexes `rank: false`;
+  - SLES 16.0: the 16 test questions cost 37.7 KB in 18 calls instead
+    of 63.8 KB in 19, and 15 of 16 find the answering section first.
 - Documents shaped for sections (§15, phase 3):
   - `rank: false` in front matter keeps a document (a license, a
     changelog) out of `find_sections`;

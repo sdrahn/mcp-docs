@@ -173,7 +173,7 @@ make build && make install DESTDIR=/tmp/root
 
 | Question | Calls |
 |---|---|
-| A question in words, document unknown | `find_sections` (the best section's text included) |
+| A question in words, document unknown | `find_sections` (the best section's text included; of a large one, its best part and its other parts) |
 | A precise term (a setting, an error message) | `search` → `read_section` of the match |
 | A known document | `outline` → `read_section` |
 | Browsing | the collection's index, or `list_docs` a page at a time |

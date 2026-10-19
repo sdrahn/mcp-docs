@@ -128,6 +128,7 @@ reboot <co xml:id="co-reboot"/></screen>
 	}
 	art := read("articles/Z.md")
 	for _, want := range []string{
+		"\nrank: false\n",
 		"# Installing SLES {#second}",
 		"- [About SLES](../topics/about.md)\n- **Doing it**: The steps.\n  - [Install](../topics/install--Z.md)\n  - [Next](../topics/links--Z.md)\n- [Glossary](../topics/terms.md)",
 	} {
