@@ -222,6 +222,35 @@ func TestOutlineLarge(t *testing.T) {
 	}
 }
 
+// Tools narrows what the server offers, and the instructions name only
+// those tools (§15).
+func TestToolsFilter(t *testing.T) {
+	s, dirs := newServer(t, 32<<10, "docs")
+	write(t, filepath.Join(dirs["docs"], "README.md"), "# Docs\n")
+	s.Tools = []string{"find_sections", "read_section", "outline"}
+	var names []string
+	for _, tl := range s.toolList() {
+		names = append(names, tl["name"].(string))
+	}
+	if strings.Join(names, ",") != "outline,find_sections,read_section" {
+		t.Errorf("tools: %v", names)
+	}
+	in := s.Instructions()
+	for _, gone := range []string{"search", "list_docs", "read_lines", "outline_file"} {
+		if strings.Contains(in, gone) {
+			t.Errorf("the instructions name %s:\n%s", gone, in)
+		}
+	}
+	if !strings.Contains(in, "find_sections, which returns the best section's text") ||
+		!strings.Contains(in, "a known document: outline it, then read_section") {
+		t.Errorf("instructions:\n%s", in)
+	}
+	raw, _ := json.Marshal(map[string]any{"query": "x"})
+	if _, err := s.call(context.Background(), "search", raw); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Errorf("search not offered: %v", err)
+	}
+}
+
 func TestListCollections(t *testing.T) {
 	s, dirs := newServer(t, 32<<10, "one", "two")
 	write(t, filepath.Join(dirs["one"], "a.md"), "# A\n")

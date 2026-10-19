@@ -19,8 +19,13 @@ import (
 // best-matching line, not text: the agent chooses what to read.
 
 const (
-	defaultFindResults = 5
+	defaultFindResults = 5 // with read: false
+	defaultFindRead    = 3 // with read: the best section and two more
 	maxFindResults     = 50
+	// findReadBudget bounds the best section's text in a find_sections
+	// result: a larger section comes as its introduction and the outline
+	// of its subsections (§15).
+	findReadBudget = 4 << 10
 )
 
 // indexes are the rank indexes of the collections, by name, built when
@@ -62,15 +67,14 @@ type found struct {
 
 func findSectionsTool() tool {
 	return tool{name: "find_sections", title: "Find sections for a question",
-		description: "The sections that best match a question or topic in words, ranked (BM25 over each " +
-			"section's text, its title counting most), across the documents of all collections or one: for a " +
-			"broad question where the document is not obvious or search finds too much or nothing. Gives each " +
-			"section's document, id, heading path, size and best-matching line, not its text: read the one that " +
-			"answers with read_section. For a precise term (a setting, an error message), search is better.",
+		description: "The sections that best answer a question in words, ranked across the documents: the best " +
+			"one's text, then the next as doc#id. The cheapest way to an answer; for a precise term, search.",
 		input: obj(map[string]any{
-			"query":      str("the question or topic, in words (\"back up the gateway's state\")"),
+			"query":      str("the question, in words"),
 			"collection": str("only this collection"),
-			"maxResults": integer(1, maxFindResults, fmt.Sprintf("sections at most (default %d)", defaultFindResults)),
+			"read":       boolean("the best section's text (default true)"),
+			"maxResults": integer(1, maxFindResults, fmt.Sprintf("sections at most (default %d; %d without read)",
+				defaultFindRead, defaultFindResults)),
 		}, "query"),
 		output: obj(map[string]any{
 			"sections": map[string]any{"type": "array", "items": obj(map[string]any{
@@ -78,6 +82,7 @@ func findSectionsTool() tool {
 				"line": intType, "lines": intType, "bytes": intType, "score": map[string]any{"type": "number"},
 				"matchLine": intType, "matchText": strType, "version": strType},
 				"doc", "path", "line", "lines", "bytes", "score", "version")},
+			"read": obj(map[string]any{"doc": strType, "section": strType, "text": strType}, "doc", "section", "text"),
 		}, "sections"),
 		run: findSections}
 }
@@ -86,6 +91,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	var a struct {
 		Query      string `json:"query"`
 		Collection string `json:"collection"`
+		Read       *bool  `json:"read"`
 		MaxResults int    `json:"maxResults"`
 	}
 	if err := decode(args, &a); err != nil {
@@ -94,9 +100,13 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	if strings.TrimSpace(a.Query) == "" {
 		return nil, errors.New("query: give the question or topic")
 	}
+	read := a.Read == nil || *a.Read
 	n := a.MaxResults
 	if n == 0 {
 		n = defaultFindResults
+		if read {
+			n = defaultFindRead
+		}
 	}
 	if n < 1 || n > maxFindResults {
 		return nil, fmt.Errorf("maxResults: from 1 to %d", maxFindResults)
@@ -134,8 +144,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		terms[t] = true
 	}
 	out := []found{}
-	var text strings.Builder
-	fmt.Fprintf(&text, "%d section(s) for %q, best first:\n", len(hits), a.Query)
+	var entries []string // one per hit: its line, and its match
 	for i, h := range hits {
 		o := h.Entry.Outline
 		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version}
@@ -166,18 +175,56 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		if f.Section != "" {
 			addr += "#" + f.Section
 		}
-		fmt.Fprintf(&text, "%d. %s  %s  (%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes))
+		entry := fmt.Sprintf("%d. %s  %s  (%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes))
 		if f.MatchLine > 0 {
-			fmt.Fprintf(&text, "   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
+			entry += fmt.Sprintf("   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
+		}
+		entries = append(entries, entry)
+	}
+	structured := map[string]any{"sections": out}
+	var text strings.Builder
+	if len(hits) == 0 {
+		fmt.Fprintf(&text, "no sections for %q: try other words, or search for a precise term", a.Query)
+		return &result{text: text.String(), structured: structured}, nil
+	}
+	fmt.Fprintf(&text, "%d section(s) for %q, best first:\n", len(hits), a.Query)
+	// The best section's text, so that one call answers (§15).
+	var readText string
+	if best := out[0]; read && best.Section != "" {
+		budget := min(int64(findReadBudget), max(s.MaxRead-1024, 1024))
+		args := map[string]any{"doc": best.Doc, "section": best.Section}
+		if best.Bytes > budget {
+			args["depth"] = 0
+		}
+		raw, _ := json.Marshal(args)
+		if r, err := s.sectionText(ctx, raw, budget); err == nil {
+			readText = r.text
+			structured["read"] = map[string]any{"doc": best.Doc, "section": best.Section, "text": r.text}
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
-	if len(hits) == 0 {
-		text.Reset()
-		fmt.Fprintf(&text, "no sections for %q: try other words, or search for a precise term", a.Query)
+	if readText != "" {
+		// The best one's line, its text; the others as one-liners.
+		text.WriteString(strings.SplitAfterN(entries[0], "\n", 2)[0])
+		text.WriteString(readText)
+		if !strings.HasSuffix(readText, "\n") {
+			text.WriteString("\n")
+		}
+		if len(entries) > 1 {
+			text.WriteString("Also:\n")
+			for _, e := range entries[1:] {
+				text.WriteString(e)
+			}
+		}
 	} else {
-		text.WriteString("(read one: read_section doc#id)")
+		for _, e := range entries {
+			text.WriteString(e)
+		}
 	}
-	return &result{text: text.String(), structured: map[string]any{"sections": out}}, nil
+	text.WriteString("(read one: read_section doc#id)")
+	return &result{text: text.String(), structured: structured}, nil
+
 }
 
 // excerptWidth is about how much of a matching line find_sections

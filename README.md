@@ -78,6 +78,35 @@ Options:
 | `--allow-origin URL` | | with `--listen`, a browser origin requests may come from (repeatable); requests without `Origin` are always served |
 | `--max-concurrent N` | 32 | with `--listen`, requests handled at once |
 | `--fs-compat` | off | also offer mcp-server-fs's `outline_file`, `search_text`, `read_text_file`, `search_files`, `list_directory` |
+| `--tools LIST` | all | offer only these tools, comma-separated; the instructions name only them |
+
+### Keeping token cost down
+
+What an agent spends on documentation is mostly what comes around the
+answer ([§15](docs/architecture.md#15-token-cost)). By default mcp-docs
+sends each result once, as text, and answers a question in words with
+one `find_sections` call that includes the best section. Narrow it
+further where you run it:
+
+- **On the server**, for every client: `--tools
+  find_sections,read_section,outline` is the smallest useful set (about
+  2.5 KB of tool definitions instead of 5.3 KB). Keep `search` for
+  documentation looked up by error messages and settings, and
+  `read_lines` and `list_docs` for collections without an index.
+- **In the client**, where it can filter a server's tools: for example
+  Kit (`~/.kit.yml`):
+
+  ```yaml
+  mcpServers:
+    docs:
+      type: local
+      command: ["/usr/bin/mcp-docs"]
+      allowedTools: ["find_sections", "read_section", "outline"]
+  ```
+
+- **Behind mcp-gateway**: bind the documentation server's role only to
+  the users who need it; every server a user may reach adds its tool
+  definitions to their sessions.
 
 ### Collection files
 
@@ -143,19 +172,19 @@ make build && make install DESTDIR=/tmp/root
 
 | Question | Calls |
 |---|---|
-| Which document? | `list_docs`, or the collection's index |
+| A question in words, document unknown | `find_sections` (the best section's text included) |
 | A precise term (a setting, an error message) | `search` → `read_section` of the match |
-| A broad question | `outline` → `read_section` |
-| A question in words, document unknown | `find_sections` → `read_section` |
+| A known document | `outline` → `read_section` |
+| Browsing | the collection's index, or `list_docs` a page at a time |
 | A long section | `read_section` with `depth: 0` (intro and sub-outline), then the subsection, or `part: 2` |
 
 ## Tools
 
 | Tool | Does |
 |---|---|
-| `list_docs` | collections, or a collection's documents with titles, descriptions and sizes |
+| `list_docs` | collections, or a collection's documents with titles and sizes, a page at a time, `query` to filter |
 | `outline` | a document's headings with section ids, lines and sizes |
 | `search` | lines matching a text or RE2 expression, grouped by section |
-| `find_sections` | sections ranked for a question in words, across documents, with their best line |
+| `find_sections` | sections ranked for a question in words, across documents: the best one's text, the next ones as `doc#id` |
 | `read_section` | one section by id or heading path, in parts when large |
 | `read_lines` | lines by number, checked against the document's version |

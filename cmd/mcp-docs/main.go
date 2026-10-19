@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -58,6 +59,7 @@ func main() {
 		"and paragraphs that open with a bold title as sections")
 	fsCompat := flag.Bool("fs-compat", false, "also offer mcp-server-fs's reading tools (outline_file, search_text, read_text_file, search_files, list_directory)")
 	structured := flag.Bool("structured", false, "also return results as structuredContent, with output schemas (for clients that read the data; a model needs only the text)")
+	toolList := flag.String("tools", "", "offer only these tools, comma-separated (default: all; find_sections,read_section,outline is the smallest useful set)")
 	listen := flag.String("listen", "", "serve MCP over Streamable HTTP on this address (\":8080\", \"127.0.0.1:8080\") "+
 		"instead of stdin/stdout: POST /mcp, health at /healthz")
 	flag.Var(&origins, "allow-origin", "with --listen, a browser origin (\"https://app.example\") requests may come from "+
@@ -85,6 +87,22 @@ func main() {
 		}
 	} else if len(origins) > 0 {
 		fail(2, "--allow-origin needs --listen")
+	}
+	var tools []string
+	if *toolList != "" {
+		known := server.AllToolNames()
+		for _, t := range splitList(*toolList) {
+			if !slices.Contains(known, t) {
+				fail(2, fmt.Sprintf("--tools: no tool %q (%s)", t, strings.Join(known, ", ")))
+			}
+			if !*fsCompat && slices.Contains([]string{"outline_file", "search_text", "read_text_file", "search_files", "list_directory"}, t) {
+				fail(2, fmt.Sprintf("--tools: %s needs --fs-compat", t))
+			}
+			tools = append(tools, t)
+		}
+		if len(tools) == 0 {
+			fail(2, "--tools: name at least one tool")
+		}
 	}
 	if *maxRead < 4096 || *maxFile <= 0 || *maxEntries <= 0 || *maxConcurrent <= 0 {
 		fail(2, "the limits must be positive, --max-read at least 4096")
@@ -134,7 +152,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "%s: serving %s; %s%s\n", server.Name, strings.Join(names, ", "), ll, tcpNote(ll, rules))
 
 	s := &server.Server{Cat: catalog.New(collections, extList, *maxEntries), About: *about, MaxRead: *maxRead,
-		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Version: version}
+		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Tools: tools, Version: version}
 	if *listen == "" {
 		if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
 			fail(1, err.Error())

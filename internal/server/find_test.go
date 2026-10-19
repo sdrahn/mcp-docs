@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,12 +15,37 @@ func TestFindSections(t *testing.T) {
 	write(t, filepath.Join(dirs["app"], "ops.md"), "# Operations\n## Backup\nBack up /var/lib/app and its keys.\n## Logs\nSee journalctl.\n")
 	write(t, filepath.Join(dirs["other"], "x.md"), "# X\n## Timeouts elsewhere\ntimeout timeout\n")
 
+	// By default the best section's text comes with it: one call answers.
 	r := call(t, s, "find_sections", map[string]any{"query": "how do I back up the keys?", "collection": "app"})
 	got := mustOK(t, r)
-	if !strings.HasPrefix(got, "1 section(s) for \"how do I back up the keys?\", best first:\n"+
-		"1. app/ops.md#backup  Backup  (45 B)\n   3: Back up /var/lib/app and its keys.\n") ||
-		!strings.Contains(got, "read_section") {
+	if got != "1 section(s) for \"how do I back up the keys?\", best first:\n"+
+		"1. app/ops.md#backup  Backup  (45 B)\n## Backup\nBack up /var/lib/app and its keys.\n[§ #backup, lines 2-3 of 5]\n"+
+		"(read one: read_section doc#id)" {
 		t.Errorf("find_sections:\n%s", got)
+	}
+	if rd := r.Structured["read"].(map[string]any); rd["section"] != "backup" || !strings.Contains(rd["text"].(string), "its keys") {
+		t.Errorf("structured read: %v", rd)
+	}
+	// read: false, the list: each section with the words that matched.
+	r = call(t, s, "find_sections", map[string]any{"query": "how do I back up the keys?", "collection": "app", "read": false})
+	got = mustOK(t, r)
+	if !strings.HasPrefix(got, "1 section(s) for \"how do I back up the keys?\", best first:\n"+
+		"1. app/ops.md#backup  Backup  (45 B)\n   3: Back up /var/lib/app and its keys.\n") || r.Structured["read"] != nil {
+		t.Errorf("find_sections, read false:\n%s", got)
+	}
+
+	// A best section larger than find_sections reads comes as its
+	// introduction and the outline of its subsections.
+	var big strings.Builder
+	big.WriteString("# Restore\n## Restore from a backup {#restore-backup}\nRestore the keys first.\n")
+	for i := 0; i < 6; i++ {
+		fmt.Fprintf(&big, "### Step %d\n%s\n", i, strings.Repeat("Copy the files back and check them. ", 30))
+	}
+	write(t, filepath.Join(dirs["app"], "restore.md"), big.String())
+	got = mustOK(t, call(t, s, "find_sections", map[string]any{"query": "restore from a backup", "collection": "app"}))
+	if !strings.Contains(got, "1. app/restore.md#restore-backup  Restore from a backup") || !strings.Contains(got, "Restore the keys first.") ||
+		!strings.Contains(got, "… ### Step 5  #step-5") || strings.Contains(got, "Copy the files back") {
+		t.Errorf("a large best section:\n%s", got)
 	}
 	sec := r.Structured["sections"].([]any)[0].(map[string]any)
 	if sec["doc"] != "app/ops.md" || sec["section"] != "backup" || sec["matchLine"].(float64) != 3 || sec["version"] == "" {
