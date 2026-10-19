@@ -305,12 +305,15 @@ wrong lines.
 
 ### 5.6 `find_sections`
 
-`find_sections(query, collection?, maxResults?)` — sections ranked for a
-question in words, for the broad question where search finds too much
-or nothing and the right document is not obvious. Returns each
-section's document, id, heading path, size and best-matching line (the
-line with most of the query's words), not text: the agent still
-chooses what to read (`internal/rank`).
+`find_sections(query, collection?, read?, maxResults?)` — sections
+ranked for a question in words, for the broad question where search
+finds too much or nothing and the right document is not obvious
+(`internal/rank`). By default (`read: true`, 3 results) it returns the
+best section's text, up to 4 KiB (a larger one as its introduction and
+the outline of its subsections), then the next sections as `doc#id`
+lines with the words around their best-matching line: one call answers
+(§15). With `read: false` (5 results) it returns the list only, and the
+agent chooses what to read.
 
 - **What is ranked:** each section's own text, from its heading to the
   next heading of any level, so that a chapter does not outrank its
@@ -540,11 +543,12 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
    image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
-9. **Token cost** (§15; phase 1 done, §15.3): a result once and compact
-   (`--structured` opt-in), `list_docs` paged, large outlines at two
-   levels, `--max-read` 16 KiB, the eval measuring both ways clients
-   forward results. Next, phase 2: one call per answer and a smaller tool
-   surface; phase 3: compact indexes and documents.
+9. **Token cost** (§15; phases 1 and 2 done, §15.3, §15.4): a result
+   once and compact (`--structured` opt-in), `list_docs` paged, large
+   outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
+   in one call; shorter tool descriptions and `--tools`; the eval
+   measuring both ways clients forward results. Next, phase 3: compact
+   indexes and documents.
 
 ## 12. Decisions
 
@@ -897,9 +901,9 @@ fixed surface, nothing large unasked.
 | Item | What | Phase |
 |---|---|---|
 | 1 | **One compact copy.** `structuredContent` and output schemas opt-in (`--structured`); `find_sections` one line per hit (`doc#id`, heading path, size) and the words around the match (about 160 bytes) instead of the whole line | 1 |
-| 2 | **One call per answer.** `find_sections` with `read: true` returns the best section's text (bounded) with two or three alternatives as one-liners; 3 results by default | 2 |
+| 2 | **One call per answer.** `find_sections` returns the best section's text (bounded) with two alternatives as one-liners; 3 results by default | 2 |
 | 3 | **Nothing large by default.** `list_docs` a page at a time with filters; large outlines start at two levels; `--max-read` 16 KiB | 1 |
-| 4 | **A small fixed surface.** Tool sets (`--tools core`: `find_sections`, `read_section`, `outline`; `full`; `fs-compat`), shorter descriptions with the guidance once in the instructions; client and gateway filters documented (Kit's `allowedTools`, gateway roles) | 2 |
+| 4 | **A small fixed surface.** Shorter tool descriptions with the guidance once in the instructions; `--tools LIST` to offer fewer, the instructions naming only those; client and gateway filters documented (Kit's `allowedTools`, gateway roles) | 2 |
 | 5 | **Documents shaped for sections.** A compact collection index (titles grouped by article); legal topics out of the ranking; the converter reports topics over a size; the writing guide's section sizes | 3 |
 | 6 | **Measured.** `make eval` reports the cost as text and as JSON-forwarding clients receive it, with budgets for the fixed cost per session | 1 |
 | 7 | **Upstream, optional.** Propose to Kit that it forward a result's text content, unescaped, when there is one: every MCP server would gain. Not ours to change; an issue for the owner to post | — |
@@ -960,10 +964,54 @@ result as a JSON-forwarding client receives it:
 The collection's index (`README.md`, 9.8 KB) is the largest result
 left: item 5.
 
-### 15.4 Compatibility
+### 15.4 Phase 2, as built
+
+- **`find_sections` answers.** `read` (default true) puts the best
+  section's text, up to 4 KiB, after its line; a larger section comes as
+  its introduction and the outline of its subsections (`read_section`
+  with `depth: 0`). The other sections follow under "Also:" as `doc#id`
+  lines with their matching words. Without `maxResults` it returns 3
+  sections when reading, 5 with `read: false` (the list, as in phase 1).
+  With `--structured`, `read` holds the document, section and text.
+- **Shorter tool descriptions.** One or two sentences each, argument
+  descriptions of a few words, no title repeated in the annotations:
+  how to work belongs in the instructions, sent once.
+- **`--tools LIST`** (default: all) offers only the named tools, among
+  them the `--fs-compat` ones; an unknown name is an error at start. The
+  instructions name only the tools offered, so an agent is never told to
+  use one it does not have. The plan's fixed sets (`core`, `full`) became
+  a list: removing `read_lines` or `list_docs` by default would leave
+  collections without an index, and documents without headings, without
+  a way in, and a list lets each deployment choose.
+- **Instructions** say that `find_sections` returns the best section's
+  text.
+- **Eval:** a question in words is one call when the best section is
+  within 4 KiB; `TestSessionCost` holds the tool definitions to 5 KiB
+  (8 KiB with `--structured`, 2.5 KiB with `--tools
+  find_sections,read_section,outline`).
+
+Measured. The eval's 20 questions, all still answered from the right
+section; the seven in words in one call each:
+
+| | Before | Phase 1 | Phase 2 |
+|---|---:|---:|---:|
+| Text the agent reads | 71.3 KiB | 70.2 KiB | 67.2 KiB |
+| As a JSON-forwarding client receives it | 103.1 KiB | 74.2 KiB | 70.6 KiB |
+| Calls | 45 | 45 | 38 |
+| Instructions + tool definitions | 10.0 KiB | 8.0 KiB | 6.0 KiB (3.1 KiB with the smallest `--tools`) |
+
+On the SLES 16.0 collection, as a JSON-forwarding client receives it:
+
+| | Before | Phase 1 | Phase 2 |
+|---|---:|---:|---:|
+| "make a SELinux domain permissive" | 5,971 B, 2 calls | 2,977 B, 2 calls | 2,174 B, 1 call |
+| Instructions + tool definitions | 11,378 B | 9,067 B | 7,053 B (3,959 B with the smallest `--tools`) |
+
+### 15.5 Compatibility
 
 A client that reads `structuredContent` needs `--structured` from this
 release on (CHANGELOG). The text of every tool is unchanged in what it
 says; `find_sections` and `list_docs` changed their layout, which
-agents read, not parse.
+agents read, not parse. `find_sections` returns text by default; an
+agent that wants the list alone passes `read: false`.
 

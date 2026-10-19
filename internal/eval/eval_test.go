@@ -49,6 +49,10 @@ type question struct {
 // a match rather than the match's section.
 const largeSection = 8 << 10
 
+// findReadBudget is find_sections' bound for the best section's text:
+// a larger one comes as its introduction, and the agent reads on.
+const findReadBudget = 4 << 10
+
 // aroundLines are the lines read around a match: from 3 before.
 const aroundLines = 40
 
@@ -244,7 +248,8 @@ func run(t *testing.T, s *server.Server, q question) outcome {
 
 func (c *session) answer(q question, o *outcome) (string, error) {
 	if q.Find != "" {
-		_, st, err := c.call("find_sections", map[string]any{"query": q.Find, "maxResults": 5})
+		// One call: find_sections reads the best section (§15).
+		text, st, err := c.call("find_sections", map[string]any{"query": q.Find})
 		if err != nil {
 			return "", err
 		}
@@ -254,18 +259,22 @@ func (c *session) answer(q question, o *outcome) (string, error) {
 				Bytes                 int64
 				MatchLine             int
 			}
+			Read *struct{ Section, Text string }
 		}
 		if err := json.Unmarshal(st, &res); err != nil || len(res.Sections) == 0 {
 			return "", fmt.Errorf("find_sections %q: nothing", q.Find)
 		}
 		f := res.Sections[0]
 		o.got = f.Section
+		if res.Read != nil && f.Bytes <= findReadBudget {
+			return text, nil
+		}
 		if f.Bytes > largeSection && f.MatchLine > 0 {
 			text, _, err := c.call("read_lines", map[string]any{"doc": f.Doc, "offset": max(f.MatchLine-3, 1),
 				"limit": aroundLines, "version": f.Version})
 			return text, err
 		}
-		text, _, err := c.call("read_section", map[string]any{"doc": f.Doc, "section": f.Section})
+		text, _, err = c.call("read_section", map[string]any{"doc": f.Doc, "section": f.Section})
 		return text, err
 	}
 	if q.Query != "" {
@@ -381,14 +390,16 @@ func TestCost(t *testing.T) {
 func TestSessionCost(t *testing.T) {
 	for _, c := range []struct {
 		structured   bool
+		only         []string // --tools
 		instructions int
 		tools        int
 	}{
-		{false, 2 << 10, 7 << 10},
-		{true, 2 << 10, 10 << 10},
+		{false, nil, 2 << 10, 5 << 10},
+		{true, nil, 2 << 10, 8 << 10},
+		{false, []string{"find_sections", "read_section", "outline"}, 2 << 10, 5 << 9},
 	} {
 		s := newServer(t)
-		s.Structured = c.structured
+		s.Structured, s.Tools = c.structured, c.only
 		init, err := s.Handle(context.Background(), "initialize", json.RawMessage(`{"protocolVersion":"2025-06-18"}`))
 		if err != nil {
 			t.Fatal(err)
@@ -399,9 +410,10 @@ func TestSessionCost(t *testing.T) {
 		}
 		ib, _ := json.Marshal(init.(map[string]any)["instructions"])
 		tb, _ := json.Marshal(tools)
-		t.Logf("structured=%v: instructions %s, tool definitions %s", c.structured, size(int64(len(ib))), size(int64(len(tb))))
+		t.Logf("structured=%v tools=%v: instructions %s, tool definitions %s", c.structured, c.only,
+			size(int64(len(ib))), size(int64(len(tb))))
 		if len(ib) > c.instructions || len(tb) > c.tools {
-			t.Errorf("structured=%v: instructions %s (budget %s), tool definitions %s (budget %s)", c.structured,
+			t.Errorf("structured=%v tools=%v: instructions %s (budget %s), tool definitions %s (budget %s)", c.structured, c.only,
 				size(int64(len(ib))), size(int64(c.instructions)), size(int64(len(tb))), size(int64(c.tools)))
 		}
 	}

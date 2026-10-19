@@ -40,26 +40,24 @@ type match struct {
 }
 
 var queryArgs = map[string]any{
-	"query":         str("the text to find, or a regular expression (RE2 syntax) with regexp: true"),
+	"query":         str("text, or RE2 with regexp"),
 	"regexp":        boolean("query is a regular expression"),
-	"caseSensitive": boolean("match case (default: ignore it)"),
-	"context":       integer(0, maxContext, fmt.Sprintf("lines shown before and after each match (default %d)", defaultContext)),
+	"caseSensitive": boolean("match case"),
+	"context":       integer(0, maxContext, fmt.Sprintf("lines around each match (default %d)", defaultContext)),
 	"maxResults":    integer(1, maxMaxResults, fmt.Sprintf("matching lines at most (default %d)", defaultMaxResults)),
 }
 
 func searchTool() tool {
 	in := map[string]any{
-		"collection": str("search only this collection"),
-		"doc":        str("search only this document, or the documents below this directory (collection/path)"),
+		"collection": str("only this collection"),
+		"doc":        str("only this document or directory (collection/path)"),
 	}
 	for k, v := range queryArgs {
 		in[k] = v
 	}
 	return tool{name: "search", title: "Search the documents",
-		description: "Find the lines of the documents that contain a text (or match a regular expression with " +
-			"regexp: true), case-insensitive unless caseSensitive. Each match comes with its document, line, " +
-			"context lines and the section it is in (id, heading path, size): read that section with " +
-			"read_section, or the lines around the match with read_lines.",
+		description: "Lines containing a text (or an RE2 expression), each with its section (doc#id): for a " +
+			"precise term, a setting or an error message. Read the section with read_section.",
 		input: obj(in, "query"),
 		output: obj(map[string]any{
 			"matches": map[string]any{"type": "array", "items": obj(map[string]any{

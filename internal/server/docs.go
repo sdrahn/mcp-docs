@@ -14,7 +14,7 @@ import (
 	"github.com/sdrahn/mcp-docs/internal/markdown"
 )
 
-var docArg = str("the document: collection/path (as list_docs names it), or a path relative to the first collection")
+var docArg = str("collection/path (or doc#id)")
 
 // load resolves a document address and returns its outline.
 func (s *Server) load(ctx context.Context, addr string) (catalog.Doc, string, *catalog.Entry, error) {
@@ -35,15 +35,13 @@ func listDocsTool() tool {
 	coll := obj(map[string]any{"name": strType, "title": strType, "description": strType, "path": strType,
 		"index": strType, "documents": intType, "bytes": intType}, "name", "path", "documents", "bytes")
 	return tool{name: "list_docs", title: "List documents",
-		description: "The collections (without arguments, when there are several), or the documents of a " +
-			"collection or below a path: titles and sizes, the index first, a page at a time (limit, offset); " +
-			"query keeps those whose path, title or description has all its words, with descriptions. For a " +
-			"question, find_sections is cheaper.",
-		input: obj(map[string]any{"collection": str("a collection's name"),
-			"path":   str("a directory: collection/path"),
-			"query":  str("only documents whose path, title, description or tags contain all these words"),
-			"offset": integer(0, 0, "documents to skip (default 0)"),
-			"limit":  integer(1, maxListLimit, fmt.Sprintf("documents at most (default %d)", defaultListLimit))}),
+		description: "Collections, or the documents of one or below a path: titles and sizes, the index first, " +
+			"a page at a time; query filters. For a question, use find_sections.",
+		input: obj(map[string]any{"collection": str("collection name"),
+			"path":   str("directory: collection/path"),
+			"query":  str("words all in the path, title or description"),
+			"offset": integer(0, 0, "documents to skip"),
+			"limit":  integer(1, maxListLimit, fmt.Sprintf("at most (default %d)", defaultListLimit))}),
 		output: obj(map[string]any{
 			"collections": map[string]any{"type": "array", "items": coll},
 			"documents":   map[string]any{"type": "array", "items": doc},
@@ -314,13 +312,11 @@ const largeOutline = 40
 
 func outlineTool() tool {
 	return tool{name: "outline", title: "Outline of a document",
-		description: "The headings of a document with their section ids and line numbers, and how many lines " +
-			"and bytes each section has (to the next heading of the same or a higher level). Read one section " +
-			"with read_section (its id) instead of the whole document. section limits it to one section's " +
-			"subsections, maxLevel to the upper levels.",
+		description: "A document's headings with section ids, lines and sizes; read one with read_section. " +
+			"section: one section's subsections; maxLevel: the upper levels.",
 		input: obj(map[string]any{"doc": docArg,
-			"section":  str("only this section and its subsections: an id, or a heading path (\"Operations > Self-check\")"),
-			"maxLevel": integer(1, 6, fmt.Sprintf("only headings down to this level (default: all, or the two upper levels when there are more than %d headings)", largeOutline))}, "doc"),
+			"section":  str("id or heading path (\"Operations > Self-check\")"),
+			"maxLevel": integer(1, 6, fmt.Sprintf("deepest level shown (default all; 2 levels over %d headings)", largeOutline))}, "doc"),
 		output: obj(map[string]any{
 			"doc": strType, "version": strType,
 			"headings": map[string]any{"type": "array", "items": obj(map[string]any{
@@ -492,15 +488,13 @@ func splitPath(p string) []string {
 
 func readSectionTool(s *Server) tool {
 	return tool{name: "read_section", title: "Read a section",
-		description: "The text of one section of a document, from its heading to the next heading of the same or " +
-			"a higher level. section is an id from outline or search (or give it in doc after #), or a heading " +
-			"path. depth limits the subsections included whole (0: the section's introduction, then the outline " +
-			"of its subsections). A section larger than " + size(s.MaxRead) + " comes in parts: the first says " +
-			"how many and what the rest holds; ask for part 2, ….",
+		description: "One section's text, to the next heading of its level: doc#id, or doc and section (id or " +
+			"heading path). depth 0: its introduction and the outline of its subsections. Over " + size(s.MaxRead) +
+			" it comes in parts (part 2, …).",
 		input: obj(map[string]any{"doc": docArg,
-			"section": str("the section's id (from outline or search), or its heading path (\"Operations > Self-check\")"),
-			"depth":   integer(0, 6, "levels of subsections to include whole (default: all)"),
-			"part":    integer(1, 0, "the part of a large section (default 1)")}, "doc"),
+			"section": str("id or heading path"),
+			"depth":   integer(0, 6, "subsection levels included (default all)"),
+			"part":    integer(1, 0, "part of a large section (default 1)")}, "doc"),
 		run: readSection}
 }
 
@@ -512,6 +506,12 @@ type unit struct {
 }
 
 func readSection(s *Server, ctx context.Context, args json.RawMessage) (*result, error) {
+	return s.sectionText(ctx, args, max(s.MaxRead-1024, 1024))
+}
+
+// sectionText is read_section with parts of at most budget bytes
+// (find_sections reads its best section with a smaller one).
+func (s *Server) sectionText(ctx context.Context, args json.RawMessage, budget int64) (*result, error) {
 	var a struct {
 		Doc     string `json:"doc"`
 		Section string `json:"section"`
@@ -564,7 +564,7 @@ func readSection(s *Server, ctx context.Context, args json.RawMessage) (*result,
 		units = append(units, unit{line: n, text: lines[n-h.Line], head: isHead})
 	}
 
-	parts := pack(units, max(s.MaxRead-1024, 1024))
+	parts := pack(units, budget)
 	if a.Part > len(parts) {
 		return nil, fmt.Errorf("%s#%s: has %d part(s)", d.Address(), h.ID, len(parts))
 	}
@@ -675,17 +675,14 @@ func cutText(t string, budget int64) string {
 
 func readLinesTool(s *Server) tool {
 	return tool{name: "read_lines", title: "Read lines of a document",
-		description: "Lines of a document by number: from offset (limit of them), the first (head) or the last " +
-			"(tail) lines, or all of it. For the lines around a search match, and documents without headings; " +
-			"a section is easier read with read_section. With version (from outline or search), a document " +
-			"changed since is an error, not the wrong lines. At most " + size(s.MaxRead) + " per call: the result " +
-			"says which lines it holds and where to go on.",
+		description: "Lines of a document by number (offset and limit, head, tail): around a search match, or " +
+			"a document without headings. version: fail if the document changed. At most " + size(s.MaxRead) + ".",
 		input: obj(map[string]any{"doc": docArg,
-			"offset":  integer(1, 0, "the first line to read (from 1)"),
-			"limit":   integer(1, 0, "how many lines from offset (default: to the end)"),
-			"head":    integer(1, 0, "only the first N lines"),
-			"tail":    integer(1, 0, "only the last N lines"),
-			"version": str("the document's version from outline or search: fail if it changed")}, "doc"),
+			"offset":  integer(1, 0, "first line (from 1)"),
+			"limit":   integer(1, 0, "lines from offset"),
+			"head":    integer(1, 0, "the first N lines"),
+			"tail":    integer(1, 0, "the last N lines"),
+			"version": str("version from outline or search")}, "doc"),
 		run: readLines}
 }
 

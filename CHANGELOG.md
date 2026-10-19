@@ -91,3 +91,13 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   - `make eval` reports the cost as JSON-forwarding clients receive it
     and holds the per-session cost (instructions, tool definitions) to a
     budget.
+- One call per answer, and a smaller fixed cost (§15, phase 2):
+  - `find_sections` returns the best section's text (up to 4 KiB; a
+    larger one as its introduction and sub-outline) and the next two as
+    `doc#id` lines; `read: false` returns the list of 5 as before;
+  - shorter tool descriptions: 5.3 KB of tool definitions instead of
+    7.3 KB (9.6 KB before phase 1);
+  - `--tools LIST` offers only the named tools, and the instructions name
+    only those (`find_sections,read_section,outline`: 2.5 KB);
+  - README: keeping token cost down, on the server, in the client (Kit's
+    `allowedTools`) and behind mcp-gateway.

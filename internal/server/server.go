@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,7 +35,11 @@ type Server struct {
 	// than show the text to a model. Off, a result is its text alone,
 	// once.
 	Structured bool
-	Version    string
+	// Tools, if set, are the only tools offered, by name (§15): a
+	// deployment narrows what every client sees. The instructions name
+	// only these.
+	Tools   []string
+	Version string
 
 	ranked indexes
 }
@@ -81,8 +86,31 @@ func (s *Server) tools() []tool {
 	if s.FSCompat {
 		ts = append(ts, compatTools(s)...)
 	}
-	return ts
+	if s.Tools == nil {
+		return ts
+	}
+	var out []tool
+	for _, t := range ts {
+		if slices.Contains(s.Tools, t.name) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
+
+// has reports whether the server offers a tool.
+func (s *Server) has(name string) bool {
+	for _, t := range s.tools() {
+		if t.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// AllToolNames are the names of every tool the server may offer (the
+// fs-compat ones with FSCompat).
+func AllToolNames() []string { return allToolNames() }
 
 // allToolNames are the names of every tool the server may offer.
 func allToolNames() []string {
@@ -98,7 +126,7 @@ func (s *Server) toolList() []map[string]any {
 	var out []map[string]any
 	for _, t := range s.tools() {
 		m := map[string]any{"name": t.name, "title": t.title, "description": t.description, "inputSchema": t.input,
-			"annotations": map[string]any{"title": t.title, "readOnlyHint": true, "destructiveHint": false,
+			"annotations": map[string]any{"readOnlyHint": true, "destructiveHint": false,
 				"idempotentHint": true, "openWorldHint": false}}
 		if t.output != nil && s.Structured {
 			m["outputSchema"] = t.output
@@ -231,7 +259,9 @@ func (s *Server) Instructions() string {
 				example = d.Address()
 			}
 		} else {
-			b.WriteString(" No index: list_docs lists its documents.")
+			if s.has("list_docs") {
+				b.WriteString(" No index: list_docs lists its documents.")
+			}
 		}
 		if k.Instructions != "" {
 			b.WriteString(" " + strings.Join(strings.Fields(k.Instructions), " "))
@@ -243,18 +273,37 @@ func (s *Server) Instructions() string {
 	}
 	fmt.Fprintf(&b, "\nA document is named collection/path (%s), a section document#id (ids are the headings' "+
 		"anchors, as links in the documents have them).\n\n", example)
-	b.WriteString("Read only the part you need:\n" +
-		"- a question in words, the document not obvious: find_sections, then read_section of the best one " +
-		"(doc#id): the cheapest way to an answer;\n" +
-		"- a precise term (a setting, an error message, a name): search, then read_section with the section " +
-		"of the match (or read_lines around its line);\n" +
-		"- a known document: outline it, then read_section of the one section that answers;\n" +
-		"- to browse: the collection's index (read_lines), or list_docs a page at a time (query filters);\n" +
-		"- a long section: read_section with depth 0 gives its introduction and the outline of its " +
-		"subsections; a section larger than one call comes in parts (part 2, …).\n" +
-		"Read a document whole only when the question needs all of it.")
+	// The workflow, naming only the tools the server offers.
+	var steps []string
+	if s.has("find_sections") {
+		steps = append(steps, "a question in words, the document not obvious: find_sections, which returns the best "+
+			"section's text and the next ones as doc#id: the cheapest way to an answer")
+	}
+	if s.has("search") {
+		steps = append(steps, "a precise term (a setting, an error message, a name): search, then read_section with the "+
+			"section of the match"+map[bool]string{true: " (or read_lines around its line)"}[s.has("read_lines")])
+	}
+	if s.has("outline") && s.has("read_section") {
+		steps = append(steps, "a known document: outline it, then read_section of the one section that answers")
+	}
+	switch {
+	case s.has("read_lines") && s.has("list_docs"):
+		steps = append(steps, "to browse: the collection's index (read_lines), or list_docs a page at a time (query filters)")
+	case s.has("read_lines"):
+		steps = append(steps, "to browse: the collection's index (read_lines)")
+	case s.has("list_docs"):
+		steps = append(steps, "to browse: list_docs, a page at a time (query filters)")
+	}
+	if s.has("read_section") {
+		steps = append(steps, "a long section: read_section with depth 0 gives its introduction and the outline of its "+
+			"subsections; a section larger than one call comes in parts (part 2, …)")
+	}
+	if len(steps) > 0 {
+		b.WriteString("Read only the part you need:\n- " + strings.Join(steps, ";\n- ") + ".\n" +
+			"Read a document whole only when the question needs all of it.")
+	}
 	fmt.Fprintf(&b, " One call returns at most %s (%s).", size(s.MaxRead), tokens(s.MaxRead))
-	if s.FSCompat {
+	if s.FSCompat && s.has("read_text_file") {
 		fmt.Fprintf(&b, "\n\nThe tools outline_file, search_text, read_text_file, search_files and list_directory "+
 			"take file paths, absolute or relative to %s, as mcp-server-fs's do.", s.Cat.Collections[0].Path)
 	}
