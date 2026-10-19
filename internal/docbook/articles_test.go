@@ -27,6 +27,7 @@ func TestArticles(t *testing.T) {
 	const doctype = `<!DOCTYPE topic [ <!ENTITY % e SYSTEM "../common/e.ent"> %e; ]>`
 	write("common/e.ent", `<!ENTITY prod "SLES">`)
 	write("DC-X", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nPROFARCH=\"x86_64\"\nSTRUCTID=\"second\"\n")
+	write("DC-Y", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nSTRUCTID=\"first\"\n")
 	write("DC-Z", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nPROFARCH=\"zseries\"\nSTRUCTID=\"second\"\n")
 	write("articles/a.asm.xml", doctype+`<assembly>
 <resources>
@@ -34,10 +35,14 @@ func TestArticles(t *testing.T) {
   <resource xml:id="_links" href="../tasks/links.xml"/>
   <resource xml:id="_about" href="../concepts/about.xml"/>
   <resource xml:id="_terms" href="../references/terms.xml"/>
+  <resource xml:id="_legal" href="../common/legal.xml"/>
 </resources>
-<structure renderas="article" xml:id="first"><merge><title>Not this one</title></merge></structure>
+<structure renderas="article" xml:id="first"><merge><title>Not this one</title></merge>
+  <module resourceref="_about" renderas="section"/>
+</structure>
 <structure renderas="article" xml:id="second">
-  <merge><title>Installing &prod;</title><meta name="description">How to install</meta></merge>
+  <merge><title>Installing &prod;</title><meta name="description">How to install</meta>
+    <meta name="task"><phrase>Installation</phrase></meta></merge>
   <module resourceref="_about" renderas="section"/>
   <module renderas="section" xml:id="grp">
     <merge><title>Doing it</title><abstract><para>The steps.</para></abstract></merge>
@@ -45,8 +50,10 @@ func TestArticles(t *testing.T) {
     <module resourceref="_links" renderas="section"/>
   </module>
   <module resourceref="_terms"><output renderas="glossary"/></module>
+  <module resourceref="_legal" renderas="section"/>
 </structure>
 </assembly>`)
+	write("common/legal.xml", doctype+`<topic xml:id="legal"><title>Legal Notice</title><para>No warranty.</para></topic>`)
 	write("concepts/about.xml", doctype+`<topic xml:id="about" role="concept"><title>About &prod;</title>
 <para>The same on every architecture.</para></topic>`)
 	write("tasks/install.xml", doctype+`<topic xml:id="install" role="task"><title>Install</title>
@@ -66,12 +73,12 @@ reboot <co xml:id="co-reboot"/></screen>
 </glossdiv></topic>`)
 
 	out := t.TempDir()
-	rep, err := Convert(Options{Src: src, DCs: []string{"DC-X", "DC-Z"}, Out: out, Name: "t", Title: "T", Description: "D",
-		SiteURL: "https://documentation.suse.com/sles/16.0/html/%s/"})
+	rep, err := Convert(Options{Src: src, DCs: []string{"DC-X", "DC-Y", "DC-Z"}, Out: out, Name: "t", Title: "T", Description: "D",
+		SiteURL: "https://documentation.suse.com/sles/16.0/html/%s/", MaxSection: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rep.OK() || rep.Articles != 2 {
+	if !rep.OK() || rep.Articles != 3 {
 		t.Fatalf("report: %s", rep)
 	}
 	read := func(name string) string {
@@ -87,7 +94,7 @@ reboot <co xml:id="co-reboot"/></screen>
 	for _, f := range files {
 		names = append(names, filepath.Base(f))
 	}
-	if got := strings.Join(names, " "); got != "about.md install--X.md install--Z.md links--X.md links--Z.md terms.md" {
+	if got := strings.Join(names, " "); got != "about.md install--X.md install--Z.md legal.md links--X.md links--Z.md terms.md" {
 		t.Errorf("topics: %s", got)
 	}
 	x, z := read("topics/install--X.md"), read("topics/install--Z.md")
@@ -128,7 +135,19 @@ reboot <co xml:id="co-reboot"/></screen>
 			t.Errorf("articles/Z.md lacks %q:\n%s", want, art)
 		}
 	}
-	if readme := read("README.md"); !strings.Contains(readme, "- [Installing SLES](articles/X.md): How to install\n- [Installing SLES](articles/Z.md): How to install") {
+	// The index: titles by the articles' first task, without
+	// descriptions.
+	if readme := read("README.md"); !strings.Contains(readme, "## Articles\n\n### Installation\n\n"+
+		"- [Installing SLES](articles/X.md)\n- [Installing SLES](articles/Z.md)\n\n### Other\n\n- [Not this one](articles/Y.md)\n") {
 		t.Errorf("README.md:\n%s", readme)
+	}
+	// Legal notices are out of the ranking; nothing else is.
+	if !strings.Contains(read("topics/legal.md"), "\nrank: false\n") || strings.Contains(read("topics/about.md"), "rank:") {
+		t.Errorf("rank: %s", read("topics/legal.md"))
+	}
+	// Sections over MaxSection are reported, by their own text.
+	if strings.Join(rep.Large, " ") != "topics/install--X.md#install (0.2 KiB) topics/install--Z.md#install (0.2 KiB)" ||
+		!strings.Contains(rep.String(), "sections over 0.2 KiB of their own text: topics/install--X.md#install") {
+		t.Errorf("large: %q\n%s", rep.Large, rep)
 	}
 }

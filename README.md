@@ -128,7 +128,8 @@ the same name).
 
 Documents' titles and descriptions come from their front matter
 (`title`, `description`, `tags`), else from the first level-1 heading
-and the first paragraph; `list_docs` shows them.
+and the first paragraph; `list_docs` shows them. `rank: false` keeps a
+document (a license, a changelog) out of `find_sections`.
 
 ### Resources and prompts
 

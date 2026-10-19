@@ -91,6 +91,10 @@ type Meta struct {
 	Title       string   `yaml:"title"`
 	Description string   `yaml:"description"`
 	Tags        []string `yaml:"tags"`
+	// Unranked ("rank: false") keeps the document out of find_sections'
+	// ranking: a license, a legal notice, a changelog. It is still
+	// listed, searched and read.
+	Unranked bool `yaml:"-"`
 }
 
 // SummaryLength bounds a summary.
@@ -204,6 +208,9 @@ func parseMeta(lines []string) Meta {
 	}
 	if d, ok := raw["description"].(string); ok {
 		m.Description = strings.TrimSpace(d)
+	}
+	if r, ok := raw["rank"].(bool); ok && !r {
+		m.Unranked = true
 	}
 	switch t := raw["tags"].(type) {
 	case []any:

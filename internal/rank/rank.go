@@ -70,6 +70,9 @@ func Build(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection, max
 			return ctx.Err() == nil
 		}
 		ix.versions[d.Address()] = en.Version
+		if en.Outline.Meta.Unranked {
+			return true
+		}
 		text, err := cat.ReadAll(d, maxFile)
 		if err != nil {
 			return true

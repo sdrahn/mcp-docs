@@ -9,7 +9,7 @@ SELinux on SLES, converted from SUSE's sources.
 
 ## Articles
 
-- [Understanding SELinux Basics](articles/SLES-SELinux.md): Learn about the basic components and functionality of SELinux
+- [Understanding SELinux Basics](articles/SLES-SELinux.md)
 
 ## Source and license
 

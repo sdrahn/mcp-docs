@@ -194,6 +194,12 @@ func TestMeta(t *testing.T) {
 	if o.Title() != "Front title" || o.Description() != "Folded text." || !reflect.DeepEqual(o.Meta.Tags, []string{"a", "b"}) {
 		t.Errorf("front matter: %q %q %v", o.Title(), o.Description(), o.Meta)
 	}
+	if o.Meta.Unranked {
+		t.Error("ranked by default")
+	}
+	if o := scan(t, "---\nrank: false\n---\n# L\n"); !o.Meta.Unranked {
+		t.Error("rank: false")
+	}
 	o = scan(t, "---\ntags: x, y\n---\n")
 	if !reflect.DeepEqual(o.Meta.Tags, []string{"x", "y"}) {
 		t.Errorf("tags as a string: %v", o.Meta.Tags)
