@@ -22,7 +22,7 @@ func TestSLES16(t *testing.T) {
 		t.Skip("MCP_DOCS_SLES16 is not set (tools/suse-docs/README.md)")
 	}
 	s := &server.Server{Cat: catalog.New([]*catalog.Collection{{Name: "sles-16.0", Path: dir}}, []string{".md"}, 5000),
-		MaxRead: 32 << 10, MaxFile: 1 << 20, Version: "test"}
+		MaxRead: 32 << 10, MaxFile: 1 << 20, Structured: true, Version: "test"}
 	found := 0
 	for _, c := range sles16Questions {
 		p, _ := json.Marshal(map[string]any{"name": "find_sections", "arguments": map[string]any{"query": c.q}})

@@ -35,15 +35,32 @@ func listDocsTool() tool {
 	coll := obj(map[string]any{"name": strType, "title": strType, "description": strType, "path": strType,
 		"index": strType, "documents": intType, "bytes": intType}, "name", "path", "documents", "bytes")
 	return tool{name: "list_docs", title: "List documents",
-		description: "The collections of documents (without arguments, when there are several), or the documents " +
-			"of a collection or below a path, with their titles, descriptions and sizes; the collection's index first.",
+		description: "The collections (without arguments, when there are several), or the documents of a " +
+			"collection or below a path: titles and sizes, the index first, a page at a time (limit, offset); " +
+			"query keeps those whose path, title or description has all its words, with descriptions. For a " +
+			"question, find_sections is cheaper.",
 		input: obj(map[string]any{"collection": str("a collection's name"),
-			"path": str("a directory: collection/path")}),
+			"path":   str("a directory: collection/path"),
+			"query":  str("only documents whose path, title, description or tags contain all these words"),
+			"offset": integer(0, 0, "documents to skip (default 0)"),
+			"limit":  integer(1, maxListLimit, fmt.Sprintf("documents at most (default %d)", defaultListLimit))}),
 		output: obj(map[string]any{
 			"collections": map[string]any{"type": "array", "items": coll},
 			"documents":   map[string]any{"type": "array", "items": doc},
-			"truncated":   map[string]any{"type": "boolean"}}, "truncated"),
+			"total":       intType, "offset": intType,
+			"truncated": map[string]any{"type": "boolean"}}, "truncated"),
 		run: listDocs}
+}
+
+const (
+	defaultListLimit = 25
+	maxListLimit     = 200
+)
+
+// listOpts select and page a listing of documents.
+type listOpts struct {
+	Query         string
+	Offset, Limit int
 }
 
 type docInfo struct {
@@ -70,10 +87,20 @@ func listDocs(s *Server, ctx context.Context, args json.RawMessage) (*result, er
 	var a struct {
 		Collection string `json:"collection"`
 		Path       string `json:"path"`
+		Query      string `json:"query"`
+		Offset     int    `json:"offset"`
+		Limit      int    `json:"limit"`
 	}
 	if err := decode(args, &a); err != nil {
 		return nil, err
 	}
+	if a.Limit == 0 {
+		a.Limit = defaultListLimit
+	}
+	if a.Limit < 1 || a.Limit > maxListLimit || a.Offset < 0 {
+		return nil, fmt.Errorf("limit: from 1 to %d; offset: 0 or more", maxListLimit)
+	}
+	opts := listOpts{Query: a.Query, Offset: a.Offset, Limit: a.Limit}
 	switch {
 	case a.Collection != "" && a.Path != "":
 		return nil, errors.New("give collection or path, not both")
@@ -82,15 +109,17 @@ func listDocs(s *Server, ctx context.Context, args json.RawMessage) (*result, er
 		if err != nil {
 			return nil, err
 		}
-		return s.listDocuments(ctx, d)
+		return s.listDocuments(ctx, d, opts)
 	case a.Collection != "":
 		k := s.Cat.Collection(a.Collection)
 		if k == nil {
 			return nil, fmt.Errorf("collection %q: no such collection (%s)", a.Collection, strings.Join(s.collNames(), ", "))
 		}
-		return s.listDocuments(ctx, catalog.Doc{Coll: k, Rel: "."})
-	case len(s.Cat.Collections) == 1:
-		return s.listDocuments(ctx, catalog.Doc{Coll: s.Cat.Collections[0], Rel: "."})
+		return s.listDocuments(ctx, catalog.Doc{Coll: k, Rel: "."}, opts)
+	case len(s.Cat.Collections) == 1 || opts.Query != "":
+		// One collection, or a query: its documents (a query across
+		// collections lists the first's; name one with collection).
+		return s.listDocuments(ctx, catalog.Doc{Coll: s.Cat.Collections[0], Rel: "."}, opts)
 	}
 	var out strings.Builder
 	colls := []collInfo{}
@@ -140,7 +169,7 @@ func (s *Server) collNames() []string {
 	return out
 }
 
-func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, error) {
+func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc, opt listOpts) (*result, error) {
 	fi, err := s.Cat.Stat(dir)
 	if err != nil {
 		return nil, err
@@ -148,22 +177,48 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 	if !fi.IsDir() {
 		return nil, fmt.Errorf("%s: a document, not a directory (outline shows its sections)", dir.Address())
 	}
+	words := strings.Fields(strings.ToLower(opt.Query))
 	var docs []docInfo
-	truncated := false
+	var total int64
+	all := 0
+	subdirs := map[string]int{}
+	var subOrder []string
+	walkFull := false
 	err = s.Cat.Walk(ctx, dir, nil, func(d catalog.Doc, e fs.DirEntry) bool {
 		if e.IsDir() {
 			return true
 		}
-		if len(docs) >= s.Cat.MaxEntries {
-			truncated = true
+		if all >= s.Cat.MaxEntries {
+			walkFull = true
 			return false
 		}
+		all++
 		di := docInfo{Doc: d.Address()}
 		if en, err := s.Cat.Load(ctx, d); err == nil {
 			o := en.Outline
 			di.Title, di.Description, di.Tags, di.Lines, di.Bytes = o.Title(), o.Description(), o.Meta.Tags, o.Lines, o.Bytes
 		} else if ctx.Err() != nil {
 			return false
+		}
+		total += di.Bytes
+		if rel, ok := strings.CutPrefix(d.Rel, strings.TrimSuffix(dir.Rel, "/")+"/"); ok || dir.Rel == "." {
+			if dir.Rel == "." {
+				rel = d.Rel
+			}
+			if sub, _, nested := strings.Cut(rel, "/"); nested {
+				if subdirs[sub] == 0 {
+					subOrder = append(subOrder, sub)
+				}
+				subdirs[sub]++
+			}
+		}
+		if len(words) > 0 {
+			hay := strings.ToLower(di.Doc + " " + di.Title + " " + di.Description + " " + strings.Join(di.Tags, " "))
+			for _, w := range words {
+				if !strings.Contains(hay, w) {
+					return true
+				}
+			}
 		}
 		docs = append(docs, di)
 		return true
@@ -180,14 +235,35 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 			}
 		}
 	}
-	var total int64
-	for _, d := range docs {
-		total += d.Bytes
-	}
+	matching := len(docs)
+	// Descriptions on a short or filtered list: on a long one, titles
+	// are what an agent can choose from in one page (§15).
+	describe := len(words) > 0 || matching <= opt.Limit
 	var out strings.Builder
-	fmt.Fprintf(&out, "%s: %d documents, %s (%s)\n", dir.Address(), len(docs), size(total), tokens(total))
+	fmt.Fprintf(&out, "%s: %d documents, %s (%s)", dir.Address(), all, size(total), tokens(total))
+	if len(subOrder) > 0 && len(words) == 0 {
+		var parts []string
+		for _, sd := range subOrder {
+			parts = append(parts, fmt.Sprintf("%s/ %d", sd, subdirs[sd]))
+		}
+		out.WriteString("; " + strings.Join(parts, ", "))
+	}
+	out.WriteString("\n")
+	if len(words) > 0 {
+		fmt.Fprintf(&out, "%d matching %q\n", matching, opt.Query)
+	}
+	page := docs
+	if opt.Offset >= len(page) {
+		page = nil
+	} else {
+		page = page[opt.Offset:]
+	}
+	truncated := walkFull
+	if len(page) > opt.Limit {
+		page = page[:opt.Limit]
+	}
 	shown := 0
-	for _, d := range docs {
+	for _, d := range page {
 		line := "  " + d.Doc
 		if d.Title != "" {
 			line += " — " + d.Title
@@ -195,8 +271,8 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 		if d.Index {
 			line += " (index: read it first)"
 		}
-		line += fmt.Sprintf("  [%d lines, %s]\n", d.Lines, size(d.Bytes))
-		if d.Description != "" {
+		line += fmt.Sprintf("  (%s)\n", size(d.Bytes))
+		if describe && d.Description != "" {
 			line += "      " + d.Description + "\n"
 		}
 		if int64(out.Len()+len(line)) > s.MaxRead-256 {
@@ -206,21 +282,35 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc) (*result, e
 		out.WriteString(line)
 		shown++
 	}
-	docs = docs[:shown]
-	if len(docs) == 0 {
+	page = page[:shown]
+	if len(page) == 0 {
 		out.WriteString("  no documents\n")
 	}
-	if truncated {
-		out.WriteString("(more documents: list a directory with path, or search)\n")
+	if next := opt.Offset + shown; next < matching {
+		fmt.Fprintf(&out, "(documents %d-%d of %d: offset %d for more, query to filter; for a question, find_sections)\n",
+			opt.Offset+1, next, matching, next)
+	}
+	if walkFull {
+		out.WriteString("(more documents than listed: list a directory with path)\n")
 	}
 	out.WriteString("(the sections of a document: outline)")
-	if docs == nil {
-		docs = []docInfo{}
+	if page == nil {
+		page = []docInfo{}
 	}
-	return &result{text: out.String(), structured: map[string]any{"documents": docs, "truncated": truncated}}, nil
+	if !describe {
+		for i := range page {
+			page[i].Description = ""
+		}
+	}
+	return &result{text: out.String(), structured: map[string]any{"documents": page, "total": matching,
+		"offset": opt.Offset, "truncated": truncated || opt.Offset+shown < matching}}, nil
 }
 
 // --- outline -----------------------------------------------------------------
+
+// largeOutline is the number of headings above which an outline without
+// maxLevel shows only its two upper levels.
+const largeOutline = 40
 
 func outlineTool() tool {
 	return tool{name: "outline", title: "Outline of a document",
@@ -230,7 +320,7 @@ func outlineTool() tool {
 			"subsections, maxLevel to the upper levels.",
 		input: obj(map[string]any{"doc": docArg,
 			"section":  str("only this section and its subsections: an id, or a heading path (\"Operations > Self-check\")"),
-			"maxLevel": integer(1, 6, "only headings down to this level (default 6: all)")}, "doc"),
+			"maxLevel": integer(1, 6, fmt.Sprintf("only headings down to this level (default: all, or the two upper levels when there are more than %d headings)", largeOutline))}, "doc"),
 		output: obj(map[string]any{
 			"doc": strType, "version": strType,
 			"headings": map[string]any{"type": "array", "items": obj(map[string]any{
@@ -250,6 +340,7 @@ func outline(s *Server, ctx context.Context, args json.RawMessage) (*result, err
 	if err := decode(args, &a); err != nil {
 		return nil, err
 	}
+	levelGiven := a.MaxLevel != 0
 	if a.MaxLevel == 0 {
 		a.MaxLevel = 6
 	}
@@ -268,6 +359,21 @@ func outline(s *Server, ctx context.Context, args json.RawMessage) (*result, err
 	if sec != "" {
 		if within, err = findSection(d, o, sec); err != nil {
 			return nil, err
+		}
+	}
+	// A large outline, unless asked for all of it, shows the two upper
+	// levels below where it starts: the agent narrows with section (§15).
+	hidden := false
+	if !levelGiven {
+		n, top := 0, 7
+		for i, h := range o.Headings {
+			if within < 0 || o.Within(i, within) {
+				n++
+				top = min(top, h.Level)
+			}
+		}
+		if n > largeOutline && top+1 < 6 {
+			a.MaxLevel, hidden = top+1, true
 		}
 	}
 	var out strings.Builder
@@ -301,6 +407,8 @@ func outline(s *Server, ctx context.Context, args json.RawMessage) (*result, err
 		out.WriteString("no headings: read it with read_lines (offset and limit), or search it")
 	case truncated:
 		out.WriteString("(more headings than one call returns: give maxLevel, or section)")
+	case hidden:
+		fmt.Fprintf(&out, "(headings deeper than level %d hidden: outline a section, or maxLevel; read one: read_section doc#id)", a.MaxLevel)
 	default:
 		out.WriteString("(read a section: read_section with doc and its id)")
 	}

@@ -68,7 +68,8 @@ Options:
 | `--root DIR` | | a collection named after the directory (repeatable) |
 | `--collection NAME=DIR[:DESC]` | | a named collection with a description (repeatable) |
 | `--instructions TEXT` | | what the documents are; opens the server's instructions |
-| `--max-read N` | 32768 | bytes one call returns at most |
+| `--max-read N` | 16384 | bytes one call returns at most |
+| `--structured` | off | also return results as `structuredContent`, with output schemas, for clients that read the data; a model needs only the text ([§15](docs/architecture.md#15-token-cost)) |
 | `--max-file N` | 16 MiB | the largest document search reads |
 | `--max-entries N` | 10000 | documents a listing or search covers |
 | `--ext LIST` | `.md,.markdown` | extensions of documents |

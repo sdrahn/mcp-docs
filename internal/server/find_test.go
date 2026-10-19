@@ -17,7 +17,7 @@ func TestFindSections(t *testing.T) {
 	r := call(t, s, "find_sections", map[string]any{"query": "how do I back up the keys?", "collection": "app"})
 	got := mustOK(t, r)
 	if !strings.HasPrefix(got, "1 section(s) for \"how do I back up the keys?\", best first:\n"+
-		"1. app/ops.md § Backup  #backup  [2 lines, 45 B]\n     3: Back up /var/lib/app and its keys.\n") ||
+		"1. app/ops.md#backup  Backup  (45 B)\n   3: Back up /var/lib/app and its keys.\n") ||
 		!strings.Contains(got, "read_section") {
 		t.Errorf("find_sections:\n%s", got)
 	}

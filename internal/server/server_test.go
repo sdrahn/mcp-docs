@@ -26,7 +26,42 @@ func newServer(t *testing.T, maxRead int64, names ...string) (*Server, map[strin
 		colls = append(colls, &catalog.Collection{Name: n, Path: d, Description: "the " + n + " docs"})
 	}
 	return &Server{Cat: catalog.New(colls, []string{".md", ".markdown"}, 1000), MaxRead: maxRead, MaxFile: 1 << 20,
-		FSCompat: true, Version: "test"}, dirs
+		FSCompat: true, Structured: true, Version: "test"}, dirs
+}
+
+// Without Structured, a result is its text alone: no structuredContent,
+// no output schemas (§15).
+func TestTextOnly(t *testing.T) {
+	s, dirs := newServer(t, 32<<10, "docs")
+	s.Structured = false
+	write(t, filepath.Join(dirs["docs"], "a.md"), "# A\n\n## Backup {#backup}\n\nCopy the state.\n")
+	for _, c := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"find_sections", map[string]any{"query": "copy the state"}},
+		{"outline", map[string]any{"doc": "docs/a.md"}},
+		{"search", map[string]any{"query": "state"}},
+		{"list_docs", map[string]any{}},
+	} {
+		raw, _ := json.Marshal(c.args)
+		res, err := s.call(context.Background(), c.name, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := res.(map[string]any)
+		if _, ok := m["structuredContent"]; ok {
+			t.Errorf("%s: structuredContent without Structured", c.name)
+		}
+		if b, _ := json.Marshal(m); !strings.Contains(string(b), `"text"`) {
+			t.Errorf("%s: no text: %s", c.name, b)
+		}
+	}
+	for _, tl := range s.toolList() {
+		if _, ok := tl["outputSchema"]; ok {
+			t.Errorf("%s: outputSchema without Structured", tl["name"])
+		}
+	}
 }
 
 type callResult struct {
@@ -108,8 +143,8 @@ func TestListDocs(t *testing.T) {
 	write(t, filepath.Join(dirs["app"], ".git", "x.md"), "# hidden\n")
 
 	got := mustOK(t, call(t, s, "list_docs", map[string]any{}))
-	for _, want := range []string{"app: 3 documents", "app/README.md — App docs (index: read it first)  [2 lines",
-		"app/guide.md — Guide  [13 lines", "app/sub/deep.markdown — Deep"} {
+	for _, want := range []string{"app: 3 documents", "; sub/ 1\n", "app/README.md — App docs (index: read it first)  (",
+		"app/guide.md — Guide  (", "app/sub/deep.markdown — Deep"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("list_docs: no %q in\n%s", want, got)
 		}
@@ -126,6 +161,65 @@ func TestListDocs(t *testing.T) {
 	}
 	mustFail(t, call(t, s, "list_docs", map[string]any{"collection": "nope"}), "no such collection")
 	mustFail(t, call(t, s, "list_docs", map[string]any{"path": "app/guide.md"}), "not a directory")
+}
+
+// A long listing comes a page at a time, titles only; query filters it,
+// with descriptions (§15).
+func TestListDocsPaged(t *testing.T) {
+	s, dirs := newServer(t, 32<<10, "big")
+	write(t, filepath.Join(dirs["big"], "README.md"), "# Index\n")
+	for i := 0; i < 60; i++ {
+		write(t, filepath.Join(dirs["big"], "topics", fmt.Sprintf("t%02d.md", i)),
+			fmt.Sprintf("---\ndescription: About topic %d.\n---\n# Topic %d\n", i, i))
+	}
+	write(t, filepath.Join(dirs["big"], "topics", "selinux.md"), "---\ndescription: Modes and booleans.\n---\n# SELinux\n")
+	r := call(t, s, "list_docs", map[string]any{})
+	got := mustOK(t, r)
+	if !strings.HasPrefix(got, "big: 62 documents, ") || !strings.Contains(got, "; topics/ 61\n") ||
+		!strings.Contains(got, "  big/README.md — Index (index: read it first)") ||
+		strings.Contains(got, "About topic") || strings.Count(got, "\n  big/") != defaultListLimit ||
+		!strings.Contains(got, "(documents 1-25 of 62: offset 25 for more, query to filter; for a question, find_sections)") {
+		t.Errorf("first page:\n%s", got)
+	}
+	if r.Structured["total"].(float64) != 62 || !r.Structured["truncated"].(bool) {
+		t.Errorf("structured: %v", r.Structured)
+	}
+	got = mustOK(t, call(t, s, "list_docs", map[string]any{"offset": 50}))
+	if strings.Count(got, "\n  big/") != 12 || strings.Contains(got, "offset 62") {
+		t.Errorf("last page:\n%s", got)
+	}
+	got = mustOK(t, call(t, s, "list_docs", map[string]any{"query": "SELinux booleans"}))
+	if !strings.Contains(got, "1 matching \"SELinux booleans\"\n  big/topics/selinux.md — SELinux  (") ||
+		!strings.Contains(got, "      Modes and booleans.\n") || strings.Contains(got, "t01.md") {
+		t.Errorf("query:\n%s", got)
+	}
+	mustFail(t, call(t, s, "list_docs", map[string]any{"limit": 500}), "limit: from 1 to 200")
+}
+
+// A large outline without maxLevel shows its two upper levels (§15);
+// maxLevel or a section shows the rest.
+func TestOutlineLarge(t *testing.T) {
+	s, dirs := newServer(t, 32<<10, "app")
+	var b strings.Builder
+	b.WriteString("# Big\n")
+	for i := 0; i < 15; i++ {
+		fmt.Fprintf(&b, "## Part %d\n", i)
+		for j := 0; j < 3; j++ {
+			fmt.Fprintf(&b, "### Step %d.%d\ntext\n", i, j)
+		}
+	}
+	write(t, filepath.Join(dirs["app"], "big.md"), b.String())
+	got := mustOK(t, call(t, s, "outline", map[string]any{"doc": "app/big.md"}))
+	if strings.Contains(got, "Step") || !strings.Contains(got, "## Part 14") ||
+		!strings.Contains(got, "(headings deeper than level 2 hidden: outline a section, or maxLevel;") {
+		t.Errorf("large outline:\n%s", got)
+	}
+	if got := mustOK(t, call(t, s, "outline", map[string]any{"doc": "app/big.md", "maxLevel": 3})); !strings.Contains(got, "### Step 14.2") {
+		t.Errorf("maxLevel 3:\n%s", got)
+	}
+	if got := mustOK(t, call(t, s, "outline", map[string]any{"doc": "app/big.md", "section": "part-3"})); !strings.Contains(got, "### Step 3.2") {
+		t.Errorf("a section:\n%s", got)
+	}
 }
 
 func TestListCollections(t *testing.T) {
