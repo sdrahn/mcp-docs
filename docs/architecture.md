@@ -543,7 +543,7 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
    image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
-9. **Token cost** (§15; phases 1 to 3 done, §15.3 to §15.5): a result
+9. **Token cost** (§15; phases 1 to 3 done, §15.3 to §15.5, measured in §15.6): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
    in one call; shorter tool descriptions and `--tools`; the eval
@@ -1038,7 +1038,43 @@ questions answered first):
 | The collection's index, read whole (as a JSON-forwarding client receives it) | 9,802 B | 5,392 B |
 | Sections over 8 KiB of their own text | — | 4, of which `vm-host-network-default` 17.0 KiB |
 
-### 15.6 Compatibility
+### 15.6 Before and after, measured
+
+The three phases together, on SLES 16.0: mcp-docs and mcp-docs-convert
+before phase 1 (8fde1d6, the collection converted with that converter)
+against the release with phase 3 (mcp-docs 0.1.0 and
+`suse-docs-mcp-sles-16.0` as packaged), both from doc-modular a9f7084.
+One session: `initialize` and `tools/list`; orientation (`list_docs`,
+then the collection's index read whole); the 16 `TestSLES16` questions,
+each the way the version's instructions teach: before, `find_sections`
+then `read_section` of the first section; now, `find_sections` alone,
+and where the best section is over 4 KiB a second call that reads it
+whole (an agent that reads only the subsection it needs spends less).
+Results as a JSON-forwarding client (Kit) receives them; tokens
+estimated at 4 bytes each.
+
+| | Before | Now | |
+|---|---:|---:|---:|
+| Instructions and tool definitions | 11,152 B | 6,824 B | −39% |
+| Orientation (`list_docs`, the index) | 84,652 B | 8,291 B | −90% |
+| 16 questions | 123,350 B, 32 calls | 63,845 B, 19 calls | −48% |
+| A question, on average | 7,709 B | 3,990 B | −48% |
+| The session's input, every turn re-sending the fixed part and the results before it | 5.48 MB, ~1.37M tokens | 1.02 MB, ~256k tokens | −81% |
+| Questions answered from the right section first | 14 of 16 | 14 of 16 | |
+
+Thirteen questions take one call instead of two and cost 55 to 75%
+less ("open a port in a firewalld zone": 4,482 B → 1,472 B; "make a
+SELinux domain permissive": 5,971 B → 2,174 B). Three have a best
+section over 4 KiB and take two calls still: "configure GRUB 2 for PXE
+boot" 27.8 KB → 18.5 KB, "systemd timer does not run" 10.2 KB →
+7.4 KB, "create a snapshot of a VM with virsh" 8.6 KB → 7.9 KB.
+
+For a client that passes the model only the text, the session's input
+falls from ~820k to ~245k tokens (−70%): the copy as JSON never reached
+it. With prompt caching, the re-sent part of each turn is a cache read
+and costs less; the proportion stays.
+
+### 15.7 Compatibility
 
 A client that reads `structuredContent` needs `--structured` from this
 release on (CHANGELOG). The text of every tool is unchanged in what it
