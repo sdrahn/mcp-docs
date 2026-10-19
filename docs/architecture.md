@@ -47,7 +47,7 @@ The `gateway-docs` server is `mcp-server-fs --read-only --root
 | `read_text_file` with `offset` and `limit`; the result says `[lines a-b of n]` | `read_lines` (§5.5), and `read_section` (§5.4) by id |
 | An index file (`README.md`) that names the file for each question and where each error message is explained | the collection's `index` (§4.2), shown in the instructions |
 | Server instructions that teach the workflow: search first, read around the match; outline for a broad question; never read the big files whole | generated instructions (§6) |
-| Text output for the model, `structuredContent` with an `outputSchema` for programs | the same, for every tool |
+| Text output for the model, `structuredContent` with an `outputSchema` for programs | text only by default; `structuredContent` and output schemas with `--structured` (§15) |
 | Read-only, `os.Root` per directory (no symbolic link out), Landlock read-only on the roots, no network, a dynamic user, its own SELinux domain (`mcpsrv_docs_t`) | §8 |
 | Outlines computed when asked, not generated into the docs at build time: always current, no build step | kept, with a cache (§7) |
 | Tests that measure cost: the outline is under 1/20 of the file, a section read is under 1/20, a search for 5 matches under 4 KB | the token-cost evaluation (§10) |
@@ -65,7 +65,7 @@ having:
 - **A read limit sized for a context window.** `mcp-server-fs` reads up
   to 10 MiB per call, right for a file server, so nothing stops an
   agent from reading `architecture.md` whole. A docs server's limit is
-  a budget for the agent (default 32 KiB), and a section larger than it
+  a budget for the agent (default 16 KiB, §15), and a section larger than it
   comes in parts, with its sub-outline.
 - **More than one set of documents**, each with its own description and
   index, found without the agent knowing paths.
@@ -200,16 +200,19 @@ ignored. Its lines count in line numbers but are no section's content.
 
 All tools are read-only, idempotent, closed-world
 (`readOnlyHint`, `idempotentHint`, `openWorldHint: false`). Each returns
-a text for the model and `structuredContent` matching its
-`outputSchema`. Each refuses unknown arguments, as mcp-gateway's do.
-Every output is bounded by `--max-read` (default 32 KiB) and says when
-it was cut and how to get the rest.
+a text for the model; with `--structured`, also `structuredContent`
+matching its `outputSchema` (§15). Each refuses unknown arguments, as
+mcp-gateway's do. Every output is bounded by `--max-read` (default
+16 KiB) and says when it was cut and how to get the rest.
 
 ### 5.1 `list_docs`
 
-`list_docs(collection?, path?)` — the collections (without arguments),
-or the documents of one collection or below a path: address, title,
-description, lines, bytes, ~tokens; the index document first.
+`list_docs(collection?, path?, query?, offset?, limit?)` — the
+collections (without arguments), or the documents of one collection or
+below a path: address, title, size; the index document first, and the
+count per directory. A page at a time (`limit`, default 25);
+descriptions on a list that fits one page or is filtered by `query`
+(all its words in the path, title, description or tags). See §15.
 
 ```
 mcp-gateway: mcp-gateway documentation — 15 documents, 600 KB (~150k tokens)
@@ -537,6 +540,11 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
    image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
+9. **Token cost** (§15; phase 1 done, §15.3): a result once and compact
+   (`--structured` opt-in), `list_docs` paged, large outlines at two
+   levels, `--max-read` 16 KiB, the eval measuring both ways clients
+   forward results. Next, phase 2: one call per answer and a smaller tool
+   surface; phase 3: compact indexes and documents.
 
 ## 12. Decisions
 
@@ -548,7 +556,7 @@ Tools stay the main way in: a resource read cannot carry `depth`,
   current, any Markdown file, no build step).
 - **D3. Sections addressed by anchor id**, line numbers kept for ranges:
   ids survive edits and match the links documents already contain.
-- **D4. A read limit for a context window (32 KiB), with parts**, not
+- **D4. A read limit for a context window (16 KiB since §15), with parts**, not
   a file-size limit with refusal: a large section is still readable,
   and the first part teaches its shape.
 - **D5. Search answers with sections.** The step from a match to the
@@ -577,6 +585,11 @@ Tools stay the main way in: a resource read cannot carry `depth`,
   per read, no index) and not scraped from the published HTML (its
   layout is not an interface): the DocBook sources carry the structure,
   the ids and the metadata, and the conversion runs once per release.
+- **D13. Results for a model by default.** A result is its text, once;
+  `structuredContent` is opt-in (`--structured`), because clients
+  differ in what they forward and one forwards both (§15). Nothing
+  large comes unasked: listings page, large outlines start at two
+  levels.
 
 ## 13. HTTP and containers
 
@@ -852,3 +865,105 @@ What the whole product needed beyond the prototype:
   (the PXE client) has no text for either, so it does not matter yet.
   Whether to treat them as one is the build tool's call (DAPS), to
   check before an article needs it.
+
+## 15. Token cost
+
+The server finds the section that answers in one call; what an answer
+costs a client is mostly what comes around it. This section is the plan
+to lower that cost for any client, without a RAG pipeline (D7 stands),
+and records phase 1.
+
+### 15.1 Where a client spends tokens
+
+1. **Once per session:** the server's instructions and the tool
+   definitions, sent with every turn. Clients that cache prompts (Kit
+   and Claude Code do, with Anthropic models) pay a cache read after the
+   first turn, others the full price. Behind mcp-gateway every server's
+   tools add up.
+2. **Per call:** the result. Clients differ in what they pass to the
+   model: the text, the `structuredContent`, or both. Kit
+   (mark3labs/kit) JSON-encodes the whole result into one string, so a
+   model got mcp-docs' text and the same data again as JSON, the
+   Markdown escaped.
+3. **Per turn:** every earlier result stays in the conversation and is
+   sent again. A large result early in a session costs again on every
+   later turn; every extra call is another turn.
+
+So: fewer calls per answer, one compact copy of each result, a small
+fixed surface, nothing large unasked.
+
+### 15.2 The plan
+
+| Item | What | Phase |
+|---|---|---|
+| 1 | **One compact copy.** `structuredContent` and output schemas opt-in (`--structured`); `find_sections` one line per hit (`doc#id`, heading path, size) and the words around the match (about 160 bytes) instead of the whole line | 1 |
+| 2 | **One call per answer.** `find_sections` with `read: true` returns the best section's text (bounded) with two or three alternatives as one-liners; 3 results by default | 2 |
+| 3 | **Nothing large by default.** `list_docs` a page at a time with filters; large outlines start at two levels; `--max-read` 16 KiB | 1 |
+| 4 | **A small fixed surface.** Tool sets (`--tools core`: `find_sections`, `read_section`, `outline`; `full`; `fs-compat`), shorter descriptions with the guidance once in the instructions; client and gateway filters documented (Kit's `allowedTools`, gateway roles) | 2 |
+| 5 | **Documents shaped for sections.** A compact collection index (titles grouped by article); legal topics out of the ranking; the converter reports topics over a size; the writing guide's section sizes | 3 |
+| 6 | **Measured.** `make eval` reports the cost as text and as JSON-forwarding clients receive it, with budgets for the fixed cost per session | 1 |
+| 7 | **Upstream, optional.** Propose to Kit that it forward a result's text content, unescaped, when there is one: every MCP server would gain. Not ours to change; an issue for the owner to post | — |
+
+The footer of a result ("read one: read_section doc#id") stays,
+shortened: it costs about 15 tokens and helps clients that do not pass
+the server's instructions to the model.
+
+### 15.3 Phase 1, as built
+
+- **`--structured`** (default off): with it, tools have output schemas
+  and results carry `structuredContent`, as before; without it a result
+  is its text, once. The eval and the converter's tests run with it, to
+  steer by the data.
+- **`find_sections`** prints `N. doc#id  Heading > path  (size)` and
+  the matching line cut to about 160 bytes around the first word of
+  the question.
+- **`list_docs`** takes `query`, `offset` and `limit` (default 25, at
+  most 200); its header counts the documents per directory
+  (`articles/ 48, topics/ 386`); descriptions only on a list that fits
+  a page or is filtered; the last line says how to get the next page.
+  Without arguments and with one collection, or with a query, it lists
+  the (first) collection's documents.
+- **`outline`** without `maxLevel`, on more than 40 headings in what it
+  shows, shows the two upper levels and says so.
+- **`--max-read`** defaults to 16 KiB (was 32): a stray whole-document
+  read costs half; `read_section` continues in parts.
+- **Instructions** lead with `find_sections` → `read_section` for a
+  question in words, and name `list_docs` for browsing, a page at a
+  time.
+- **`make eval`** reports per question the text, the result as JSON
+  (default) and as JSON with `--structured`; `TestSessionCost` holds the
+  instructions to 2 KiB and the tool definitions to 7 KiB (10 KiB with
+  `--structured`).
+
+Measured. The eval's 20 questions over mcp-gateway's documentation, all
+answered from the right section:
+
+| | Before | Phase 1 |
+|---|---:|---:|
+| Text the agent reads | 71.3 KiB | 70.2 KiB |
+| As a JSON-forwarding client receives it | 103.1 KiB | 74.2 KiB |
+| Tool definitions | 8.9 KiB | 6.9 KiB (9.4 KiB with `--structured`) |
+
+A session on the SLES 16.0 collection (435 documents), each call's
+result as a JSON-forwarding client receives it:
+
+| Call | Before | Phase 1 |
+|---|---:|---:|
+| `list_docs` | 74,850 B | 2,899 B |
+| `find_sections` | 4,607 B | 1,613 B |
+| `search` | 3,513 B | 1,556 B |
+| `outline` (a large topic) | 6,180 B | 2,727 B |
+| `read_section` | 1,364 B | 1,364 B |
+| tool definitions | 9,646 B | 7,349 B |
+| **the session (initialize, tools, 8 calls)** | **115.6 KB, ~29k tokens** | **32.3 KB, ~8k tokens** |
+
+The collection's index (`README.md`, 9.8 KB) is the largest result
+left: item 5.
+
+### 15.4 Compatibility
+
+A client that reads `structuredContent` needs `--structured` from this
+release on (CHANGELOG). The text of every tool is unchanged in what it
+says; `find_sections` and `list_docs` changed their layout, which
+agents read, not parse.
+

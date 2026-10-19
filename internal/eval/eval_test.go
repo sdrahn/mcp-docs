@@ -98,15 +98,20 @@ var questions = []question{
 		Doc: "mcp-gateway/user-guide/07-approvals.md", Want: "desktop-notifications", Text: "mcp-gateway-notify"},
 }
 
+// step is one call and what it cost: the text an agent reads, and the
+// whole result as clients that forward it as JSON pass it on (the text
+// escaped, and structuredContent with --structured; §15).
 type step struct {
-	tool  string
-	bytes int
+	tool                     string
+	bytes, json, jsonDefault int
 }
 
 type outcome struct {
 	q        question
 	steps    []step
 	cost     int
+	jsonCost int // as a client that forwards the result as JSON, with --structured
+	jsonDef  int // the same, by default (no structuredContent)
 	baseline int64
 	got      string // the section read
 	ok       bool
@@ -120,7 +125,7 @@ func newServer(t *testing.T) *server.Server {
 	k := &catalog.Collection{Name: "mcp-gateway", Path: abs(t, "testdata/mcp-gateway"),
 		Description: "mcp-gateway's documentation (a snapshot)", ListItems: true}
 	return &server.Server{Cat: catalog.New([]*catalog.Collection{k}, []string{".md"}, 10000),
-		MaxRead: 32 << 10, MaxFile: 16 << 20, Version: "eval"}
+		MaxRead: 32 << 10, MaxFile: 16 << 20, Structured: true, Version: "eval"}
 }
 
 func abs(t *testing.T, p string) string {
@@ -162,7 +167,11 @@ func (c *session) call(name string, args map[string]any) (string, json.RawMessag
 	if len(r.Content) > 0 {
 		text = r.Content[0].Text
 	}
-	c.steps = append(c.steps, step{name, len(text)})
+	var plain map[string]any
+	_ = json.Unmarshal(b, &plain)
+	delete(plain, "structuredContent")
+	bd, _ := json.Marshal(plain)
+	c.steps = append(c.steps, step{name, len(text), len(b), len(bd)})
 	if r.IsError {
 		return text, nil, fmt.Errorf("%s: %s", name, text)
 	}
@@ -217,6 +226,8 @@ func run(t *testing.T, s *server.Server, q question) outcome {
 	o.steps, o.cost = c.steps, 0
 	for _, st := range c.steps {
 		o.cost += st.bytes
+		o.jsonCost += st.json
+		o.jsonDef += st.jsonDefault
 	}
 	switch {
 	case err != nil:
@@ -323,7 +334,7 @@ func budget(o outcome) int {
 func TestCost(t *testing.T) {
 	s := newServer(t)
 	var rows []string
-	var total, whole int64
+	var total, totalJSON, totalDef, whole int64
 	failed := 0
 	for _, q := range questions {
 		o := run(t, s, q)
@@ -342,13 +353,17 @@ func TestCost(t *testing.T) {
 			t.Errorf("%s: %s", q.Ask, status)
 		}
 		total += int64(o.cost)
+		totalJSON += int64(o.jsonCost)
+		totalDef += int64(o.jsonDef)
 		whole += o.baseline
-		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s | %.0f%% | %s |", q.Ask, strings.Join(calls, " → "),
-			size(int64(o.cost)), size(o.baseline), 100*float64(o.cost)/float64(max(o.baseline, 1)), status))
+		rows = append(rows, fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %.0f%% | %s |", q.Ask, strings.Join(calls, " → "),
+			size(int64(o.cost)), size(int64(o.jsonDef)), size(int64(o.jsonCost)), size(o.baseline),
+			100*float64(o.cost)/float64(max(o.baseline, 1)), status))
 	}
-	report := "| Question | Calls | Cost | Whole document | Share | |\n|---|---|---|---|---|---|\n" +
-		strings.Join(rows, "\n") + fmt.Sprintf("\n| **%d questions** | | **%s** | **%s** | **%.0f%%** | %d failed |\n",
-		len(questions), size(total), size(whole), 100*float64(total)/float64(whole), failed)
+	report := "| Question | Calls | Cost (text) | As JSON | As JSON, --structured | Whole document | Share | |\n" +
+		"|---|---|---|---|---|---|---|---|\n" + strings.Join(rows, "\n") +
+		fmt.Sprintf("\n| **%d questions** | | **%s** | **%s** | **%s** | **%s** | **%.0f%%** | %d failed |\n",
+			len(questions), size(total), size(totalDef), size(totalJSON), size(whole), 100*float64(total)/float64(whole), failed)
 	t.Log("\n" + report)
 	if p := os.Getenv("EVAL_REPORT"); p != "" {
 		f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -357,6 +372,38 @@ func TestCost(t *testing.T) {
 		}
 		defer func() { _ = f.Close() }()
 		fmt.Fprintf(f, "## What answers cost (mcp-docs eval)\n\n%s\n", report)
+	}
+}
+
+// What a session costs before any question (§15): the instructions and
+// the tool definitions, which a client sends with every turn (cached or
+// not). Budgets for the default (text only) and --structured.
+func TestSessionCost(t *testing.T) {
+	for _, c := range []struct {
+		structured   bool
+		instructions int
+		tools        int
+	}{
+		{false, 2 << 10, 7 << 10},
+		{true, 2 << 10, 10 << 10},
+	} {
+		s := newServer(t)
+		s.Structured = c.structured
+		init, err := s.Handle(context.Background(), "initialize", json.RawMessage(`{"protocolVersion":"2025-06-18"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools, err := s.Handle(context.Background(), "tools/list", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ib, _ := json.Marshal(init.(map[string]any)["instructions"])
+		tb, _ := json.Marshal(tools)
+		t.Logf("structured=%v: instructions %s, tool definitions %s", c.structured, size(int64(len(ib))), size(int64(len(tb))))
+		if len(ib) > c.instructions || len(tb) > c.tools {
+			t.Errorf("structured=%v: instructions %s (budget %s), tool definitions %s (budget %s)", c.structured,
+				size(int64(len(ib))), size(int64(c.instructions)), size(int64(len(tb))), size(int64(c.tools)))
+		}
 	}
 }
 

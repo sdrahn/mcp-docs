@@ -29,7 +29,12 @@ type Server struct {
 	// FSCompat also offers mcp-server-fs's reading tools, with its
 	// names and arguments (§5.7).
 	FSCompat bool
-	Version  string
+	// Structured also returns results as structuredContent, with the
+	// tools' output schemas (§15): for clients that read the data rather
+	// than show the text to a model. Off, a result is its text alone,
+	// once.
+	Structured bool
+	Version    string
 
 	ranked indexes
 }
@@ -95,7 +100,7 @@ func (s *Server) toolList() []map[string]any {
 		m := map[string]any{"name": t.name, "title": t.title, "description": t.description, "inputSchema": t.input,
 			"annotations": map[string]any{"title": t.title, "readOnlyHint": true, "destructiveHint": false,
 				"idempotentHint": true, "openWorldHint": false}}
-		if t.output != nil {
+		if t.output != nil && s.Structured {
 			m["outputSchema"] = t.output
 		}
 		out = append(out, m)
@@ -125,7 +130,7 @@ func (s *Server) call(ctx context.Context, name string, args json.RawMessage) (a
 		return map[string]any{"content": []map[string]any{{"type": "text", "text": err.Error()}}, "isError": true}, nil
 	}
 	out := map[string]any{"content": []map[string]any{{"type": "text", "text": res.text}}, "isError": false}
-	if res.structured != nil {
+	if res.structured != nil && s.Structured {
 		out["structuredContent"] = res.structured
 	}
 	return out, nil
@@ -239,12 +244,12 @@ func (s *Server) Instructions() string {
 	fmt.Fprintf(&b, "\nA document is named collection/path (%s), a section document#id (ids are the headings' "+
 		"anchors, as links in the documents have them).\n\n", example)
 	b.WriteString("Read only the part you need:\n" +
-		"- which document: read the collection's index (read_lines), or list_docs (titles and descriptions);\n" +
+		"- a question in words, the document not obvious: find_sections, then read_section of the best one " +
+		"(doc#id): the cheapest way to an answer;\n" +
 		"- a precise term (a setting, an error message, a name): search, then read_section with the section " +
 		"of the match (or read_lines around its line);\n" +
-		"- a broad question: outline the document (maxLevel 2 for a large one), then read_section of the one " +
-		"section that answers it; when the document is not obvious, find_sections ranks the sections of all " +
-		"documents for the question in words;\n" +
+		"- a known document: outline it, then read_section of the one section that answers;\n" +
+		"- to browse: the collection's index (read_lines), or list_docs a page at a time (query filters);\n" +
 		"- a long section: read_section with depth 0 gives its introduction and the outline of its " +
 		"subsections; a section larger than one call comes in parts (part 2, …).\n" +
 		"Read a document whole only when the question needs all of it.")

@@ -76,3 +76,18 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   the mcp-docs-convert package, lints, installs and queries it.
   `tools/suse-docs/convert` takes `REV=` with `SRC=`, so that a package
   names the revision it converts.
+- Lower token cost for every client (docs/architecture.md, §15):
+  - results are their text only; `structuredContent` and output schemas
+    come with `--structured` (a client that reads them needs it);
+  - `find_sections` gives one line per section (`doc#id`, heading path,
+    size) and the words around the match, not the whole line;
+  - `list_docs` comes a page at a time (`limit`, default 25; `offset`),
+    filters with `query`, counts documents per directory, and shows
+    descriptions only on a short or filtered list;
+  - `outline` of a large document (over 40 headings) shows its two upper
+    levels unless `maxLevel` is given;
+  - `--max-read` defaults to 16 KiB (was 32 KiB);
+  - the instructions lead with `find_sections` → `read_section`;
+  - `make eval` reports the cost as JSON-forwarding clients receive it
+    and holds the per-session cost (instructions, tool definitions) to a
+    budget.

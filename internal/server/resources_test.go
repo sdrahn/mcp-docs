@@ -42,8 +42,8 @@ func TestDescriptionsAndInstructions(t *testing.T) {
 
 	r := call(t, s, "list_docs", map[string]any{"collection": "app"})
 	got := mustOK(t, r)
-	if !strings.Contains(got, "app/README.md — App docs (index: read it first)  [3 lines, 37 B]\n      Which file answers what.\n") ||
-		!strings.Contains(got, "app/guide.md — The guide  [7 lines, 84 B]\n      How to set it up.\n") {
+	if !strings.Contains(got, "app/README.md — App docs (index: read it first)  (37 B)\n      Which file answers what.\n") ||
+		!strings.Contains(got, "app/guide.md — The guide  (84 B)\n      How to set it up.\n") {
 		t.Errorf("list_docs:\n%s", got)
 	}
 	if d := r.Structured["documents"].([]any)[1].(map[string]any); d["description"] != "How to set it up." ||

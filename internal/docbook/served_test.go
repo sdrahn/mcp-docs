@@ -15,7 +15,7 @@ import (
 func TestServed(t *testing.T) {
 	out, _ := convert(t)
 	s := &server.Server{Cat: catalog.New([]*catalog.Collection{{Name: "sles-16.0", Path: out}}, []string{".md"}, 1000),
-		MaxRead: 32 << 10, MaxFile: 1 << 20, Version: "test"}
+		MaxRead: 32 << 10, MaxFile: 1 << 20, Structured: true, Version: "test"}
 	call := func(tool string, args map[string]any) (string, json.RawMessage) {
 		t.Helper()
 		p, _ := json.Marshal(map[string]any{"name": tool, "arguments": args})

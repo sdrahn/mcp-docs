@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
 	"github.com/sdrahn/mcp-docs/internal/rank"
@@ -159,22 +160,74 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 			}
 		}
 		out = append(out, f)
-		fmt.Fprintf(&text, "%d. %s § %s", i+1, f.Doc, strings.Join(f.Path, " > "))
+		// One line an agent can act on (read_section takes doc#id), then
+		// the words that matched, in their context (§15).
+		addr := f.Doc
 		if f.Section != "" {
-			fmt.Fprintf(&text, "  #%s", f.Section)
+			addr += "#" + f.Section
 		}
-		fmt.Fprintf(&text, "  [%d lines, %s]\n", f.Lines, size(f.Bytes))
+		fmt.Fprintf(&text, "%d. %s  %s  (%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes))
 		if f.MatchLine > 0 {
-			fmt.Fprintf(&text, "     %d: %s\n", f.MatchLine, cut(strings.TrimSpace(f.MatchText)))
+			fmt.Fprintf(&text, "   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
 		}
 	}
 	if len(hits) == 0 {
 		text.Reset()
 		fmt.Fprintf(&text, "no sections for %q: try other words, or search for a precise term", a.Query)
 	} else {
-		text.WriteString("(read one: read_section with doc and its id; text before a first heading: read_lines)")
+		text.WriteString("(read one: read_section doc#id)")
 	}
 	return &result{text: text.String(), structured: map[string]any{"sections": out}}, nil
+}
+
+// excerptWidth is about how much of a matching line find_sections
+// shows: the words around the first of the query's.
+const excerptWidth = 160
+
+// excerpt is the part of a line around its first word of the query,
+// about excerptWidth bytes, cut at spaces and marked "…" where cut.
+func excerpt(l string, terms map[string]bool) string {
+	if len(l) <= excerptWidth {
+		return l
+	}
+	at := 0
+	for i := 0; i < len(l); {
+		j := i
+		for j < len(l) && l[j] != ' ' {
+			j++
+		}
+		if ts := rank.Tokens(l[i:j]); len(ts) > 0 && terms[ts[0]] {
+			at = i
+			break
+		}
+		i = j + 1
+	}
+	start := max(0, at-excerptWidth/3)
+	if start > 0 {
+		if k := strings.IndexByte(l[start:], ' '); k >= 0 && start+k < at+1 {
+			start += k + 1
+		}
+	}
+	end := min(len(l), start+excerptWidth)
+	if end < len(l) {
+		if k := strings.LastIndexByte(l[start:end], ' '); k > 0 {
+			end = start + k
+		}
+	}
+	for start > 0 && !utf8.RuneStart(l[start]) {
+		start++
+	}
+	for end < len(l) && !utf8.RuneStart(l[end]) {
+		end--
+	}
+	out := l[start:end]
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(l) {
+		out += "…"
+	}
+	return out
 }
 
 // bestLine is the line of a section with the most of the query's words

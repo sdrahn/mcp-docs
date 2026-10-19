@@ -48,7 +48,7 @@ func main() {
 	flag.Var(&roots, "root", "a directory of documents, a collection named after it (repeatable)")
 	flag.Var(&colls, "collection", "a collection: name=/path[:description] (repeatable)")
 	about := flag.String("instructions", "", "what the documents are, for the client's model (opens the server's instructions)")
-	maxRead := flag.Int64("max-read", 32<<10, "bytes one call returns at most")
+	maxRead := flag.Int64("max-read", 16<<10, "bytes one call returns at most")
 	maxFile := flag.Int64("max-file", 16<<20, "bytes of the largest document search reads")
 	maxEntries := flag.Int("max-entries", 10000, "documents a listing or search covers at most")
 	exts := flag.String("ext", ".md,.markdown", "extensions of documents, comma-separated")
@@ -57,6 +57,7 @@ func main() {
 	listItems := flag.Bool("list-items", false, "in the collections of --root and --collection, take list items "+
 		"and paragraphs that open with a bold title as sections")
 	fsCompat := flag.Bool("fs-compat", false, "also offer mcp-server-fs's reading tools (outline_file, search_text, read_text_file, search_files, list_directory)")
+	structured := flag.Bool("structured", false, "also return results as structuredContent, with output schemas (for clients that read the data; a model needs only the text)")
 	listen := flag.String("listen", "", "serve MCP over Streamable HTTP on this address (\":8080\", \"127.0.0.1:8080\") "+
 		"instead of stdin/stdout: POST /mcp, health at /healthz")
 	flag.Var(&origins, "allow-origin", "with --listen, a browser origin (\"https://app.example\") requests may come from "+
@@ -133,7 +134,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "%s: serving %s; %s%s\n", server.Name, strings.Join(names, ", "), ll, tcpNote(ll, rules))
 
 	s := &server.Server{Cat: catalog.New(collections, extList, *maxEntries), About: *about, MaxRead: *maxRead,
-		MaxFile: *maxFile, FSCompat: *fsCompat, Version: version}
+		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Version: version}
 	if *listen == "" {
 		if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
 			fail(1, err.Error())

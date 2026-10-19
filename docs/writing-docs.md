@@ -33,7 +33,7 @@ mcp-docs reads a document as a tree of sections:
   match with the section it is in; `find_sections` ranks sections for a
   question in words, a section's own title counting most;
   `read_section` returns one section, and a section larger than one
-  call (32 KiB) in parts.
+  call (16 KiB by default) in parts.
 - The document's **title** and **description** come from its front
   matter, or else from its first `#` heading and its first paragraph;
   `list_docs` shows them for every document.
@@ -68,8 +68,8 @@ section that explains it.
 | Section size | What an agent does |
 |---|---|
 | up to 8 KiB (about 2,000 tokens) | reads the section whole: the cheap case |
-| 8 to 32 KiB | reads the lines around a match, or the section's introduction and outline (`depth: 0`), then a subsection |
-| over 32 KiB | gets it in parts, with the outline of the rest after each |
+| 8 to 16 KiB | reads the lines around a match, or the section's introduction and outline (`depth: 0`), then a subsection |
+| over 16 KiB (the default `--max-read`) | gets it in parts, with the outline of the rest after each |
 
 Aim for sections of a few hundred bytes to a few KiB, each answering
 one question. When a section grows past 8 KiB, split it with `###`
