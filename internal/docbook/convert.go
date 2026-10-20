@@ -554,7 +554,9 @@ func Convert(o Options) (*Report, error) {
 	// first task ("Security"), short enough to read whole; the articles'
 	// descriptions are in their own front matter (list_docs).
 	var readme strings.Builder
-	readme.WriteString(frontMatter([][2]any{{"title", o.Title}, {"description", o.Description}}))
+	// Like an article's index, the way in, not an answer: out of the
+	// ranking.
+	readme.WriteString(frontMatter([][2]any{{"title", o.Title}, {"description", o.Description}, {"rank", false}}))
 	fmt.Fprintf(&readme, "# %s\n\n%s\n\n## Articles\n", o.Title, o.Description)
 	groups := map[string][]*article{}
 	for _, a := range arts {

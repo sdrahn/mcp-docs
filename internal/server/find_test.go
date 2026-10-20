@@ -80,6 +80,32 @@ func TestFindSections(t *testing.T) {
 		t.Errorf("structured: %v", sec)
 	}
 
+	// doc: only the sections of a document or a directory, a version's
+	// in a collection of several.
+	for _, v := range []string{"1", "2"} {
+		write(t, filepath.Join(dirs["other"], "v"+v, "upgrade.md"), "# Upgrade\n## Upgrading the cluster\nRun upgrade-"+v+".\n")
+	}
+	for _, doc := range []string{"other/v2", "other/v2/upgrade.md"} {
+		r = call(t, s, "find_sections", map[string]any{"query": "upgrading the cluster", "doc": doc})
+		for _, sec := range r.Structured["sections"].([]any) {
+			if sec.(map[string]any)["doc"] != "other/v2/upgrade.md" {
+				t.Errorf("doc %s: %s", doc, mustOK(t, r))
+			}
+		}
+		if !strings.Contains(mustOK(t, r), "upgrade-2") {
+			t.Errorf("doc %s: %s", doc, mustOK(t, r))
+		}
+	}
+	docs := map[any]bool{}
+	for _, sec := range call(t, s, "find_sections", map[string]any{"query": "upgrading the cluster", "doc": "other"}).Structured["sections"].([]any) {
+		docs[sec.(map[string]any)["doc"]] = true
+	}
+	if !docs["other/v1/upgrade.md"] || !docs["other/v2/upgrade.md"] {
+		t.Errorf("doc of a whole collection: %v", docs)
+	}
+	mustFail(t, call(t, s, "find_sections", map[string]any{"query": "x", "doc": "other/v3"}), "")
+	mustFail(t, call(t, s, "find_sections", map[string]any{"query": "x", "doc": "other/v2", "collection": "other"}), "not both")
+
 	// Across collections, the section titled with the words first.
 	r = call(t, s, "find_sections", map[string]any{"query": "timeouts", "maxResults": 3})
 	ss := r.Structured["sections"].([]any)

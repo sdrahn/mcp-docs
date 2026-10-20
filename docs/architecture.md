@@ -535,14 +535,17 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (§14; SLES 16.0 converted, §14.7): a
+8. **SUSE documentation** (§14; SLES 16.0 and SUSE Linux Micro 6.0 to
+   6.2 converted, §14.7, §14.8): a
    converter, `mcp-docs-convert`, from SUSE's DocBook sources to
    Markdown collections, so that the documentation of
    documentation.suse.com is served offline, a section at a time. All 48
    SLES 16.0 articles convert (`tools/suse-docs/convert`), every source
    link checked against the site, and are packaged
-   (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); next, the container
-   image, SLES for SAP and SLE HA 16.0, SLE 15 guides after.
+   (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); SUSE Linux Micro
+   6.0, 6.1 and 6.2 convert into one collection, a directory per version
+   (`tools/suse-docs/convert-sle-micro`); next, the container image, SLES
+   for SAP and SLE HA 16.0, SLE 15 guides after.
 9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
@@ -870,6 +873,34 @@ What the whole product needed beyond the prototype:
   (the PXE client) has no text for either, so it does not matter yet.
   Whether to treat them as one is the build tool's call (DAPS), to
   check before an article needs it.
+
+### 14.8 SUSE Linux Micro 6.0, 6.1 and 6.2
+
+One collection, `sle-micro`, a directory per version: the articles the
+site publishes under `/sle-micro/V/html/` (29, 35 and 38), from
+doc-modular's `maintenance/SLE_Micro_6.0` and `maintenance/SLE_Micro_6.1`
+and, for 6.2, `maintenance/SLE16.0` (SLES 16.0's branch: there is no
+Micro 6.2 branch, and on it `&productnumber;` of `slmicro` is 6.2). Each
+version is a conversion of its own: the versions share most topic ids,
+and a conversion of all three would name the same topic three times.
+All convert with `--strict`, nothing lost (266, 305 and 347 documents),
+no section over 8 KiB; all 915 source links lead to a page and anchor
+on the site.
+
+What one collection of several versions needed:
+
+- **`find_sections` within a directory.** Unscoped, its first three
+  results were mostly the same section in 6.0, 6.1 and 6.2, and ties
+  went to 6.0 (the first in document order). `doc` (a document or a
+  directory, as `search` has it) ranks only the sections below it; the
+  collection's instructions tell the agent to pass the version's
+  directory (`sle-micro/6.2`, the current version when the user does
+  not say). `TestSLEMicro`: 16 questions asked of one version, 16
+  answered first from that version.
+- **Indexes out of the ranking.** The collection's index and each
+  version's (`README.md`) carry `rank: false`, as the articles' indexes
+  do (§15.7): "upgrade SLE Micro" found the index's group heading
+  "Upgrade & Update".
 
 ## 15. Token cost
 

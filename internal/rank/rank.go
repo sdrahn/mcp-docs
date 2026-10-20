@@ -182,6 +182,17 @@ func (ix *Index) Search(query string, n int) ([]Hit, error) {
 	return ix.search(query, n, nil)
 }
 
+// Under returns the n sections of a document, or of the documents below
+// a directory ("." for all), that best match the query, best first.
+func (ix *Index) Under(query string, d catalog.Doc, n int) ([]Hit, error) {
+	if d.Rel == "." || d.Rel == "" {
+		return ix.search(query, n, nil)
+	}
+	return ix.search(query, n, func(u *unit) bool {
+		return u.doc.Rel == d.Rel || strings.HasPrefix(u.doc.Rel, d.Rel+"/")
+	})
+}
+
 // Within returns the n subsections of a document's section (heading
 // index; at any depth, not the section itself) that best match the
 // query, best first: where in a large section the answer is.
