@@ -101,6 +101,13 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
     only those (`find_sections,read_section,outline`: 2.5 KB);
   - README: keeping token cost down, on the server, in the client (Kit's
     `allowedTools`) and behind mcp-gateway.
+- SUSE Linux Micro 6.0, 6.1 and 6.2 (§14.8): `tools/suse-docs/convert-sle-micro`
+  converts the three versions' articles from documentation.suse.com into
+  one collection, a directory per version; `find_sections` takes `doc`
+  (a document or directory, as `search` does), so that an agent asks one
+  version; the converter marks the collection's index `rank: false`;
+  packaged as `suse-docs-mcp-sle-micro`, which `mcp-docs-convert` (now
+  with `convert-sle-micro` and its article lists) converts at build time.
 - The best part of a large section (§15, phase 4):
   - `find_sections`, when its best section is over 4 KiB, returns the
     subsection that matches best (or a passage of at most 2 KiB) and a

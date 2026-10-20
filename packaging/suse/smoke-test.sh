@@ -103,7 +103,8 @@ grep -q 'listening on http://127.0.0.1:18080/mcp' /tmp/smoke-http.err || fail "H
 # The converter: its files, and SUSE's SELinux article (the checkout's
 # test sources) converted and served.
 mcp-docs-convert --version | grep -qx "mcp-docs-convert $version" || fail "mcp-docs-convert --version: $(mcp-docs-convert --version)"
-for f in /usr/bin/mcp-docs-convert /usr/share/mcp-docs-convert/suse-docs/convert /usr/share/mcp-docs-convert/suse-docs/sles-16.0; do
+for f in /usr/bin/mcp-docs-convert /usr/share/mcp-docs-convert/suse-docs/convert /usr/share/mcp-docs-convert/suse-docs/sles-16.0 \
+	/usr/share/mcp-docs-convert/suse-docs/convert-sle-micro /usr/share/mcp-docs-convert/suse-docs/sle-micro-6.2; do
 	rpm -qf "$f" | grep -q '^mcp-docs-convert-' || fail "$f is not owned by mcp-docs-convert"
 done
 mcp-docs-convert --strict --src "$src/internal/docbook/testdata/doc-modular" --dc DC-SLES-SELinux \

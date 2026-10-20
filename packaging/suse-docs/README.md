@@ -9,11 +9,13 @@ air-gapped, updated with the package.
 | Package | Product | Sources |
 |---|---|---|
 | `suse-docs-mcp-sles-16.0` ([sles-16.0](sles-16.0)) | SUSE Linux Enterprise Server 16.0, its 48 articles (`tools/suse-docs/sles-16.0`) | SUSE/doc-modular, `maintenance/SLE16.0` |
+| `suse-docs-mcp-sle-micro` ([sle-micro](sle-micro)) | SUSE Linux Micro 6.0, 6.1 and 6.2, their 29, 35 and 38 articles (`tools/suse-docs/sle-micro-V`), one collection, a directory per version | SUSE/doc-modular, `maintenance/SLE_Micro_6.0`, `maintenance/SLE_Micro_6.1`, `maintenance/SLE16.0` (6.2) |
 
-CI builds it in the openSUSE Tumbleweed and Leap 16.0 containers after
+CI builds them in the openSUSE Tumbleweed and Leap 16.0 containers after
 mcp-docs (job `opensuse`), with the `mcp-docs-convert` package just
-built, runs rpmlint, installs it and runs `smoke-test.sh`: mcp-docs
-serves it from its collection file and answers questions from it.
+built, runs rpmlint, installs them and runs `smoke-test.sh PACKAGE`:
+mcp-docs serves each from its collection file and answers questions
+from it.
 
 ## The package
 
@@ -27,6 +29,15 @@ It does not require mcp-docs: without it, the files do nothing. The
 version is the product's and the sources' revision,
 `16.0+git<date>.<revision>`; the license is the documentation's, GFDL
 1.2 or later.
+
+`suse-docs-mcp-sle-micro` installs the same way: the collection file
+`/usr/share/mcp-docs/collections.d/sle-micro.yaml`, the documents below
+`/usr/share/mcp-docs/docs/suse/sle-micro/` (`README.md`, then `6.0/`,
+`6.1/`, `6.2/`, each with its own index, `articles/` and `topics/`), the
+license symlinks to 6.2's. Its version is the newest product version and
+the newest of the three revisions' dates, `6.2+git<date>`; the
+revisions are in its description and the versions' indexes. It needs
+three source tarballs, one per branch; its `_service` makes them.
 
 ## Setting up the OBS package
 
@@ -57,6 +68,12 @@ tarball from a clone.
    of articles if the site's changed.
 2. Set the revision in `_service` and `rev`, `shortrev`, `revdate` in
    the spec; `osc service manualrun`, `osc vc`, commit.
+
+For `suse-docs-mcp-sle-micro`, the same per version: the revisions in
+`tools/suse-docs/convert-sle-micro` (`TestSLEMicro`), then the version's
+revision in `_service` and `revN`, `shortrevN` in the spec, and
+`revdate` to the newest of the three revisions' dates. 6.2 shares its
+branch, and usually its revision, with SLES 16.0.
 
 The package passes its revision to the converter (`REV=`), so a new
 revision of the documentation needs no new mcp-docs-convert, unless the

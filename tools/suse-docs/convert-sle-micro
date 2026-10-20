@@ -1,0 +1,127 @@
+#!/bin/sh
+# Converts the documentation of SUSE Linux Micro 6.0, 6.1 and 6.2 into one
+# collection for mcp-docs, a directory per version: the articles that
+# documentation.suse.com publishes for each (tools/suse-docs/sle-micro-V),
+# from SUSE/doc-modular at a pinned revision of the version's branch.
+#
+#   tools/suse-docs/convert-sle-micro [OUT [ROOT]]
+#
+# OUT (default build/sle-micro) receives 6.0/, 6.1/, 6.2/ (each converted
+# on its own: the versions share topic ids), README.md (the collection's
+# index, linking each version's) and sle-micro.yaml, the collection file;
+# ROOT (default OUT's absolute path) is where the collection file says the
+# documents are, for example /usr/share/mcp-docs/docs/suse/sle-micro.
+#
+# The sources are checked out from build/doc-modular (a clone, as convert
+# makes it) into build/doc-modular-V, or, with SRC set, read from SRC/V as
+# they are (unpacked trees, as in a package build, which has no network).
+# REV_60, REV_61 and REV_62 name the revisions of the versions' sources
+# (default: the pinned ones), cited in the indexes and source links; so a
+# package of newer sources needs no new mcp-docs-convert.
+# In a checkout of mcp-docs the converter is built from it; installed, it
+# is the installed one.
+set -eu
+
+# version, revision, branch
+versions='
+6.0 7440233ef92838854c8966b87896efccdcee1c58 maintenance/SLE_Micro_6.0
+6.1 32a0b5d6b5d5ecf57941f3882ae74cfd8c99414f maintenance/SLE_Micro_6.1
+6.2 a9f708401da072b024e66994c8f15d91250b836e maintenance/SLE16.0
+'
+here=$(cd "$(dirname "$0")" && pwd)
+out=${1:-build/sle-micro}
+
+convert=mcp-docs-convert
+repo=$(cd "$here/../.." && pwd)
+if [ -d "$repo/cmd/mcp-docs-convert" ]; then
+	(cd "$repo" && go build -o bin/mcp-docs-convert ./cmd/mcp-docs-convert)
+	convert=$repo/bin/mcp-docs-convert
+fi
+
+clone=build/doc-modular
+if [ -z "${SRC:-}" ] && [ ! -d "$clone/.git" ]; then
+	mkdir -p build
+	git clone -q --filter=blob:none --no-checkout https://github.com/SUSE/doc-modular "$clone"
+fi
+
+rm -rf "$out"
+mkdir -p "$out"
+echo "$versions" | while read -r v rev branch; do
+	[ -n "$v" ] || continue
+	rev=$(eval "echo \${REV_$(echo "$v" | tr -d .):-$rev}")
+	if [ -n "${SRC:-}" ]; then
+		src=$SRC/$v
+	else
+		src=build/doc-modular-$v
+		git -C "$clone" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$clone" fetch -q origin "$branch"
+		if [ ! -d "$src" ]; then
+			git -C "$clone" worktree add -q --detach "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" "$rev"
+		fi
+		git -C "$src" checkout -q --detach "$rev"
+	fi
+	short=$(echo "$rev" | cut -c1-7)
+	"$convert" --strict --src "$src" --dcs "$here/sle-micro-$v" --out "$out/$v" \
+		--name sle-micro --title "SUSE Linux Micro $v" \
+		--description "The documentation of SUSE Linux Micro $v from documentation.suse.com, converted from its DocBook sources." \
+		--site-url "https://documentation.suse.com/sle-micro/$v/html/%s/" \
+		--source-url "https://github.com/SUSE/doc-modular/blob/$rev/%s" \
+		--revision "$short"
+	echo "$v $short $branch $(ls "$out/$v/articles" | wc -l)" >>"$out/.versions"
+done
+
+# The collection's index: the versions, each with its own index.
+{
+	cat <<'EOT'
+---
+title: "SUSE Linux Micro 6.0, 6.1 and 6.2"
+description: "The documentation of SUSE Linux Micro 6.0, 6.1 and 6.2 from documentation.suse.com, a directory per version."
+rank: false
+---
+
+# SUSE Linux Micro 6.0, 6.1 and 6.2
+
+The documentation of SUSE Linux Micro from documentation.suse.com,
+converted from its DocBook sources: a directory per version, each with
+its articles (`V/articles/`), its topics (`V/topics/`) and its index
+(`V/README.md`). The versions share most topics, under the same ids:
+answer from the documents of the version asked about, and say which
+version an answer is for.
+
+## Versions
+
+EOT
+	while read -r v short branch n; do
+		echo "- [SUSE Linux Micro $v]($v/README.md): $n articles (SUSE/doc-modular, $branch, revision $short)"
+	done <"$out/.versions"
+	cat <<'EOT'
+
+## License
+
+Copyright SUSE LLC and contributors; licensed under the GNU Free
+Documentation License 1.2 or (at your option) 1.3, with the copyright
+notice and license as the Invariant Section: each version's index links
+them.
+EOT
+} >"$out/README.md"
+rm "$out/.versions"
+
+root=${2:-$(cd "$out" && pwd)}
+cat >"$out/sle-micro.yaml" <<YAML
+title: SUSE Linux Micro 6.0, 6.1 and 6.2
+root: $root
+description: >
+  SUSE's documentation of SUSE Linux Micro 6.0, 6.1 and 6.2, the articles
+  of documentation.suse.com: deployment, transactional updates,
+  containers, security, system administration. A directory per version
+  (6.0/, 6.1/, 6.2/), one document per topic under the ids of the site's
+  sections.
+index: README.md
+instructions: >
+  The documents of a version are under its directory; the versions share
+  most sections. Answer from the version the user runs, 6.2 (the current
+  one) when they do not say: pass find_sections and search the version's
+  directory as doc ("sle-micro/6.2"), and say which version an answer is
+  for. Each document's source front matter is its page on
+  documentation.suse.com: cite it.
+YAML
+echo "$out/sle-micro.yaml"

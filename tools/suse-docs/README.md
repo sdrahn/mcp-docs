@@ -37,6 +37,26 @@ The collection's `README.md` lists the articles by task; the legal
 notices and the articles' indexes carry `rank: false`, out of
 `find_sections`' ranking.
 
+## SUSE Linux Micro 6.0, 6.1 and 6.2
+
+`convert-sle-micro` makes one collection, `sle-micro`, of the three
+versions, a directory each (`6.0/`, `6.1/`, `6.2/`), each converted on
+its own from its branch: `maintenance/SLE_Micro_6.0`,
+`maintenance/SLE_Micro_6.1`, and for 6.2 `maintenance/SLE16.0` (the
+branch of SLES 16.0, which has no Micro branch of its own), at pinned
+revisions. `sle-micro-6.0`, `sle-micro-6.1` and `sle-micro-6.2` list the
+articles the site publishes under `/sle-micro/V/html/` (29, 35 and 38).
+The versions share most topics under the same ids, so the collection
+file tells agents to pass `find_sections` and `search` the version's
+directory as `doc` (`sle-micro/6.2`).
+
+```sh
+tools/suse-docs/convert-sle-micro          # build/sle-micro
+MCP_DOCS_SLE_MICRO=$PWD/build/sle-micro go test -run TestSLEMicro -v ./internal/docbook/
+```
+
+## Updating SLES 16.0
+
 `sles-16.0` lists the build definitions of the articles the site
 publishes under `/sles/16.0/html/`, from its `sitemap.xml`. To update
 it, or the pinned revision in `convert`, run the conversion and the

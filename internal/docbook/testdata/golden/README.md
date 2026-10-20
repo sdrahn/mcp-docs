@@ -1,6 +1,7 @@
 ---
 title: "SUSE Linux Enterprise Server 16.0"
 description: "SELinux on SLES, converted from SUSE's sources."
+rank: false
 ---
 
 # SUSE Linux Enterprise Server 16.0

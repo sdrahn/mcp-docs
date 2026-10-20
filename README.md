@@ -16,8 +16,8 @@ SLES 16 ([packaging/suse](packaging/suse/README.md)), ranked search
 (`find_sections`), list items as sections, and HTTP with a container
 image. `mcp-docs-convert` converts SUSE's documentation
 (documentation.suse.com) from its DocBook sources: all of SLES 16.0
-([tools/suse-docs](tools/suse-docs/README.md)), packaged as
-`suse-docs-mcp-sles-16.0` ([packaging/suse-docs](packaging/suse-docs/README.md)); other formats than
+and SUSE Linux Micro 6.0, 6.1 and 6.2 ([tools/suse-docs](tools/suse-docs/README.md)), packaged as
+`suse-docs-mcp-sles-16.0` and `suse-docs-mcp-sle-micro` ([packaging/suse-docs](packaging/suse-docs/README.md)); other formats than
 Markdown are designed, not built. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs
@@ -186,6 +186,6 @@ make build && make install DESTDIR=/tmp/root
 | `list_docs` | collections, or a collection's documents with titles and sizes, a page at a time, `query` to filter |
 | `outline` | a document's headings with section ids, lines and sizes |
 | `search` | lines matching a text or RE2 expression, grouped by section |
-| `find_sections` | sections ranked for a question in words, across documents: the best one's text, the next ones as `doc#id` |
+| `find_sections` | sections ranked for a question in words, across documents or within a document or directory (`doc`): the best one's text, the next ones as `doc#id` |
 | `read_section` | one section by id or heading path, in parts when large |
 | `read_lines` | lines by number, checked against the document's version |

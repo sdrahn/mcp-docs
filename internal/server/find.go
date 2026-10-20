@@ -75,6 +75,7 @@ func findSectionsTool() tool {
 		input: obj(map[string]any{
 			"query":      str("the question, in words"),
 			"collection": str("only this collection"),
+			"doc":        str("only this document or directory (collection/path)"),
 			"read":       boolean("the best section's text (default true)"),
 			"maxResults": integer(1, maxFindResults, fmt.Sprintf("sections at most (default %d; %d without read)",
 				defaultFindRead, defaultFindResults)),
@@ -94,6 +95,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	var a struct {
 		Query      string `json:"query"`
 		Collection string `json:"collection"`
+		Doc        string `json:"doc"`
 		Read       *bool  `json:"read"`
 		MaxResults int    `json:"maxResults"`
 	}
@@ -114,21 +116,39 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	if n < 1 || n > maxFindResults {
 		return nil, fmt.Errorf("maxResults: from 1 to %d", maxFindResults)
 	}
-	colls := s.Cat.Collections
-	if a.Collection != "" {
+	var scopes []catalog.Doc
+	switch {
+	case a.Doc != "" && a.Collection != "":
+		return nil, errors.New("give collection or doc, not both")
+	case a.Doc != "":
+		// A document or a directory of one collection: a version's
+		// documents in a collection of several, for example.
+		d, _, err := s.Cat.Resolve(a.Doc, false)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.Cat.Stat(d); err != nil {
+			return nil, err
+		}
+		scopes = []catalog.Doc{d}
+	case a.Collection != "":
 		k := s.Cat.Collection(a.Collection)
 		if k == nil {
 			return nil, fmt.Errorf("collection %q: no such collection (%s)", a.Collection, strings.Join(s.collNames(), ", "))
 		}
-		colls = []*catalog.Collection{k}
+		scopes = []catalog.Doc{{Coll: k, Rel: "."}}
+	default:
+		for _, k := range s.Cat.Collections {
+			scopes = append(scopes, catalog.Doc{Coll: k, Rel: "."})
+		}
 	}
 	var hits []rank.Hit
-	for _, k := range colls {
-		ix, err := s.index(ctx, k)
+	for _, d := range scopes {
+		ix, err := s.index(ctx, d.Coll)
 		if err != nil {
 			return nil, err
 		}
-		h, err := ix.Search(a.Query, n)
+		h, err := ix.Under(a.Query, d, n)
 		if err != nil {
 			return nil, err
 		}

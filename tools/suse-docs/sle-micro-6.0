@@ -1,0 +1,32 @@
+# The articles of SUSE Linux Micro 6.0 on documentation.suse.com
+# (/sle-micro/6.0/html/NAME/, from its sitemap.xml, 2026-10-20): their build
+# definitions in SUSE/doc-modular, branch maintenance/SLE_Micro_6.0.
+DC-Micro-6.0-cockpit
+DC-Micro-6.0-public-cloud
+DC-Micro-NVIDIA-jetson
+DC-Micro-PAM-security
+DC-Micro-compose
+DC-Micro-deployment-images
+DC-Micro-deployment-raw-images
+DC-Micro-deployment-raw-images-ibmz
+DC-Micro-deployment-raw-images-ibmz-zfcp
+DC-Micro-deployment-raw-images-virtual-machines
+DC-Micro-deployment-selfinstall-images
+DC-Micro-keylime
+DC-Micro-managing-system-logfiles
+DC-Micro-network-configuration
+DC-Micro-ntp-time-synchronization
+DC-Micro-openscap
+DC-Micro-pcp
+DC-Micro-podman
+DC-Micro-raids
+DC-Micro-selinux
+DC-Micro-setroubleshoot
+DC-Micro-snapper-basic-concepts
+DC-Micro-sudo-configure-superuser-privileges
+DC-Micro-sudo-run-commands-as-superuser
+DC-Micro-systemd-basics
+DC-Micro-systemd-working-with-timers
+DC-Micro-toolbox
+DC-Micro-transactional-updates
+DC-Micro-upgrade

@@ -1,40 +1,77 @@
 #!/bin/sh
-# smoke-test.sh: check an installed documentation package (here
-# suse-docs-mcp-sles-16.0) with mcp-docs installed, as root (CI's
-# openSUSE containers): its files, and mcp-docs serving it from its
-# collection file as an agent asks.
+# smoke-test.sh: check an installed documentation package with mcp-docs
+# installed, as root (CI's openSUSE containers): its files, and mcp-docs
+# serving it from its collection file as an agent asks.
 #
-#   packaging/suse-docs/smoke-test.sh
+#   packaging/suse-docs/smoke-test.sh [PACKAGE]
+#
+# PACKAGE: suse-docs-mcp-sles-16.0 (the default) or suse-docs-mcp-sle-micro.
 set -eu
 
+pkg=${1:-suse-docs-mcp-sles-16.0}
 fail() {
 	echo "smoke-test: $*" >&2
 	exit 1
 }
-coll=/usr/share/mcp-docs/collections.d/sles-16.0.yaml
-docs=/usr/share/mcp-docs/docs/suse/sles-16.0
-for f in "$coll" "$docs/README.md" "$docs/topics/selinux-switching-modes.md"; do
-	rpm -qf "$f" | grep -q '^suse-docs-mcp-sles-16.0-' || fail "$f is not owned by suse-docs-mcp-sles-16.0"
+call() { # id, tool, arguments
+	echo "{\"jsonrpc\":\"2.0\",\"id\":$1,\"method\":\"tools/call\",\"params\":{\"name\":\"$2\",\"arguments\":$3}}"
+}
+case $pkg in
+suse-docs-mcp-sles-16.0)
+	coll=sles-16.0
+	title='SUSE Linux Enterprise Server 16.0'
+	owned=topics/selinux-switching-modes.md
+	calls() {
+		call 2 find_sections '{"query":"make a SELinux domain permissive"}'
+		call 3 read_section '{"doc":"sles-16.0/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes"}'
+		call 4 find_sections '{"query":"build an RPM package from a live patch"}'
+	}
+	answers='sles-16.0/topics/selinux-permissive-domains.md
+#setting-permissive-domain
+Changing the SELinux mode temporarily
+setenforce
+#ulp-pack-livepatch'
+	;;
+suse-docs-mcp-sle-micro)
+	coll=sle-micro
+	title='SUSE Linux Micro 6.0, 6.1 and 6.2'
+	owned=6.2/topics/selinux-switching-modes.md
+	calls() {
+		call 2 find_sections '{"query":"apply updates with transactional-update without rebooting","doc":"sle-micro/6.2"}'
+		call 3 find_sections '{"query":"set up keylime remote attestation","doc":"sle-micro/6.0"}'
+		call 4 read_section '{"doc":"sle-micro/6.1/topics/selinux-switching-modes.md#selinux-permanent-mode-changes"}'
+	}
+	answers='sle-micro/6.2/topics/transactional-update-no-reboot.md
+sle-micro/6.0/topics/keylime-remote-attestation.md
+Changing the SELinux mode permanently
+/etc/selinux/config'
+	;;
+*)
+	fail "unknown package $pkg"
+	;;
+esac
+
+yaml=/usr/share/mcp-docs/collections.d/$coll.yaml
+docs=/usr/share/mcp-docs/docs/suse/$coll
+for f in "$yaml" "$docs/README.md" "$docs/$owned"; do
+	rpm -qf "$f" | grep -q "^$pkg-" || fail "$f is not owned by $pkg"
 done
 
 {
 	echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
 	echo '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-	echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_sections","arguments":{"query":"make a SELinux domain permissive"}}}'
-	echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_section","arguments":{"doc":"sles-16.0/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes"}}}'
-	echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"find_sections","arguments":{"query":"build an RPM package from a live patch"}}}'
+	calls
+	echo "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"resources/read\",\"params\":{\"uri\":\"docs://$coll/README.md\"}}"
 	sleep 2
 } | timeout 30 mcp-docs >/tmp/smoke.out 2>/tmp/smoke.err || fail "the session failed: $(cat /tmp/smoke.err)"
 
 expect() {
 	grep -q -- "$1" /tmp/smoke.out || fail "no $1 in the answers: $(cat /tmp/smoke.out)"
 }
-grep -q 'serving sles-16.0=/usr/share/mcp-docs/docs/suse/sles-16.0' /tmp/smoke.err || fail "not served: $(cat /tmp/smoke.err)"
-expect 'SUSE Linux Enterprise Server 16.0'
-expect 'sles-16.0/topics/selinux-permissive-domains.md'
-expect '#setting-permissive-domain'
-expect 'Changing the SELinux mode temporarily'
-expect 'setenforce'
-expect '#ulp-pack-livepatch'
+grep -q "serving .*$coll=$docs" /tmp/smoke.err || fail "not served: $(cat /tmp/smoke.err)"
+expect "$title"
+echo "$answers" | while read -r a; do
+	expect "$a"
+done
 
-echo "smoke-test: suse-docs-mcp-sles-16.0 is served ($(find "$docs" -name '*.md' | wc -l) documents)"
+echo "smoke-test: $pkg is served ($(find "$docs" -name '*.md' | wc -l) documents)"
