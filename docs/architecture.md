@@ -544,7 +544,8 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    link checked against the site, and are packaged
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); SUSE Linux Micro
    6.0, 6.1 and 6.2 convert into one collection, a directory per version
-   (`tools/suse-docs/convert-sle-micro`); next, the container image, SLES
+   (`tools/suse-docs/convert-sle-micro`), packaged as
+   `suse-docs-mcp-sle-micro`; next, the container image, SLES
    for SAP and SLE HA 16.0, SLE 15 guides after.
 9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
@@ -901,6 +902,13 @@ What one collection of several versions needed:
   version's (`README.md`) carry `rank: false`, as the articles' indexes
   do (§15.7): "upgrade SLE Micro" found the index's group heading
   "Upgrade & Update".
+
+Packaged as `suse-docs-mcp-sle-micro` (packaging/suse-docs/sle-micro):
+three source tarballs, unpacked to `6.0/`, `6.1/` and `6.2/` and
+converted at build time with the installed `convert-sle-micro`, which
+takes the revisions from the package (`REV_60`, `REV_61`, `REV_62`), so
+that newer sources need no new converter. CI builds, installs and
+smoke-tests it beside the SLES package.
 
 ## 15. Token cost
 

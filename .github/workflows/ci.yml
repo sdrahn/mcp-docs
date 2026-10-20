@@ -78,6 +78,19 @@ jobs:
           rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
           rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
           packaging/suse-docs/smoke-test.sh
+      # Three versions, three source tarballs (6.2's is SLES 16.0's).
+      - name: Documentation package (suse-docs-mcp-sle-micro)
+        run: |
+          spec=packaging/suse-docs/sle-micro/suse-docs-mcp-sle-micro.spec
+          for v in 60:maintenance/SLE_Micro_6.0 61:maintenance/SLE_Micro_6.1 62:maintenance/SLE16.0; do
+            rev=$(sed -n "s/^%define rev${v%%:*} *//p" "$spec")
+            cp "$(tools/suse-docs/source-tarball "$rev" build "${v#*:}")" ~/rpmbuild/SOURCES/
+          done
+          rpmbuild -bb --define "_topdir $HOME/rpmbuild" "$spec"
+          rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sle-micro-*.rpm
+          rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sle-micro-*.rpm
+          packaging/suse-docs/smoke-test.sh suse-docs-mcp-sle-micro
+          packaging/suse-docs/smoke-test.sh suse-docs-mcp-sles-16.0
 
   # The container image (packaging/container), built as a user builds it,
   # then run as a container runtime runs it: read-only, any user.

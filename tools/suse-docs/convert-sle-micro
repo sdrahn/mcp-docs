@@ -15,6 +15,9 @@
 # The sources are checked out from build/doc-modular (a clone, as convert
 # makes it) into build/doc-modular-V, or, with SRC set, read from SRC/V as
 # they are (unpacked trees, as in a package build, which has no network).
+# REV_60, REV_61 and REV_62 name the revisions of the versions' sources
+# (default: the pinned ones), cited in the indexes and source links; so a
+# package of newer sources needs no new mcp-docs-convert.
 # In a checkout of mcp-docs the converter is built from it; installed, it
 # is the installed one.
 set -eu
@@ -45,6 +48,7 @@ rm -rf "$out"
 mkdir -p "$out"
 echo "$versions" | while read -r v rev branch; do
 	[ -n "$v" ] || continue
+	rev=$(eval "echo \${REV_$(echo "$v" | tr -d .):-$rev}")
 	if [ -n "${SRC:-}" ]; then
 		src=$SRC/$v
 	else

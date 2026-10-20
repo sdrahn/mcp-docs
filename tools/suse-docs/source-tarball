@@ -5,17 +5,19 @@
 # conversion does not read (images, translations, templates). The OBS
 # service of the package (packaging/suse-docs/*/_service) makes the same.
 #
-#   tools/suse-docs/source-tarball [REV [DIR]]
+#   tools/suse-docs/source-tarball [REV [DIR [BRANCH]]]
 #
 # REV defaults to the revision tools/suse-docs/convert pins; DIR (default
-# build) receives the tarball, whose path is printed. The sources are
-# cloned into build/doc-modular, as convert does.
+# build) receives the tarball, whose path is printed; BRANCH (default
+# convert's) is fetched when REV is not yet in the clone (for SUSE Linux
+# Micro 6.0: maintenance/SLE_Micro_6.0). The sources are cloned into
+# build/doc-modular, as convert does.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 rev=${1:-$(sed -n 's/^rev=//p' "$here/convert")}
-branch=$(sed -n 's/^branch=//p' "$here/convert")
 dir=${2:-build}
+branch=${3:-$(sed -n 's/^branch=//p' "$here/convert")}
 src=build/doc-modular
 
 if [ ! -d "$src/.git" ]; then

@@ -105,7 +105,9 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
   converts the three versions' articles from documentation.suse.com into
   one collection, a directory per version; `find_sections` takes `doc`
   (a document or directory, as `search` does), so that an agent asks one
-  version; the converter marks the collection's index `rank: false`.
+  version; the converter marks the collection's index `rank: false`;
+  packaged as `suse-docs-mcp-sle-micro`, which `mcp-docs-convert` (now
+  with `convert-sle-micro` and its article lists) converts at build time.
 - The best part of a large section (§15, phase 4):
   - `find_sections`, when its best section is over 4 KiB, returns the
     subsection that matches best (or a passage of at most 2 KiB) and a
