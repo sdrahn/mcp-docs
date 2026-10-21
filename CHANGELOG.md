@@ -3,129 +3,95 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.1.0 — 2026-10-21
 
-First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
+First release: an MCP server that gives agents the Markdown documentation
+on a system a section at a time, for openSUSE Tumbleweed, openSUSE Leap
+16 and SLES 16, and a converter of SUSE's documentation into such
+collections.
 
-- The tools `list_docs`, `outline`, `search`, `read_section` and
-  `read_lines`: documents read a section or a range of lines at a time,
-  search answers with sections, and one call returns at most 32 KiB
-  (`--max-read`).
-- `--fs-compat` offers mcp-gateway's `mcp-server-fs` tools for reading
-  (`outline_file`, `search_text`, `read_text_file`, `search_files`,
-  `list_directory`), so that mcp-gateway's `gateway-docs` server can run
-  on mcp-docs unchanged.
-- Collections from `--root` and `--collection`, or from collection files
-  in `/usr/share/mcp-docs/collections.d` (packages) and
-  `/etc/mcp-docs/collections.d` (the administrator).
-- Titles and descriptions from front matter or the first heading and
-  paragraph; resources `docs://collection/path#section`; the prompt
+Server (`mcp-docs`):
+
+- Tools:
+  - `find_sections`: the sections that answer a question in words,
+    ranked across documents (BM25 over each section's own text, a bonus
+    for the words of its title). It returns the best section's text, up
+    to 4 KiB. Of a larger section, it returns the subsection or passage
+    that matches best, with a line for each of the section's other
+    parts. `doc` limits it to a document or directory, `collection` to a
+    collection; `read: false` returns only the list.
+  - `search`: lines matching a text or an RE2 expression, grouped by
+    section, with each section's size.
+  - `read_section`: one section by id or heading path, in parts when
+    large; `depth: 0` returns its introduction and the outline of its
+    subsections.
+  - `outline`: a document's headings with ids, lines and sizes; a large
+    document's two upper levels.
+  - `read_lines`: lines by number, checked against the document's
+    version.
+  - `list_docs`: collections, or a collection's documents with titles
+    and sizes, a page at a time, filtered with `query`.
+- Resources `docs://collection/path#section` and the prompt
   `answer_from_docs`.
-- Read-only, restricted with Landlock to the collections.
-- Packaging for openSUSE and SLES (`packaging/suse`), and an evaluation
-  of what answers cost on a fixed corpus (`make eval`).
-- A guide to writing Markdown for agents (`docs/writing-docs.md`).
-- `find_sections`: sections ranked for a question in words, across the
-  documents of all collections or one (BM25 over each section's own
-  text, a bonus for the words of its title), with the best-matching
-  line of each.
-- `list_items: true` in a collection file (`--list-items` on the command
-  line): list items and paragraphs that open with a bold title are
-  sections, for documents that keep steps or decisions as entries under
-  one heading.
-- `search` results give each section's size in bytes (`sectionBytes`).
-- `--listen ADDR`: MCP over Streamable HTTP, stateless (one JSON-RPC
-  message per POST to `/mcp`, no sessions, no event streams), with
-  `/healthz`, `Origin` checks (`--allow-origin`), protocol version
-  checks, bounds on body size, concurrency (`--max-concurrent`) and
-  time, and a graceful stop on SIGTERM.
-- Landlock also restricts TCP (kernels with ABI 4): no connections, and
-  no listening on stdin/stdout or listening on the `--listen` port only.
+- Small results:
+  - each result once, as text; `structuredContent` and output schemas
+    come with `--structured`;
+  - one call returns at most 16 KiB (`--max-read`);
+  - `--tools LIST` offers only the named tools, and the instructions
+    name only those;
+  - `make eval` measures what answers cost, and holds the per-session
+    cost to a budget (docs/architecture.md, §15).
+- Collections:
+  - from `--root` and `--collection`, or from collection files in
+    `/usr/share/mcp-docs/collections.d` (packages) and
+    `/etc/mcp-docs/collections.d` (the administrator), with an index,
+    include and exclude patterns, instructions and `list_items`;
+  - titles and descriptions come from front matter, or else from the
+    first heading and paragraph;
+  - `rank: false` in front matter keeps a document (a license, an index)
+    out of `find_sections`.
+- `--list-items`: list items and paragraphs that open with a bold title
+  are sections.
+- `--fs-compat`: mcp-gateway's `mcp-server-fs` reading tools
+  (`outline_file`, `search_text`, `read_text_file`, `search_files`,
+  `list_directory`), so that mcp-gateway's `gateway-docs` server runs
+  on mcp-docs.
+- `--listen ADDR`: stateless MCP over Streamable HTTP. It has
+  `/healthz`, `Origin` checks (`--allow-origin`), bounds on body size,
+  concurrency (`--max-concurrent`) and time, and a graceful stop on
+  SIGTERM.
+- Read-only. Landlock restricts it to reading its collections, to no
+  TCP connection, and to listening on its `--listen` port only.
+
+Converter (`mcp-docs-convert`):
+
+- Converts the articles of SUSE's DocBook sources (SUSE/doc-modular) into
+  a Markdown collection:
+  - entities, XInclude and profiling resolved;
+  - one document per topic, under the sources' ids;
+  - a variant per article where articles profile a topic differently;
+  - an index per article, dated with its latest revision;
+  - a collection index grouped by task;
+  - each document's source is its page and anchor on
+    documentation.suse.com.
+- `--strict` fails on anything it could not convert; `--max-section`
+  reports sections larger than an agent reads whole.
+- `tools/suse-docs`: the articles of SUSE Linux Enterprise Server 16.0,
+  SUSE Linux Enterprise High Availability 16.0 and SUSE Linux Micro 6.0,
+  6.1 and 6.2, from pinned revisions.
+
+Packages and images:
+
+- `mcp-docs` and `mcp-docs-convert` (`packaging/suse`).
+- Documentation packages, converted at build time from source tarballs
+  (`packaging/suse-docs`):
+  - `suse-docs-mcp-sles-16.0`;
+  - `suse-docs-mcp-sle-ha-16.0`;
+  - `suse-docs-mcp-sle-micro` (6.0, 6.1 and 6.2, a directory each).
 - A container image (`packaging/container`): BCI micro, port 8080, any
-  user, read-only root file system; built and queried in CI.
-- Fixed: collection files in directories other than below `/etc`,
-  `/usr` or `/tmp` (`--config-dirs`) were not found: mcp-docs reads them
-  again after restricting itself with Landlock, which did not allow
-  their directories. When no collection is left, the reasons are now
-  printed.
-- `mcp-docs-convert` (prototype): converts an article of SUSE's DocBook
-  sources (SUSE/doc-modular) into a Markdown collection: entities and
-  profiling resolved, every xml:id an anchor, one document per topic,
-  an index per article, front matter with the source.
-- `mcp-docs-convert` converts many articles into one collection
-  (`--dc` more than once, `--dcs FILE`): a topic that articles profile
-  differently is one document per variant (`topics/ID--ARTICLE.md`),
-  article indexes are named by their build definition
-  (`articles/SLES-SELinux.md`). `--site-url` makes each document's
-  `source` its page and anchor on documentation.suse.com. New:
-  `STRUCTID`, XInclude, callouts, glossaries, simple lists, results,
-  modules without a topic.
-- `tools/suse-docs/convert`: SUSE Linux Enterprise Server 16.0's 48
-  articles from SUSE/doc-modular `maintenance/SLE16.0`, at a pinned
-  revision, into a collection with its collection file.
-- Package `mcp-docs-convert` (from the same spec): the converter and
-  `tools/suse-docs` (below `/usr/share/mcp-docs-convert/suse-docs`), a
-  build requirement for packages of SUSE's documentation; `convert`
-  takes the sources from `SRC=` without network, and uses the installed
-  converter outside a checkout. `mcp-docs-convert --version`. CI installs
-  and smoke-tests it.
-- Package `suse-docs-mcp-sles-16.0` (`packaging/suse-docs`): SUSE Linux
-  Enterprise Server 16.0's documentation as the collection `sles-16.0`,
-  converted at build time from a source tarball of SUSE/doc-modular
-  (`_service`, or `tools/suse-docs/source-tarball`). CI builds it with
-  the mcp-docs-convert package, lints, installs and queries it.
-  `tools/suse-docs/convert` takes `REV=` with `SRC=`, so that a package
-  names the revision it converts.
-- Lower token cost for every client (docs/architecture.md, §15):
-  - results are their text only; `structuredContent` and output schemas
-    come with `--structured` (a client that reads them needs it);
-  - `find_sections` gives one line per section (`doc#id`, heading path,
-    size) and the words around the match, not the whole line;
-  - `list_docs` comes a page at a time (`limit`, default 25; `offset`),
-    filters with `query`, counts documents per directory, and shows
-    descriptions only on a short or filtered list;
-  - `outline` of a large document (over 40 headings) shows its two upper
-    levels unless `maxLevel` is given;
-  - `--max-read` defaults to 16 KiB (was 32 KiB);
-  - the instructions lead with `find_sections` → `read_section`;
-  - `make eval` reports the cost as JSON-forwarding clients receive it
-    and holds the per-session cost (instructions, tool definitions) to a
-    budget.
-- One call per answer, and a smaller fixed cost (§15, phase 2):
-  - `find_sections` returns the best section's text (up to 4 KiB; a
-    larger one as its introduction and sub-outline) and the next two as
-    `doc#id` lines; `read: false` returns the list of 5 as before;
-  - shorter tool descriptions: 5.3 KB of tool definitions instead of
-    7.3 KB (9.6 KB before phase 1);
-  - `--tools LIST` offers only the named tools, and the instructions name
-    only those (`find_sections,read_section,outline`: 2.5 KB);
-  - README: keeping token cost down, on the server, in the client (Kit's
-    `allowedTools`) and behind mcp-gateway.
-- `mcp-docs-convert` dates each article's index with its latest revision
-  (`date` in the front matter, "Last revised" in the text), from the
-  sources' revision history: the site's modification date.
-- SUSE Linux Enterprise High Availability 16.0 (§14.9): its 18 articles
-  as the collection `sle-ha-16.0` (`PRODUCT=sle-ha-16.0 tools/suse-docs/convert`),
-  packaged as `suse-docs-mcp-sle-ha-16.0`.
-- SUSE Linux Micro 6.0, 6.1 and 6.2 (§14.8): `tools/suse-docs/convert-sle-micro`
-  converts the three versions' articles from documentation.suse.com into
-  one collection, a directory per version; `find_sections` takes `doc`
-  (a document or directory, as `search` does), so that an agent asks one
-  version; the converter marks the collection's index `rank: false`;
-  packaged as `suse-docs-mcp-sle-micro`, which `mcp-docs-convert` (now
-  with `convert-sle-micro` and its article lists) converts at build time.
-- The best part of a large section (§15, phase 4):
-  - `find_sections`, when its best section is over 4 KiB, returns the
-    subsection that matches best (or a passage of at most 2 KiB) and a
-    line for each of the section's other parts, instead of the
-    section's introduction and outline;
-  - `mcp-docs-convert` marks the articles' indexes `rank: false`;
-  - SLES 16.0: the 16 test questions cost 37.7 KB in 18 calls instead
-    of 63.8 KB in 19, and 15 of 16 find the answering section first.
-- Documents shaped for sections (§15, phase 3):
-  - `rank: false` in front matter keeps a document (a license, a
-    changelog) out of `find_sections`;
-  - `mcp-docs-convert` writes a compact collection index, the articles'
-    titles grouped by task (SLES 16.0: 5.2 KB instead of 9.6 KB), marks
-    the legal notices `rank: false`, and reports sections over
-    `--max-section` (8 KiB) of their own text.
+  user, read-only root file system.
+- Behind mcp-gateway 1.2.0 and later, the `gateway-docs` server can run
+  on mcp-docs; mcp-gateway's SELinux policy labels `/usr/bin/mcp-docs`.
+
+Documentation: README, docs/architecture.md, and a guide to writing
+Markdown that agents read cheaply (docs/writing-docs.md).

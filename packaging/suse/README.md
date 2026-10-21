@@ -89,7 +89,7 @@ neither mcp-docs nor network access:
 | Path | What |
 |---|---|
 | `/usr/bin/mcp-docs-convert` | the converter of SUSE's DocBook sources into collections ([docs/architecture.md](../../docs/architecture.md), §14) |
-| `/usr/share/mcp-docs-convert/suse-docs/` | `convert`, which converts SLES 16.0's articles, their list `sles-16.0`, and its README |
+| `/usr/share/mcp-docs-convert/suse-docs/` | `convert` (SLES 16.0, SLE HA 16.0) and `convert-sle-micro` (SUSE Linux Micro 6.0 to 6.2), the lists of their articles, and their README |
 
 A documentation package ships the sources of a revision as a tarball
 and converts them in `%build`; `suse-docs-mcp-sles-16.0` does
