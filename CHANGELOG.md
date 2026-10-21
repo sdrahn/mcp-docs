@@ -101,6 +101,9 @@ First release, for openSUSE Tumbleweed, openSUSE Leap 16 and SLES 16.
     only those (`find_sections,read_section,outline`: 2.5 KB);
   - README: keeping token cost down, on the server, in the client (Kit's
     `allowedTools`) and behind mcp-gateway.
+- `mcp-docs-convert` dates each article's index with its latest revision
+  (`date` in the front matter, "Last revised" in the text), from the
+  sources' revision history: the site's modification date.
 - SUSE Linux Enterprise High Availability 16.0 (§14.9): its 18 articles
   as the collection `sle-ha-16.0` (`PRODUCT=sle-ha-16.0 tools/suse-docs/convert`),
   packaged as `suse-docs-mcp-sle-ha-16.0`.

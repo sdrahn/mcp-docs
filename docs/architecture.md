@@ -723,7 +723,11 @@ tree and DC file in, Markdown documents and a collection file out.
   (`selinux-switching-modes.md`), so that a topic that several articles
   reuse is found once by `search` and `find_sections`;
 - **one index document per article** (`articles/selinux.md`): its title,
-  description, and its topics in order as links, so that an agent who
+  description, the date of its latest revision (`date`, and "Last
+  revised" in the text: the first entry of the sources' `revhistory`,
+  which documentation.suse.com shows as the page's modification date;
+  the site's publication date is when the site was built, not in the
+  sources), and its topics in order as links, so that an agent who
   wants the article reads it in order;
 - **one collection per product version** (`sles-16.0`), its index a
   generated list of the articles with their descriptions, and

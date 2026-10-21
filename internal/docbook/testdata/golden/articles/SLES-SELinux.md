@@ -1,12 +1,15 @@
 ---
 title: "Understanding SELinux Basics"
 description: "Learn about the basic components and functionality of SELinux"
+date: "2026-08-31"
 tags: ["article","Security","Configuration"]
 rank: false
 source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html"
 ---
 
 # Understanding SELinux Basics {#selinux-article-sles}
+
+Last revised 2026-08-31.
 
 Security-Enhanced Linux (SELinux) is a robust security framework in SUSE Linux Enterprise Server that implements Mandatory Access Control to provide granular access policies beyond standard Linux permissions. By using a strict labeling system and security contexts, administrators can effectively confine system processes, mitigate zero-day exploits and maintain comprehensive system integrity.
 
