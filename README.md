@@ -146,7 +146,7 @@ out of a collection is refused.
 
 ### Behind mcp-gateway
 
-mcp-gateway (from the release after 0.18.0) ships a definition of its
+mcp-gateway (from 1.2.0) ships a definition of its
 `gateway-docs` server on mcp-docs, for the administrator to enable:
 
 ```sh
