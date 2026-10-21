@@ -78,6 +78,14 @@ jobs:
           rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
           rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sles-16.0-*.rpm
           packaging/suse-docs/smoke-test.sh
+      # From the same source tarball as SLES 16.0's, already in SOURCES.
+      - name: Documentation package (suse-docs-mcp-sle-ha-16.0)
+        run: |
+          spec=packaging/suse-docs/sle-ha-16.0/suse-docs-mcp-sle-ha-16.0.spec
+          rpmbuild -bb --define "_topdir $HOME/rpmbuild" "$spec"
+          rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sle-ha-16.0-*.rpm
+          rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-sle-ha-16.0-*.rpm
+          packaging/suse-docs/smoke-test.sh suse-docs-mcp-sle-ha-16.0
       # Three versions, three source tarballs (6.2's is SLES 16.0's).
       - name: Documentation package (suse-docs-mcp-sle-micro)
         run: |

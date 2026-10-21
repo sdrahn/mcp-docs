@@ -1,0 +1,25 @@
+<!--
+  The source tarball of suse-docs-mcp-sle-ha-16.0, the same as
+  suse-docs-mcp-sles-16.0's: SUSE/doc-modular at the spec's revision,
+  without images, translations and templates, as
+  doc-modular-SHORTREV.tar.xz (the same as tools/suse-docs/source-tarball
+  makes). To update: change the revision here and rev, shortrev and
+  revdate in the spec, then osc service manualrun.
+-->
+<services>
+  <service name="tar_scm" mode="manual">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/SUSE/doc-modular.git</param>
+    <param name="revision">a9f708401da072b024e66994c8f15d91250b836e</param>
+    <param name="filename">doc-modular</param>
+    <param name="version">a9f7084</param>
+    <param name="exclude">images</param>
+    <param name="exclude">l10n</param>
+    <param name="exclude">templates</param>
+    <param name="exclude">SmartDocs-Cheatsheet.*</param>
+  </service>
+  <service name="recompress" mode="manual">
+    <param name="file">*.tar</param>
+    <param name="compression">xz</param>
+  </service>
+</services>

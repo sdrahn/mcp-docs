@@ -5,7 +5,8 @@
 #
 #   packaging/suse-docs/smoke-test.sh [PACKAGE]
 #
-# PACKAGE: suse-docs-mcp-sles-16.0 (the default) or suse-docs-mcp-sle-micro.
+# PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0
+# or suse-docs-mcp-sle-micro.
 set -eu
 
 pkg=${1:-suse-docs-mcp-sles-16.0}
@@ -31,6 +32,19 @@ suse-docs-mcp-sles-16.0)
 Changing the SELinux mode temporarily
 setenforce
 #ulp-pack-livepatch'
+	;;
+suse-docs-mcp-sle-ha-16.0)
+	coll=sle-ha-16.0
+	title='SUSE Linux Enterprise High Availability 16.0'
+	owned=topics/ha-sbd-setting-up-diskless.md
+	calls() {
+		call 2 find_sections '{"query":"set up diskless SBD","collection":"sle-ha-16.0"}'
+		call 3 find_sections '{"query":"put a node into maintenance mode","collection":"sle-ha-16.0"}'
+		call 4 read_section '{"doc":"sle-ha-16.0/topics/ha-sbd-setting-up-diskless.md#ha-sbd-setting-up-diskless"}'
+	}
+	answers='sle-ha-16.0/topics/ha-sbd-setting-up-diskless.md
+#ha-maintenance-putting-node-into-maintenance-mode
+Setting up diskless SBD'
 	;;
 suse-docs-mcp-sle-micro)
 	coll=sle-micro
