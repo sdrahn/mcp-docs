@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -226,6 +227,10 @@ type article struct {
 	desc     string
 	abstract string
 	tasks    []string
+	// date is the date of the article's latest revision (its
+	// revhistory), "2026-09-18": when it was last revised; "" without
+	// one.
+	date string
 }
 
 // topic is a topic as an article profiles it.
@@ -418,6 +423,7 @@ func Convert(o Options) (*Report, error) {
 			a.renderer = a.links(unknown, broken)
 			r := a.renderer
 			a.title, a.desc, a.abstract, a.tasks = articleMeta(r, a.st)
+			a.date = revised(a.st)
 			r.links[a.st.Attr["id"]] = Target{File: a.file, Title: a.title, Anchor: a.st.Attr["id"]}
 			for _, t := range a.topics {
 				r.file = t.file
@@ -514,10 +520,16 @@ func Convert(o Options) (*Report, error) {
 		// An article's index is the way to its topics, not an answer:
 		// out of find_sections' ranking, where its titles of every topic
 		// outranked the topic that answers.
+		if a.date != "" {
+			fields = append(fields, [2]any{"date", a.date})
+		}
 		fields = append(fields, [2]any{"tags", append([]string{"article"}, a.tasks...)}, [2]any{"rank", false},
 			[2]any{"source", c.sourceOf(a, a.asmRel, "index.html", "")})
 		idx.WriteString(frontMatter(fields))
 		fmt.Fprintf(&idx, "# %s {#%s}\n\n", a.title, a.st.Attr["id"])
+		if a.date != "" {
+			fmt.Fprintf(&idx, "Last revised %s.\n\n", a.date)
+		}
 		if a.abstract != "" {
 			idx.WriteString(a.abstract + "\n\n")
 		}
@@ -715,6 +727,30 @@ func (r *renderer) note(n *Node, file, section string) {
 		r.note(c, file, section)
 	}
 }
+
+// revised is the date of the latest revision of a structure's merge:
+// the first of its revhistory, as the sources list them newest first and
+// documentation.suse.com shows it as the article's modification date
+// (a later date further down is a typo, such as 2026-11-04 for
+// 2025-11-04). "" without a revision with an ISO date.
+func revised(st *Node) string {
+	mg := st.Child("merge")
+	if mg == nil {
+		return ""
+	}
+	for _, rh := range mg.Elements("revhistory") {
+		for _, rev := range rh.Elements("revision") {
+			if d := rev.Child("date"); d != nil {
+				if v := strings.TrimSpace(plain(d)); isoDate.MatchString(v) {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // articleMeta reads the article's title, description, abstract and
 // task tags from its structure's merge.

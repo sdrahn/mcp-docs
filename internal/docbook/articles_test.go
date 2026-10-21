@@ -42,7 +42,8 @@ func TestArticles(t *testing.T) {
 </structure>
 <structure renderas="article" xml:id="second">
   <merge><title>Installing &prod;</title><meta name="description">How to install</meta>
-    <meta name="task"><phrase>Installation</phrase></meta></merge>
+    <meta name="task"><phrase>Installation</phrase></meta>
+    <revhistory><revision><date>2026-09-18</date></revision><revision><date>2026-11-04</date></revision></revhistory></merge>
   <module resourceref="_about" renderas="section"/>
   <module renderas="section" xml:id="grp">
     <merge><title>Doing it</title><abstract><para>The steps.</para></abstract></merge>
@@ -129,12 +130,18 @@ reboot <co xml:id="co-reboot"/></screen>
 	art := read("articles/Z.md")
 	for _, want := range []string{
 		"\nrank: false\n",
-		"# Installing SLES {#second}",
+		// The latest revision is the first listed, a later date below it
+		// a typo.
+		"\ndate: \"2026-09-18\"\n",
+		"# Installing SLES {#second}\n\nLast revised 2026-09-18.\n",
 		"- [About SLES](../topics/about.md)\n- **Doing it**: The steps.\n  - [Install](../topics/install--Z.md)\n  - [Next](../topics/links--Z.md)\n- [Glossary](../topics/terms.md)",
 	} {
 		if !strings.Contains(art, want) {
 			t.Errorf("articles/Z.md lacks %q:\n%s", want, art)
 		}
+	}
+	if y := read("articles/Y.md"); strings.Contains(y, "date:") || strings.Contains(y, "Last revised") {
+		t.Errorf("an article without revisions has a date:\n%s", y)
 	}
 	// The index: titles by the articles' first task, without
 	// descriptions.
