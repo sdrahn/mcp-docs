@@ -37,6 +37,20 @@ The collection's `README.md` lists the articles by task; the legal
 notices and the articles' indexes carry `rank: false`, out of
 `find_sections`' ranking.
 
+## SUSE Linux Enterprise High Availability 16.0
+
+`PRODUCT=sle-ha-16.0 tools/suse-docs/convert` converts its 18 articles
+(`sle-ha-16.0`, from the site's sitemap) from the same branch and
+revision as SLES 16.0 into `build/sle-ha-16.0`, collection `sle-ha-16.0`.
+
+```sh
+PRODUCT=sle-ha-16.0 tools/suse-docs/convert
+MCP_DOCS_SLE_HA=$PWD/build/sle-ha-16.0 go test -run TestSLEHA16 -v ./internal/docbook/
+```
+
+Only 16.0: the guides of SLE HA 15 SP4 to SP7 and 12 SP5 are books from
+another repository (SUSE/doc-sleha), which the converter does not read.
+
 ## SUSE Linux Micro 6.0, 6.1 and 6.2
 
 `convert-sle-micro` makes one collection, `sle-micro`, of the three

@@ -24,6 +24,16 @@ func TestSLES16(t *testing.T) {
 	answeredFirst(t, "sles-16.0", dir, sles16Questions)
 }
 
+// SUSE Linux Enterprise High Availability 16.0 (tools/suse-docs/convert,
+// PRODUCT=sle-ha-16.0). MCP_DOCS_SLE_HA names the converted collection.
+func TestSLEHA16(t *testing.T) {
+	dir := os.Getenv("MCP_DOCS_SLE_HA")
+	if dir == "" {
+		t.Skip("MCP_DOCS_SLE_HA is not set (tools/suse-docs/README.md)")
+	}
+	answeredFirst(t, "sle-ha-16.0", dir, sleHA16Questions)
+}
+
 // SUSE Linux Micro 6.0, 6.1 and 6.2, one collection, a directory per
 // version (tools/suse-docs/convert-sle-micro): questions asked of one
 // version (doc: its directory) find the answering section of that
@@ -127,4 +137,24 @@ var sleMicroQuestions = []question{
 	{"network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, "sle-micro/6.2"},
 	{"set up keylime remote attestation", []string{"keylime-remote-attestation"}, "sle-micro/6.0"},
 	{"manage a software RAID", []string{"raid-management"}, "sle-micro/6.1"},
+}
+
+// sleHA16Questions name the sections that answer them.
+var sleHA16Questions = []question{
+	{"configure disk-based SBD", []string{"ha-sbd-setting-up-diskbased"}, ""},
+	{"set up diskless SBD", []string{"ha-sbd-setting-up-diskless"}, ""},
+	{"connect QDevice to the QNetd server", []string{"ha-qdevice-connecting-to-qnetd"}, ""},
+	{"install a three-node cluster", []string{"ha-installing-cluster-overview"}, ""},
+	{"add a location constraint for a resource", []string{"ha-resources-adding-location-constraints"}, ""},
+	{"move a resource to another node manually", []string{"ha-resources-adding-relocation-constraints", "ha-resources-relocation-constraints-what-is"}, ""},
+	{"put a node into maintenance mode", []string{"ha-maintenance-putting-node-into-maintenance-mode"}, ""},
+	{"configure a fencing device", []string{"ha-fencing-creating-resources-for-physical-device"}, ""},
+	{"log in to Hawk", []string{"ha-hawk-logging-in"}, ""},
+	{"start the cluster services for the whole cluster", []string{"ha-maintenance-starting-cluster-services-whole-cluster"}, ""},
+	{"clean up a failed resource", []string{"ha-resources-cleaning-up"}, ""},
+	{"change the SBD timeout", []string{"ha-sbd-changing-timeout-settings"}, ""},
+	{"what is a primitive resource", []string{"ha-resources-what-is-primitive"}, ""},
+	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode"}, ""},
+	{"resolve cluster issues after an upgrade", []string{"ha-upgrade-resolving-cluster-issues"}, ""},
+	{"remove an SBD device", []string{"ha-sbd-removing-device"}, ""},
 }

@@ -1,0 +1,22 @@
+# The articles of SUSE Linux Enterprise High Availability 16.0 on
+# documentation.suse.com (/sle-ha/16.0/html/NAME/, from its sitemap.xml,
+# 2026-10-21): their build definitions in SUSE/doc-modular, branch
+# maintenance/SLE16.0.
+DC-HA-crmsh-introduction
+DC-HA-fencing-configuring
+DC-HA-hawk-introduction
+DC-HA-installing-three-node-cluster
+DC-HA-installing-two-node-cluster
+DC-HA-introduction
+DC-HA-maintenance-performing-tasks-cluster-infra
+DC-HA-maintenance-performing-tasks-cluster-nodes
+DC-HA-maintenance-performing-tasks-cluster-resources
+DC-HA-qdevice-configuring
+DC-HA-resources-adding-constraints
+DC-HA-resources-configuring
+DC-HA-resources-managing
+DC-HA-resources-manually-moving
+DC-HA-sbd-changing-configuration
+DC-HA-sbd-configuring-diskbased
+DC-HA-sbd-configuring-diskless
+DC-HA-upgrading

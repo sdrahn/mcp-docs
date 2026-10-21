@@ -535,8 +535,8 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (§14; SLES 16.0 and SUSE Linux Micro 6.0 to
-   6.2 converted, §14.7, §14.8): a
+8. **SUSE documentation** (§14; SLES 16.0, SLE HA 16.0 and SUSE Linux
+   Micro 6.0 to 6.2 converted, §14.7 to §14.9): a
    converter, `mcp-docs-convert`, from SUSE's DocBook sources to
    Markdown collections, so that the documentation of
    documentation.suse.com is served offline, a section at a time. All 48
@@ -545,8 +545,9 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    (`suse-docs-mcp-sles-16.0`, packaging/suse-docs); SUSE Linux Micro
    6.0, 6.1 and 6.2 convert into one collection, a directory per version
    (`tools/suse-docs/convert-sle-micro`), packaged as
-   `suse-docs-mcp-sle-micro`; next, the container image, SLES
-   for SAP and SLE HA 16.0, SLE 15 guides after.
+   `suse-docs-mcp-sle-micro`; SLE HA 16.0's 18 articles as
+   `suse-docs-mcp-sle-ha-16.0`; next, the container image, SLES for SAP
+   16.0, SLE 15 guides after.
 9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
@@ -909,6 +910,23 @@ converted at build time with the installed `convert-sle-micro`, which
 takes the revisions from the package (`REV_60`, `REV_61`, `REV_62`), so
 that newer sources need no new converter. CI builds, installs and
 smoke-tests it beside the SLES package.
+
+### 14.9 SUSE Linux Enterprise High Availability 16.0
+
+The 18 articles the site publishes under `/sle-ha/16.0/html/`, from the
+same branch and revision as SLES 16.0 (`maintenance/SLE16.0`, a9f7084;
+`PROFOS="sleha"`): `convert` takes the product (`PRODUCT=sle-ha-16.0`),
+its list of articles and its title. 140 documents, nothing lost, all 139
+source links lead to a page and anchor on the site; one section over
+8 KiB, the glossary (15.4 KiB of entries without headings), which
+`find_sections` answers from with a passage (§15.7). `TestSLEHA16`: 15
+of 16 questions answered first ("configure disk-based SBD" finds the
+topics on changing between disk-based and diskless SBD before the one
+on setting it up). Packaged as `suse-docs-mcp-sle-ha-16.0`, from SLES
+16.0's source tarball.
+
+The SLE HA 15 and 12 guides are DocBook books in SUSE/doc-sleha, not
+modular articles: converting them is a reader of books, not a new list.
 
 ## 15. Token cost
 
