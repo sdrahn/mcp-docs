@@ -8,7 +8,7 @@
 #
 
 Name:           mcp-docs
-Version:        0.1.0
+Version:        0.1.1
 Release:        0
 Summary:        MCP server that gives agents on-system documentation a section at a time
 # MIT for mcp-docs; the others for the vendored Go modules linked in
