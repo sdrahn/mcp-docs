@@ -3,7 +3,7 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.1.2 — 2026-10-22
 
 - SUSE Linux Enterprise Server for SAP applications 16.0: its 42
   articles as the collection `sles-sap-16.0`
