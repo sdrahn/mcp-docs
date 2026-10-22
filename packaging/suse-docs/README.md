@@ -10,6 +10,7 @@ air-gapped, updated with the package.
 |---|---|---|
 | `suse-docs-mcp-sles-16.0` ([sles-16.0](sles-16.0)) | SUSE Linux Enterprise Server 16.0, its 48 articles (`tools/suse-docs/sles-16.0`) | SUSE/doc-modular, `maintenance/SLE16.0` |
 | `suse-docs-mcp-sle-ha-16.0` ([sle-ha-16.0](sle-ha-16.0)) | SUSE Linux Enterprise High Availability 16.0, its 18 articles (`tools/suse-docs/sle-ha-16.0`) | SUSE/doc-modular, `maintenance/SLE16.0` (the same tarball as SLES 16.0's) |
+| `suse-docs-mcp-sles-sap-16.0` ([sles-sap-16.0](sles-sap-16.0)) | SUSE Linux Enterprise Server for SAP applications 16.0, its 42 articles (`tools/suse-docs/sles-sap-16.0`) | SUSE/doc-modular, `maintenance/SLE16.0` (the same tarball as SLES 16.0's) |
 | `suse-docs-mcp-sle-micro` ([sle-micro](sle-micro)) | SUSE Linux Micro 6.0, 6.1 and 6.2, their 29, 35 and 38 articles (`tools/suse-docs/sle-micro-V`), one collection, a directory per version | SUSE/doc-modular, `maintenance/SLE_Micro_6.0`, `maintenance/SLE_Micro_6.1`, `maintenance/SLE16.0` (6.2) |
 
 CI builds them in the openSUSE Tumbleweed and Leap 16.0 containers after
@@ -31,9 +32,10 @@ version is the product's and the sources' revision,
 `16.0+git<date>.<revision>`; the license is the documentation's, GFDL
 1.2 or later.
 
-`suse-docs-mcp-sle-ha-16.0` is built like the SLES package, from the
-same source tarball and revision (`PRODUCT=sle-ha-16.0` for `convert`),
-and installs the collection `sle-ha-16.0` the same way.
+`suse-docs-mcp-sle-ha-16.0` and `suse-docs-mcp-sles-sap-16.0` are built
+like the SLES package, from the same source tarball and revision
+(`PRODUCT=sle-ha-16.0` or `PRODUCT=sles-sap-16.0` for `convert`), and
+install the collections `sle-ha-16.0` and `sles-sap-16.0` the same way.
 
 `suse-docs-mcp-sle-micro` installs the same way: the collection file
 `/usr/share/mcp-docs/collections.d/sle-micro.yaml`, the documents below

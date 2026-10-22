@@ -51,6 +51,22 @@ MCP_DOCS_SLE_HA=$PWD/build/sle-ha-16.0 go test -run TestSLEHA16 -v ./internal/do
 Only 16.0: the guides of SLE HA 15 SP4 to SP7 and 12 SP5 are books from
 another repository (SUSE/doc-sleha), which the converter does not read.
 
+## SUSE Linux Enterprise Server for SAP applications 16.0
+
+`PRODUCT=sles-sap-16.0 tools/suse-docs/convert` converts its 42 articles
+(`sles-sap-16.0`, from the site's sitemap) from the same branch and
+revision as SLES 16.0 into `build/sles-sap-16.0`, collection
+`sles-sap-16.0`. Most are SLES articles profiled for SLES for SAP
+(`SAP-SELinux`, `SAP-snapper-basics`); the SAP-specific ones cover
+saptune, Ansible for SAP, SELinux for SAP and the conversion of a SLES
+system. The SAP best practices guides (`/sbp/sap-16/`) are not articles
+of doc-modular.
+
+```sh
+PRODUCT=sles-sap-16.0 tools/suse-docs/convert
+MCP_DOCS_SLES_SAP=$PWD/build/sles-sap-16.0 go test -run TestSLESSAP16 -v ./internal/docbook/
+```
+
 ## SUSE Linux Micro 6.0, 6.1 and 6.2
 
 `convert-sle-micro` makes one collection, `sle-micro`, of the three

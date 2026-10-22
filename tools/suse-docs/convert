@@ -3,8 +3,9 @@
 # collection for mcp-docs: the articles that documentation.suse.com
 # publishes for it (tools/suse-docs/PRODUCT), from SUSE/doc-modular at a
 # pinned revision of its maintenance/SLE16.0 branch. PRODUCT is sles-16.0
-# (SUSE Linux Enterprise Server, the default) or sle-ha-16.0 (SUSE Linux
-# Enterprise High Availability).
+# (SUSE Linux Enterprise Server, the default), sle-ha-16.0 (SUSE Linux
+# Enterprise High Availability) or sles-sap-16.0 (SUSE Linux Enterprise
+# Server for SAP applications).
 #
 #   [PRODUCT=...] tools/suse-docs/convert [OUT [ROOT]]
 #
@@ -37,8 +38,13 @@ sle-ha-16.0)
 	site=sle-ha/16.0
 	about='cluster installation, fencing and SBD, resources and constraints, maintenance, crmsh and Hawk'
 	;;
+sles-sap-16.0)
+	product='SUSE Linux Enterprise Server for SAP applications'
+	site=sles-sap/16.0
+	about='installing and configuring a system for SAP applications, saptune, Ansible for SAP, and the administration of SLES 16.0 as it applies to them'
+	;;
 *)
-	echo "convert: unknown PRODUCT $name (sles-16.0, sle-ha-16.0)" >&2
+	echo "convert: unknown PRODUCT $name (sles-16.0, sle-ha-16.0, sles-sap-16.0)" >&2
 	exit 2
 	;;
 esac
