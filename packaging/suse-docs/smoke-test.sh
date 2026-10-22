@@ -5,8 +5,8 @@
 #
 #   packaging/suse-docs/smoke-test.sh [PACKAGE]
 #
-# PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0
-# or suse-docs-mcp-sle-micro.
+# PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0,
+# suse-docs-mcp-sles-sap-16.0 or suse-docs-mcp-sle-micro.
 set -eu
 
 pkg=${1:-suse-docs-mcp-sles-16.0}
@@ -45,6 +45,19 @@ suse-docs-mcp-sle-ha-16.0)
 	answers='sle-ha-16.0/topics/ha-sbd-setting-up-diskless.md
 #ha-maintenance-putting-node-into-maintenance-mode
 Setting up diskless SBD'
+	;;
+suse-docs-mcp-sles-sap-16.0)
+	coll=sles-sap-16.0
+	title='SUSE Linux Enterprise Server for SAP applications 16.0'
+	owned=topics/task-convert-sles-to-sap.md
+	calls() {
+		call 2 find_sections '{"query":"revert a saptune solution","collection":"sles-sap-16.0"}'
+		call 3 find_sections '{"query":"convert a SLES system to SLES for SAP","collection":"sles-sap-16.0"}'
+		call 4 read_section '{"doc":"sles-sap-16.0/topics/task-convert-sles-to-sap.md#task-convert-sles-to-sap"}'
+	}
+	answers='#sec-saptune-revert-solution
+sles-sap-16.0/topics/task-convert-sles-to-sap.md
+Migrate_SLES_to_SLES-for-SAP.sh'
 	;;
 suse-docs-mcp-sle-micro)
 	coll=sle-micro

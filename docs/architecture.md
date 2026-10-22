@@ -535,8 +535,8 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (§14; SLES 16.0, SLE HA 16.0 and SUSE Linux
-   Micro 6.0 to 6.2 converted, §14.7 to §14.9): a
+8. **SUSE documentation** (§14; SLES 16.0, SLE HA 16.0, SLES for SAP
+   16.0 and SUSE Linux Micro 6.0 to 6.2 converted, §14.7 to §14.10): a
    converter, `mcp-docs-convert`, from SUSE's DocBook sources to
    Markdown collections, so that the documentation of
    documentation.suse.com is served offline, a section at a time. All 48
@@ -546,8 +546,9 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    6.0, 6.1 and 6.2 convert into one collection, a directory per version
    (`tools/suse-docs/convert-sle-micro`), packaged as
    `suse-docs-mcp-sle-micro`; SLE HA 16.0's 18 articles as
-   `suse-docs-mcp-sle-ha-16.0`; next, the container image, SLES for SAP
-   16.0, SLE 15 guides after.
+   `suse-docs-mcp-sle-ha-16.0`; SLES for SAP 16.0's 42 articles as
+   `suse-docs-mcp-sles-sap-16.0`; next, the container image, SLE 15
+   guides after.
 9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
@@ -940,6 +941,22 @@ on setting it up). Packaged as `suse-docs-mcp-sle-ha-16.0`, from SLES
 
 The SLE HA 15 and 12 guides are DocBook books in SUSE/doc-sleha, not
 modular articles: converting them is a reader of books, not a new list.
+
+### 14.10 SUSE Linux Enterprise Server for SAP applications 16.0
+
+The 42 articles the site publishes under `/sles-sap/16.0/html/`, from
+the same branch and revision as SLES 16.0 (`PROFOS="sles4sap"`, three
+shared articles with `sles`): `PRODUCT=sles-sap-16.0`. Most are SLES
+articles profiled for SLES for SAP; 11 more `DC-SAP-*` on the branch are
+not published and are left out, as the site leaves them. 411 documents,
+nothing lost; all 410 source links lead to a page and anchor on the
+site; dates and architectures as the site shows them but for the
+differences known from SLES (a newer revision of SAP-Minimal-VM, the
+2026-11-04 typo, architectures the site's pages omit). Eight sections
+over 8 KiB, four of them the Ansible deployment procedures for SAP
+(10.8 to 15.3 KiB), which `find_sections` answers from with a passage.
+`TestSLESSAP16`: 13 of 16 questions answered first. Packaged as
+`suse-docs-mcp-sles-sap-16.0`, from SLES 16.0's source tarball.
 
 ## 15. Token cost
 

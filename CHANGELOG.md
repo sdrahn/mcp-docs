@@ -3,6 +3,13 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- SUSE Linux Enterprise Server for SAP applications 16.0: its 42
+  articles as the collection `sles-sap-16.0`
+  (`PRODUCT=sles-sap-16.0 tools/suse-docs/convert`), packaged as
+  `suse-docs-mcp-sles-sap-16.0`.
+
 ## v0.1.1 — 2026-10-22
 
 - `mcp-docs-convert` writes the product and version into every

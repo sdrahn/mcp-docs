@@ -34,6 +34,17 @@ func TestSLEHA16(t *testing.T) {
 	answeredFirst(t, "sle-ha-16.0", dir, sleHA16Questions)
 }
 
+// SUSE Linux Enterprise Server for SAP applications 16.0
+// (tools/suse-docs/convert, PRODUCT=sles-sap-16.0). MCP_DOCS_SLES_SAP
+// names the converted collection.
+func TestSLESSAP16(t *testing.T) {
+	dir := os.Getenv("MCP_DOCS_SLES_SAP")
+	if dir == "" {
+		t.Skip("MCP_DOCS_SLES_SAP is not set (tools/suse-docs/README.md)")
+	}
+	answeredFirst(t, "sles-sap-16.0", dir, slesSAP16Questions)
+}
+
 // SUSE Linux Micro 6.0, 6.1 and 6.2, one collection, a directory per
 // version (tools/suse-docs/convert-sle-micro): questions asked of one
 // version (doc: its directory) find the answering section of that
@@ -157,4 +168,24 @@ var sleHA16Questions = []question{
 	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode"}, ""},
 	{"resolve cluster issues after an upgrade", []string{"ha-upgrade-resolving-cluster-issues"}, ""},
 	{"remove an SBD device", []string{"ha-sbd-removing-device"}, ""},
+}
+
+// slesSAP16Questions name the sections that answer them.
+var slesSAP16Questions = []question{
+	{"tune the system for SAP HANA with saptune", []string{"task-saptune-tuning-perform"}, ""},
+	{"apply a saptune solution", []string{"task-saptune-manage-sap-sols-perform"}, ""},
+	{"revert a saptune solution", []string{"sec-saptune-revert-solution"}, ""},
+	{"edit a custom SAP Note", []string{"sec-saptune-sap-notes-edit"}, ""},
+	{"verify system tuning with saptune", []string{"sap-verify-saptune"}, ""},
+	{"convert a SLES system to SLES for SAP", []string{"task-convert-sles-to-sap"}, ""},
+	{"what is SUSE Linux Enterprise Server for SAP applications", []string{"sles-sap-what-is"}, ""},
+	{"deploy SAP S/4HANA on AWS with Ansible", []string{"deploy-sap-ansible-aws"}, ""},
+	{"deploy SAP BW/4HANA on Google Cloud", []string{"deploy-sap-ansible-gcp"}, ""},
+	{"deploy an SAP HANA high availability cluster with Ansible", []string{"deploy-sap-hana-ansible-hosts-ha"}, ""},
+	{"install SLES for SAP with Agama", []string{"deployment-pxe-agama", "agama-manual-installation"}, ""},
+	{"install SAP software patterns", []string{"sap-install-patterns"}, ""},
+	{"SELinux support with SAP software", []string{"selinux-sap-support"}, ""},
+	{"troubleshoot the SAP SELinux configuration", []string{"selinux-sap-troubleshooting"}, ""},
+	{"how is high availability achieved for SAP HANA", []string{"sles-sap-about-ha"}, ""},
+	{"what is the sles_sap_automation pattern", []string{"about-install-sap-pattern-ansible"}, ""},
 }
