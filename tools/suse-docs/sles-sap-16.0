@@ -1,0 +1,46 @@
+# The articles of SUSE Linux Enterprise Server for SAP applications 16.0 on
+# documentation.suse.com (/sles-sap/16.0/html/NAME/, from its sitemap.xml,
+# 2026-10-22): their build definitions in SUSE/doc-modular, branch
+# maintenance/SLE16.0.
+DC-SAP-Ansible
+DC-SAP-GNOME-getting-started
+DC-SAP-Minimal-VM
+DC-SAP-PXE-server
+DC-SAP-SELinux
+DC-SAP-SELinux-sap
+DC-SAP-ansible-roles
+DC-SAP-cockpit
+DC-SAP-copy-file-rsync
+DC-SAP-deployment-pxe-client
+DC-SAP-gnome-remote-desktop
+DC-SAP-initial-config
+DC-SAP-intro-firewalld
+DC-SAP-intro-sap-ansible-automation
+DC-SAP-kernel-control-groups
+DC-SAP-klp
+DC-SAP-lsm
+DC-SAP-networkmanager-nmcli
+DC-SAP-ntp-time-synchronization
+DC-SAP-ppc-agama-based-installation
+DC-SAP-predictable-naming
+DC-SAP-saptune
+DC-SAP-sles-sap-about
+DC-SAP-sles-to-sap
+DC-SAP-snapper-basics
+DC-SAP-subnet-manager
+DC-SAP-sudo-configure-superuser-privileges
+DC-SAP-sudo-run-commands-as-superuser
+DC-SAP-supportconfig
+DC-SAP-systemd-basics
+DC-SAP-systemd-timers
+DC-SAP-ulp
+DC-SAP-upgrading
+DC-SAP-valkey
+DC-SAP-virtualization
+DC-SAP-vm-host-network-multihome-setup
+DC-SAP-x86-64-agama-automated-installation
+DC-SAP-x86-64-agama-autoyast-profiles
+DC-SAP-x86-64-agama-based-installation
+DC-SLE-comparison
+DC-SLE-os-identification
+DC-SLE-packages-lifecycle
