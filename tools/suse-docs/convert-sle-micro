@@ -61,7 +61,7 @@ echo "$versions" | while read -r v rev branch; do
 	fi
 	short=$(echo "$rev" | cut -c1-7)
 	"$convert" --strict --src "$src" --dcs "$here/sle-micro-$v" --out "$out/$v" \
-		--name sle-micro --title "SUSE Linux Micro $v" \
+		--name sle-micro --title "SUSE Linux Micro $v" --product "SUSE Linux Micro" --product-version "$v" \
 		--description "The documentation of SUSE Linux Micro $v from documentation.suse.com, converted from its DocBook sources." \
 		--site-url "https://documentation.suse.com/sle-micro/$v/html/%s/" \
 		--source-url "https://github.com/SUSE/doc-modular/blob/$rev/%s" \

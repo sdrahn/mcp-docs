@@ -1,15 +1,19 @@
 ---
 title: "Understanding SELinux Basics"
 description: "Learn about the basic components and functionality of SELinux"
+product: "SUSE Linux Enterprise Server"
+version: "16.0"
+architectures: ["AMD64/Intel 64","POWER","IBM","AArch64"]
+created: "2025-11-04"
 date: "2026-08-31"
-tags: ["article","Security","Configuration"]
+tags: ["article","Security","Configuration","AMD64/Intel 64","POWER","IBM","AArch64"]
 rank: false
 source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html"
 ---
 
 # Understanding SELinux Basics {#selinux-article-sles}
 
-Last revised 2026-08-31.
+SUSE Linux Enterprise Server 16.0. Architectures: AMD64/Intel 64, POWER, IBM, AArch64. Created 2025-11-04, last revised 2026-08-31.
 
 Security-Enhanced Linux (SELinux) is a robust security framework in SUSE Linux Enterprise Server that implements Mandatory Access Control to provide granular access policies beyond standard Linux permissions. By using a strict labeling system and security contexts, administrators can effectively confine system processes, mitigate zero-day exploits and maintain comprehensive system integrity.
 

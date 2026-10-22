@@ -3,6 +3,16 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- `mcp-docs-convert` writes the product and version into every
+  document's front matter (`--product`, `--product-version`), and into
+  each article's index the architectures it applies to (also as tags)
+  and the date of its first revision (`created`), with a line in the
+  text: "SUSE Linux Enterprise High Availability 16.0. Architectures:
+  AMD64/Intel 64, POWER, IBM Z. Created 2026-01-15, last revised
+  2026-09-18." The metadata documentation.suse.com shows in its pages.
+
 ## v0.1.0 — 2026-10-21
 
 First release: an MCP server that gives agents the Markdown documentation
