@@ -67,6 +67,7 @@ func convert(t *testing.T) (string, *Report) {
 	t.Helper()
 	out := t.TempDir()
 	rep, err := Convert(Options{Src: "testdata/doc-modular", DCs: []string{"DC-SLES-SELinux"}, Out: out, Name: "sles-16.0",
+		Product: "SUSE Linux Enterprise Server", Version: "16.0",
 		Title: "SUSE Linux Enterprise Server 16.0", Description: "SELinux on SLES, converted from SUSE's sources.",
 		SourceURL: "https://github.com/SUSE/doc-modular/blob/maintenance/SLE16.0/%s",
 		SiteURL:   "https://documentation.suse.com/sles/16.0/html/%s/", Revision: "a9f7084"})

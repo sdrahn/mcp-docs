@@ -25,24 +25,26 @@ set -eu
 rev=a9f708401da072b024e66994c8f15d91250b836e
 branch=maintenance/SLE16.0
 here=$(cd "$(dirname "$0")" && pwd)
-product=${PRODUCT:-sles-16.0}
-case $product in
+name=${PRODUCT:-sles-16.0}
+case $name in
 sles-16.0)
-	title='SUSE Linux Enterprise Server 16.0'
+	product='SUSE Linux Enterprise Server'
 	site=sles/16.0
 	about='installation, administration, security, virtualization, containers'
 	;;
 sle-ha-16.0)
-	title='SUSE Linux Enterprise High Availability 16.0'
+	product='SUSE Linux Enterprise High Availability'
 	site=sle-ha/16.0
 	about='cluster installation, fencing and SBD, resources and constraints, maintenance, crmsh and Hawk'
 	;;
 *)
-	echo "convert: unknown PRODUCT $product (sles-16.0, sle-ha-16.0)" >&2
+	echo "convert: unknown PRODUCT $name (sles-16.0, sle-ha-16.0)" >&2
 	exit 2
 	;;
 esac
-out=${1:-build/$product}
+version=16.0
+title="$product $version"
+out=${1:-build/$name}
 
 if [ -n "${SRC:-}" ]; then
 	src=$SRC
@@ -66,15 +68,15 @@ fi
 
 rm -rf "$out"
 mkdir -p "$out"
-"$convert" --strict --src "$src" --dcs "$here/$product" --out "$out" \
-	--name "$product" --title "$title" \
+"$convert" --strict --src "$src" --dcs "$here/$name" --out "$out" \
+	--name "$name" --title "$title" --product "$product" --product-version "$version" \
 	--description "The documentation of $title from documentation.suse.com, converted from its DocBook sources." \
 	--site-url "https://documentation.suse.com/$site/html/%s/" \
 	--source-url "https://github.com/SUSE/doc-modular/blob/$rev/%s" \
 	--revision "$(echo "$rev" | cut -c1-7)"
 
 root=${2:-$(cd "$out" && pwd)}
-cat >"$out/$product.yaml" <<YAML
+cat >"$out/$name.yaml" <<YAML
 title: $title
 root: $root
 description: >
@@ -87,4 +89,4 @@ instructions: >
   in order; a topic named ID--ARTICLE.md is that article's variant (an
   architecture's, for example).
 YAML
-echo "$out/$product.yaml"
+echo "$out/$name.yaml"

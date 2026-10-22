@@ -25,7 +25,7 @@ func TestArticles(t *testing.T) {
 		}
 	}
 	const doctype = `<!DOCTYPE topic [ <!ENTITY % e SYSTEM "../common/e.ent"> %e; ]>`
-	write("common/e.ent", `<!ENTITY prod "SLES">`)
+	write("common/e.ent", `<!ENTITY prod "SLES"><!ENTITY x86 "AMD64/Intel 64">`)
 	write("DC-X", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nPROFARCH=\"x86_64\"\nSTRUCTID=\"second\"\n")
 	write("DC-Y", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nSTRUCTID=\"first\"\n")
 	write("DC-Z", "MAIN=\"a.asm.xml\"\nSRC_DIR=\"articles\"\nPROFARCH=\"zseries\"\nSTRUCTID=\"second\"\n")
@@ -43,7 +43,8 @@ func TestArticles(t *testing.T) {
 <structure renderas="article" xml:id="second">
   <merge><title>Installing &prod;</title><meta name="description">How to install</meta>
     <meta name="task"><phrase>Installation</phrase></meta>
-    <revhistory><revision><date>2026-09-18</date></revision><revision><date>2026-11-04</date></revision></revhistory></merge>
+    <meta name="architecture"><phrase>&x86;</phrase> <phrase>IBM&#160;Z</phrase></meta>
+    <revhistory><revision><date>2026-09-18</date></revision><revision><date>2026-01-15</date></revision></revhistory></merge>
   <module resourceref="_about" renderas="section"/>
   <module renderas="section" xml:id="grp">
     <merge><title>Doing it</title><abstract><para>The steps.</para></abstract></merge>
@@ -75,7 +76,8 @@ reboot <co xml:id="co-reboot"/></screen>
 
 	out := t.TempDir()
 	rep, err := Convert(Options{Src: src, DCs: []string{"DC-X", "DC-Y", "DC-Z"}, Out: out, Name: "t", Title: "T", Description: "D",
-		SiteURL: "https://documentation.suse.com/sles/16.0/html/%s/", MaxSection: 200})
+		SiteURL: "https://documentation.suse.com/sles/16.0/html/%s/", MaxSection: 200,
+		Product: "SUSE Linux Enterprise Server", Version: "16.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,18 +132,27 @@ reboot <co xml:id="co-reboot"/></screen>
 	art := read("articles/Z.md")
 	for _, want := range []string{
 		"\nrank: false\n",
-		// The latest revision is the first listed, a later date below it
-		// a typo.
-		"\ndate: \"2026-09-18\"\n",
-		"# Installing SLES {#second}\n\nLast revised 2026-09-18.\n",
+		// The product and version, the architectures (also as tags), the
+		// first and the latest revision, in front matter and in the text.
+		"\nproduct: \"SUSE Linux Enterprise Server\"\nversion: \"16.0\"\n" +
+			"architectures: [\"AMD64/Intel 64\",\"IBM Z\"]\ncreated: \"2026-01-15\"\ndate: \"2026-09-18\"\n" +
+			"tags: [\"article\",\"Installation\",\"AMD64/Intel 64\",\"IBM Z\"]\n",
+		"# Installing SLES {#second}\n\nSUSE Linux Enterprise Server 16.0. Architectures: AMD64/Intel 64, IBM Z. " +
+			"Created 2026-01-15, last revised 2026-09-18.\n",
 		"- [About SLES](../topics/about.md)\n- **Doing it**: The steps.\n  - [Install](../topics/install--Z.md)\n  - [Next](../topics/links--Z.md)\n- [Glossary](../topics/terms.md)",
 	} {
 		if !strings.Contains(art, want) {
 			t.Errorf("articles/Z.md lacks %q:\n%s", want, art)
 		}
 	}
-	if y := read("articles/Y.md"); strings.Contains(y, "date:") || strings.Contains(y, "Last revised") {
-		t.Errorf("an article without revisions has a date:\n%s", y)
+	// Without revisions and architectures: the product and version only.
+	if y := read("articles/Y.md"); strings.Contains(y, "date:") || strings.Contains(y, "revised") || strings.Contains(y, "architectures") ||
+		!strings.Contains(y, "{#first}\n\nSUSE Linux Enterprise Server 16.0.\n") {
+		t.Errorf("an article without revisions:\n%s", y)
+	}
+	// Every document names the product and version.
+	if a := read("topics/about.md"); !strings.Contains(a, "\nproduct: \"SUSE Linux Enterprise Server\"\nversion: \"16.0\"\n") {
+		t.Errorf("topics/about.md:\n%s", a)
 	}
 	// The index: titles by the articles' first task, without
 	// descriptions.
@@ -157,5 +168,26 @@ reboot <co xml:id="co-reboot"/></screen>
 	if strings.Join(rep.Large, " ") != "topics/install--X.md#install (0.2 KiB) topics/install--Z.md#install (0.2 KiB)" ||
 		!strings.Contains(rep.String(), "sections over 0.2 KiB of their own text: topics/install--X.md#install") {
 		t.Errorf("large: %q\n%s", rep.Large, rep)
+	}
+}
+
+// The dates of an article: the latest revision is the first listed, its
+// creation the last; a creation date after the latest revision is a
+// typo, left out.
+func TestRevised(t *testing.T) {
+	for _, c := range []struct{ revs, latest, first string }{
+		{"<revision><date>2026-09-18</date></revision><revision><date>2026-09-10</date></revision><revision><date>2026-01-15</date></revision>", "2026-09-18", "2026-01-15"},
+		{"<revision><date>2026-08-31</date></revision><revision><date>2026-11-04</date></revision>", "2026-08-31", ""},
+		{"<revision><date>2026-08-31</date></revision>", "2026-08-31", "2026-08-31"},
+		{"<revision><date>next week</date></revision>", "", ""},
+		{"", "", ""},
+	} {
+		st, err := Parse([]byte("<structure><merge><revhistory>" + c.revs + "</revhistory></merge></structure>"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if latest, first := revised(st); latest != c.latest || first != c.first {
+			t.Errorf("%s: %q %q, want %q %q", c.revs, latest, first, c.latest, c.first)
+		}
 	}
 }

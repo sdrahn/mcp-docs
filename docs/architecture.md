@@ -723,12 +723,21 @@ tree and DC file in, Markdown documents and a collection file out.
   (`selinux-switching-modes.md`), so that a topic that several articles
   reuse is found once by `search` and `find_sections`;
 - **one index document per article** (`articles/selinux.md`): its title,
-  description, the date of its latest revision (`date`, and "Last
-  revised" in the text: the first entry of the sources' `revhistory`,
-  which documentation.suse.com shows as the page's modification date;
-  the site's publication date is when the site was built, not in the
-  sources), and its topics in order as links, so that an agent who
-  wants the article reads it in order;
+  description, the architectures it applies to (`architectures`, also
+  as tags: the sources' `meta name="architecture"`), the dates of its
+  first and latest revision (`created`, `date`: the last and the first
+  entry of the sources' `revhistory`, which documentation.suse.com shows
+  as the page's creation and modification dates; a creation date after
+  the latest revision is a typo and left out; the site's publication
+  date is when the site was built, not in the sources), a line in the
+  text that says all of it with the product and version, and its topics
+  in order as links, so that an agent who wants the article reads it in
+  order;
+- **the product and version on every document** (`product`, `version`,
+  from the converter's `--product` and `--product-version`, not from the
+  sources' `productname` metadata, which names other products and
+  versions too), so that a document says what it documents wherever
+  it is read: in the SUSE Linux Micro collection, which version;
 - **one collection per product version** (`sles-16.0`), its index a
   generated list of the articles with their descriptions, and
   instructions that name the product version and the license.

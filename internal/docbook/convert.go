@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,6 +42,12 @@ type Options struct {
 	// MaxSection, when set, is the size in bytes of a section's own
 	// text (to the next heading) over which the report names it.
 	MaxSection int
+	// Product and Version name the product and version the articles
+	// document ("SUSE Linux Enterprise Server", "16.0"), written into
+	// every document's front matter and each article's index. The
+	// sources' own productname metadata is not used: it names other
+	// products and versions too (an assembly shared with SLES 15 SP6).
+	Product, Version string
 }
 
 // Report says what a conversion did and what it could not.
@@ -228,9 +235,12 @@ type article struct {
 	abstract string
 	tasks    []string
 	// date is the date of the article's latest revision (its
-	// revhistory), "2026-09-18": when it was last revised; "" without
-	// one.
-	date string
+	// revhistory), "2026-09-18": when it was last revised; created the
+	// date of its first; "" without one.
+	date, created string
+	// arches are the architectures the article applies to (its meta
+	// architecture: "AMD64/Intel 64", "POWER", "IBM Z").
+	arches []string
 }
 
 // topic is a topic as an article profiles it.
@@ -423,7 +433,8 @@ func Convert(o Options) (*Report, error) {
 			a.renderer = a.links(unknown, broken)
 			r := a.renderer
 			a.title, a.desc, a.abstract, a.tasks = articleMeta(r, a.st)
-			a.date = revised(a.st)
+			a.date, a.created = revised(a.st)
+			a.arches = architectures(a.st)
 			r.links[a.st.Attr["id"]] = Target{File: a.file, Title: a.title, Anchor: a.st.Attr["id"]}
 			for _, t := range a.topics {
 				r.file = t.file
@@ -493,6 +504,7 @@ func Convert(o Options) (*Report, error) {
 				// find_sections' ranking.
 				fields = append(fields, [2]any{"rank", false})
 			}
+			fields = append(fields, c.productFields()...)
 			fields = append(fields, [2]any{"source", c.sourceOf(a, t.src.rel, t.page, t.id)})
 			text := frontMatter(fields) + t.body
 			if err := os.WriteFile(filepath.Join(o.Out, t.file), []byte(text), 0o644); err != nil {
@@ -517,18 +529,27 @@ func Convert(o Options) (*Report, error) {
 		if a.desc != "" {
 			fields = append(fields, [2]any{"description", a.desc})
 		}
-		// An article's index is the way to its topics, not an answer:
-		// out of find_sections' ranking, where its titles of every topic
-		// outranked the topic that answers.
+		fields = append(fields, c.productFields()...)
+		if len(a.arches) > 0 {
+			fields = append(fields, [2]any{"architectures", a.arches})
+		}
+		if a.created != "" {
+			fields = append(fields, [2]any{"created", a.created})
+		}
 		if a.date != "" {
 			fields = append(fields, [2]any{"date", a.date})
 		}
-		fields = append(fields, [2]any{"tags", append([]string{"article"}, a.tasks...)}, [2]any{"rank", false},
+		// The architectures are tags too, so that list_docs shows them.
+		// An article's index is the way to its topics, not an answer:
+		// out of find_sections' ranking, where its titles of every topic
+		// outranked the topic that answers.
+		tags := append(append([]string{"article"}, a.tasks...), a.arches...)
+		fields = append(fields, [2]any{"tags", tags}, [2]any{"rank", false},
 			[2]any{"source", c.sourceOf(a, a.asmRel, "index.html", "")})
 		idx.WriteString(frontMatter(fields))
 		fmt.Fprintf(&idx, "# %s {#%s}\n\n", a.title, a.st.Attr["id"])
-		if a.date != "" {
-			fmt.Fprintf(&idx, "Last revised %s.\n\n", a.date)
+		if line := a.about(c.o); line != "" {
+			idx.WriteString(line + "\n\n")
 		}
 		if a.abstract != "" {
 			idx.WriteString(a.abstract + "\n\n")
@@ -728,26 +749,90 @@ func (r *renderer) note(n *Node, file, section string) {
 	}
 }
 
-// revised is the date of the latest revision of a structure's merge:
-// the first of its revhistory, as the sources list them newest first and
-// documentation.suse.com shows it as the article's modification date
-// (a later date further down is a typo, such as 2026-11-04 for
-// 2025-11-04). "" without a revision with an ISO date.
-func revised(st *Node) string {
+// revised returns the dates of the latest and the first revision of a
+// structure's merge, from its revhistory, which the sources list newest
+// first: documentation.suse.com shows them as the article's modification
+// and creation dates. A date further down that is later than the first
+// is a typo (2026-11-04 for 2025-11-04): no creation date then, where
+// the site shows the typo. "" without a revision with an ISO date.
+func revised(st *Node) (latest, first string) {
 	mg := st.Child("merge")
 	if mg == nil {
-		return ""
+		return "", ""
 	}
+	var dates []string
 	for _, rh := range mg.Elements("revhistory") {
 		for _, rev := range rh.Elements("revision") {
 			if d := rev.Child("date"); d != nil {
 				if v := strings.TrimSpace(plain(d)); isoDate.MatchString(v) {
-					return v
+					dates = append(dates, v)
 				}
 			}
 		}
 	}
-	return ""
+	if len(dates) == 0 {
+		return "", ""
+	}
+	latest, first = dates[0], dates[len(dates)-1]
+	if first > latest {
+		first = ""
+	}
+	return latest, first
+}
+
+// architectures are the architectures of a structure's merge (meta
+// name="architecture", a phrase each, entities resolved).
+func architectures(st *Node) []string {
+	mg := st.Child("merge")
+	if mg == nil {
+		return nil
+	}
+	var out []string
+	for _, m := range mg.Elements("meta") {
+		if m.Attr["name"] != "architecture" {
+			continue
+		}
+		for _, p := range m.Elements("phrase") {
+			if v := strings.Join(strings.Fields(plain(p)), " "); v != "" && !slices.Contains(out, v) {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// productFields are the front matter fields of the product and version
+// (Options.Product, Options.Version), on every document.
+func (c *conversion) productFields() [][2]any {
+	var f [][2]any
+	if c.o.Product != "" {
+		f = append(f, [2]any{"product", c.o.Product})
+	}
+	if c.o.Version != "" {
+		f = append(f, [2]any{"version", c.o.Version})
+	}
+	return f
+}
+
+// about is the line under an article's title that says what it is for
+// and how current it is: "SUSE Linux Enterprise High Availability 16.0.
+// Architectures: AMD64/Intel 64, POWER, IBM Z. Created 2026-01-15, last
+// revised 2026-09-18." Each part only when known.
+func (a *article) about(o Options) string {
+	var parts []string
+	if p := strings.TrimSpace(o.Product + " " + o.Version); p != "" {
+		parts = append(parts, p+".")
+	}
+	if len(a.arches) > 0 {
+		parts = append(parts, "Architectures: "+strings.Join(a.arches, ", ")+".")
+	}
+	switch {
+	case a.created != "" && a.date != "":
+		parts = append(parts, fmt.Sprintf("Created %s, last revised %s.", a.created, a.date))
+	case a.date != "":
+		parts = append(parts, fmt.Sprintf("Last revised %s.", a.date))
+	}
+	return strings.Join(parts, " ")
 }
 
 var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

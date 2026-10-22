@@ -2,6 +2,8 @@
 title: "Disabling and reenabling SELinux"
 description: "The topic covers enabling and disabling SELinux via the kernel command-line."
 tags: ["task"]
+product: "SUSE Linux Enterprise Server"
+version: "16.0"
 source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html#selinux-enable-disable"
 ---
 
