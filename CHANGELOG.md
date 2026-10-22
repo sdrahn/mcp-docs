@@ -3,7 +3,7 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.1.1 — 2026-10-22
 
 - `mcp-docs-convert` writes the product and version into every
   document's front matter (`--product`, `--product-version`), and into
