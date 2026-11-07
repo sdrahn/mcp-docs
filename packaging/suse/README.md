@@ -91,6 +91,15 @@ neither mcp-docs nor network access:
 | `/usr/bin/mcp-docs-convert` | the converter of SUSE's DocBook sources into collections ([docs/architecture.md](../../docs/architecture.md), §14) |
 | `/usr/share/mcp-docs-convert/suse-docs/` | `convert` (SLES 16.0, SLE HA 16.0) and `convert-sle-micro` (SUSE Linux Micro 6.0 to 6.2), the lists of their articles, and their README |
 
+A third, `mcp-docs-gateway` (noarch), gives mcp-gateway the server
+`suse-docs`: mcp-docs over the installed collections. It requires
+mcp-docs of the same version and comes with it where mcp-gateway is
+installed (`Supplements: (mcp-docs and mcp-gateway)`):
+
+| Path | What |
+|---|---|
+| `/usr/share/mcp-gateway/servers.d/suse-docs.yaml` | the server definition ([packaging/gateway/suse-docs.yaml.in](../gateway/suse-docs.yaml.in)): `/usr/bin/mcp-docs` in `mcpsrv_docs_t` (mcp-gateway-selinux), a user of its own, no network, Landlock to `/usr/share` and `/etc/mcp-docs` |
+
 A documentation package ships the sources of a revision as a tarball
 and converts them in `%build`; `suse-docs-mcp-sles-16.0` does
 ([packaging/suse-docs](../suse-docs/README.md)):

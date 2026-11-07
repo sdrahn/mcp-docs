@@ -118,4 +118,13 @@ mcp-docs-convert --strict --src "$src/internal/docbook/testdata/doc-modular" --d
 expect 'sles-16.0/topics/selinux-permissive-domains.md'
 expect '#setting-permissive-domain'
 
+# mcp-docs-gateway: the server suse-docs for mcp-gateway, its command
+# the installed mcp-docs (cmd/mcp-docs's TestGatewayDefinition runs it).
+def=/usr/share/mcp-gateway/servers.d/suse-docs.yaml
+rpm -qf "$def" | grep -q '^mcp-docs-gateway-' || fail "$def is not owned by mcp-docs-gateway"
+grep -qx 'name: suse-docs' "$def" || fail "$def: no name suse-docs"
+grep -q '^command: \["/usr/bin/mcp-docs",' "$def" || fail "$def: not the installed mcp-docs: $(grep command "$def")"
+grep -q '@' "$def" && fail "$def: a placeholder left: $(grep '@' "$def")"
+grep -qx 'selinux_type: mcpsrv_docs_t' "$def" && grep -qx 'network: false' "$def" || fail "$def: domain or network"
+
 echo "smoke-test: mcp-docs $version works ($(grep -o 'Landlock.*$' /tmp/smoke.err | head -n 1 || echo 'Landlock: not reported'))"

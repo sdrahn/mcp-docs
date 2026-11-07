@@ -32,8 +32,9 @@ eval:
 # theirs below $(DATADIR)/mcp-docs/collections.d, the administrator's go
 # to $(SYSCONFDIR)/mcp-docs/collections.d. The converter comes with what
 # converts SUSE's documentation (tools/suse-docs), for packages of it.
-# It installs what build built (with its VERSION), building only if
-# nothing was.
+# The server suse-docs for mcp-gateway (packaging/gateway), in the
+# gateway's directory of package-provided servers. It installs what
+# build built (with its VERSION), building only if nothing was.
 install:
 	test -x bin/mcp-docs -a -x bin/mcp-docs-convert || $(MAKE) build
 	install -D -m 0755 bin/mcp-docs $(DESTDIR)$(BINDIR)/mcp-docs
@@ -44,6 +45,10 @@ install:
 	install -m 0755 tools/suse-docs/convert-sle-micro $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/
 	install -m 0644 tools/suse-docs/sles-16.0 tools/suse-docs/sle-ha-16.0 tools/suse-docs/sles-sap-16.0 tools/suse-docs/sle-micro-6.0 tools/suse-docs/sle-micro-6.1 \
 		tools/suse-docs/sle-micro-6.2 tools/suse-docs/README.md $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/
+	install -d -m 0755 $(DESTDIR)$(DATADIR)/mcp-gateway/servers.d
+	sed -e 's|@BINDIR@|$(BINDIR)|g' -e 's|@DATADIR@|$(DATADIR)|g' packaging/gateway/suse-docs.yaml.in \
+		>$(DESTDIR)$(DATADIR)/mcp-gateway/servers.d/suse-docs.yaml
+	chmod 0644 $(DESTDIR)$(DATADIR)/mcp-gateway/servers.d/suse-docs.yaml
 
 clean:
 	rm -rf bin

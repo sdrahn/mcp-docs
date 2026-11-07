@@ -161,6 +161,25 @@ the server's domain `mcpsrv_docs_t`. mcp-gateway also installs its
 documentation as the collection `mcp-gateway`, for agents that run
 mcp-docs themselves.
 
+The package `mcp-docs-gateway` gives the gateway the server `suse-docs`:
+mcp-docs over all the collections installed (SUSE's documentation from
+the `suse-docs-mcp-*` packages, and that of other software, such as
+mcp-gateway's and Custos's), in the same domain, without network and
+under Landlock ([packaging/gateway/suse-docs.yaml.in](packaging/gateway/suse-docs.yaml.in)).
+It installs `/usr/share/mcp-gateway/servers.d/suse-docs.yaml`, which the
+gateway runs beside its other servers; it comes with mcp-docs where
+mcp-gateway is installed:
+
+```sh
+zypper in mcp-docs-gateway suse-docs-mcp-sles-16.0
+```
+
+The gateway's policy decides who may call its tools. An agent needs
+permissions for them, e.g. `{server: suse-docs, tool: find_sections,
+read_only: true}`; Custos's agent templates have them for
+`find_sections`, `search`, `outline` and `read_section`. A replacement
+goes in `/etc/mcp-gateway/servers.d/suse-docs.yaml`.
+
 ## Development
 
 ```sh
