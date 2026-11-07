@@ -1,0 +1,28 @@
+# mcp-gateway server definition: the product documentation installed on
+# this system, served by mcp-docs. Package mcp-docs-gateway installs it
+# as @DATADIR@/mcp-gateway/servers.d/suse-docs.yaml, so the gateway runs
+# it beside the others. Overrides go in
+# /etc/mcp-gateway/servers.d/suse-docs.yaml.
+#
+# Its collections are those of the collection files in
+# @DATADIR@/mcp-docs/collections.d and /etc/mcp-docs/collections.d:
+# SUSE's documentation (packages suse-docs-mcp-sles-16.0 and the other
+# suse-docs-mcp-*), and what other packages install, such as mcp-gateway's
+# and custos-docs's. The tools only read: list_docs, outline, search,
+# find_sections, read_section, read_lines. The gateway's policy decides
+# who may call them (an agent: its permissions, e.g.
+#   - {server: suse-docs, tool: find_sections, read_only: true}).
+version: 1
+name: suse-docs
+command: ["@BINDIR@/mcp-docs",
+  "--instructions", "The product documentation installed on this system: SUSE's documentation of the product and version installed (each article's index and its topics, linked to documentation.suse.com) and that of the software installed with its own documentation. list_docs names the collections. For a question in words use find_sections; for an exact setting, command or error message search, then read_section of the match. Cite the document and section you used. The configuration and state of this machine are not here."]
+# mcp-gateway's domain for mcp-docs (package mcp-gateway-selinux labels
+# @BINDIR@/mcp-docs as its entry point); a user of its own, no network.
+selinux_type: mcpsrv_docs_t
+run_as: dynamic
+network: false
+# Landlock: the documentation lives below @DATADIR@ (the collections'
+# roots) and the collection files below /etc/mcp-docs as well; mcp-docs
+# restricts itself further, to its collections.
+landlock:
+  read: ["@DATADIR@", "/etc/mcp-docs"]

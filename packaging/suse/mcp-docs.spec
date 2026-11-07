@@ -53,6 +53,23 @@ requirement: %{_datadir}/mcp-docs-convert/suse-docs/convert converts
 the documentation of SUSE Linux Enterprise Server 16.0 from a source
 tree of the pinned revision.
 
+%package gateway
+Summary:        The product documentation for mcp-gateway, served by mcp-docs
+License:        MIT
+Group:          Development/Tools/Other
+BuildArch:      noarch
+Requires:       mcp-docs = %{version}
+# Where both are installed: the gateway serves the documentation.
+Supplements:    (mcp-docs and mcp-gateway)
+
+%description gateway
+The server suse-docs for mcp-gateway: mcp-docs serving the documentation
+collections installed on the system (SUSE's documentation from the
+suse-docs-mcp-* packages, and that of other software, such as
+mcp-gateway's and custos-docs's) to the agents and people the gateway's
+policy allows, read-only, without network, in mcp-gateway's domain for
+mcp-docs (mcpsrv_docs_t, from mcp-gateway-selinux) and under Landlock.
+
 %prep
 %autosetup -p1 -a1
 
@@ -77,6 +94,12 @@ go test ./...
 %dir %{_datadir}/mcp-docs/collections.d
 %dir %{_sysconfdir}/mcp-docs
 %dir %{_sysconfdir}/mcp-docs/collections.d
+
+%files gateway
+%license LICENSE
+%dir %{_datadir}/mcp-gateway
+%dir %{_datadir}/mcp-gateway/servers.d
+%{_datadir}/mcp-gateway/servers.d/suse-docs.yaml
 
 %files convert
 %license LICENSE
