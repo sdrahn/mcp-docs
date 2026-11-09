@@ -3,6 +3,16 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- The 16.1 family: SLES, SLE HA and SLES for SAP 16.1, their 87, 19 and
+  71 articles as the collections `sles-16.1`, `sle-ha-16.1` and
+  `sles-sap-16.1` (`PRODUCT=sles-16.1 tools/suse-docs/convert`, …),
+  from `maintenance/SLE16.1`, where the sources are below `en/`;
+  packaged as `suse-docs-mcp-sles-16.1`, `suse-docs-mcp-sle-ha-16.1`
+  and `suse-docs-mcp-sles-sap-16.1`.
+- `mcp-docs-convert` renders question-and-answer sets (`qandaset`).
+
 ## v0.1.2 — 2026-10-22
 
 - SUSE Linux Enterprise Server for SAP applications 16.0: its 42
