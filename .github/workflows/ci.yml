@@ -110,7 +110,7 @@ jobs:
       # sources below en/), three packages from it.
       - name: Documentation packages (suse-docs-mcp-sles-16.1, -sle-ha-16.1, -sles-sap-16.1)
         run: |
-          rev=$(sed -n 's/^%define rev *//p' packaging/suse-docs/sles-16.1/suse-docs-mcp-sles-16.1.spec)
+          rev=$(sed -n 's/^%define rev[[:space:]][[:space:]]*//p' packaging/suse-docs/sles-16.1/suse-docs-mcp-sles-16.1.spec)
           cp "$(tools/suse-docs/source-tarball "$rev" build maintenance/SLE16.1)" ~/rpmbuild/SOURCES/
           for p in sles sle-ha sles-sap; do
             rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/suse-docs/$p-16.1/suse-docs-mcp-$p-16.1.spec
