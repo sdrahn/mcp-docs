@@ -67,7 +67,11 @@ reboot <co xml:id="co-reboot"/></screen>
 <para>See <xref linkend="grp"/>.</para></topic>`)
 	write("snippets/note.xml", doctype+`<note><title>Included</title><para>From a snippet about &prod;.</para></note>`)
 	write("tasks/links.xml", doctype+`<topic xml:id="links" role="task"><title>Next</title>
-<para>Read <xref linkend="install"/> and <xref linkend="gl-dvd"/>.</para></topic>`)
+<para>Read <xref linkend="install"/> and <xref linkend="gl-dvd"/>.</para>
+<qandaset xml:id="faq"><title>Questions</title>
+<qandaentry><question><para>Does it boot?</para></question><answer><para>Yes, from <filename>/boot</filename>.</para><para>Usually.</para></answer></qandaentry>
+<qandaentry><question><para>And then?</para></question><answer><para>Log in.</para></answer></qandaentry>
+</qandaset></topic>`)
 	write("references/terms.xml", doctype+`<topic xml:id="terms" role="reference"><title>Glossary</title>
 <glossdiv xml:id="gl-media"><title>Media</title>
 <glossentry xml:id="gl-dvd"><glossterm>DVD</glossterm><glossdef><para>A disc.</para></glossdef></glossentry>
@@ -114,6 +118,10 @@ reboot <co xml:id="co-reboot"/></screen>
 		if !strings.Contains(x, want) {
 			t.Errorf("install--X.md lacks %q:\n%s", want, x)
 		}
+	}
+	// Questions and answers: the set's title, an item per question.
+	if l := read("topics/links--Z.md"); !strings.Contains(l, "**Questions**\n\n- **Does it boot?**\n\n  Yes, from `/boot`.\n\n  Usually.\n\n- **And then?**\n\n  Log in.\n") {
+		t.Errorf("questions and answers:\n%s", l)
 	}
 	if l := read("topics/links--Z.md"); !strings.Contains(l, "Read [Install](install--Z.md#install) and [DVD](terms.md#gl-media).") {
 		t.Errorf("links--Z.md:\n%s", l)

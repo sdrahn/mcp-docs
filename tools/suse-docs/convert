@@ -1,11 +1,12 @@
 #!/bin/sh
-# Converts the documentation of a SUSE product of the 16.0 family into a
-# collection for mcp-docs: the articles that documentation.suse.com
+# Converts the documentation of a SUSE product of the 16.0 or 16.1 family
+# into a collection for mcp-docs: the articles that documentation.suse.com
 # publishes for it (tools/suse-docs/PRODUCT), from SUSE/doc-modular at a
-# pinned revision of its maintenance/SLE16.0 branch. PRODUCT is sles-16.0
-# (SUSE Linux Enterprise Server, the default), sle-ha-16.0 (SUSE Linux
-# Enterprise High Availability) or sles-sap-16.0 (SUSE Linux Enterprise
-# Server for SAP applications).
+# pinned revision of the family's branch (maintenance/SLE16.0,
+# maintenance/SLE16.1; from 16.1 the sources are below en/). PRODUCT is
+# sles-16.0 (SUSE Linux Enterprise Server, the default), sle-ha-16.0 (SUSE
+# Linux Enterprise High Availability), sles-sap-16.0 (SUSE Linux
+# Enterprise Server for SAP applications), or the same for 16.1.
 #
 #   [PRODUCT=...] tools/suse-docs/convert [OUT [ROOT]]
 #
@@ -27,28 +28,43 @@ rev=a9f708401da072b024e66994c8f15d91250b836e
 branch=maintenance/SLE16.0
 here=$(cd "$(dirname "$0")" && pwd)
 name=${PRODUCT:-sles-16.0}
-case $name in
-sles-16.0)
-	product='SUSE Linux Enterprise Server'
-	site=sles/16.0
-	about='installation, administration, security, virtualization, containers'
-	;;
-sle-ha-16.0)
-	product='SUSE Linux Enterprise High Availability'
-	site=sle-ha/16.0
-	about='cluster installation, fencing and SBD, resources and constraints, maintenance, crmsh and Hawk'
-	;;
-sles-sap-16.0)
-	product='SUSE Linux Enterprise Server for SAP applications'
-	site=sles-sap/16.0
-	about='installing and configuring a system for SAP applications, saptune, Ansible for SAP, and the administration of SLES 16.0 as it applies to them'
+# The family: its branch, the pinned revision, and where the sources are
+# (rev and branch above are 16.0's, which source-tarball reads).
+version=${name##*-}
+subdir=
+case $version in
+16.0) ;;
+16.1)
+	rev=1a9929880092d38b658b5b590578206bb6d4178b
+	branch=maintenance/SLE16.1
+	subdir=en/
 	;;
 *)
-	echo "convert: unknown PRODUCT $name (sles-16.0, sle-ha-16.0, sles-sap-16.0)" >&2
+	echo "convert: unknown version in PRODUCT $name (16.0, 16.1)" >&2
 	exit 2
 	;;
 esac
-version=16.0
+case ${name%-*} in
+sles)
+	product='SUSE Linux Enterprise Server'
+	site=sles/$version
+	about='installation, administration, security, virtualization, containers'
+	;;
+sle-ha)
+	product='SUSE Linux Enterprise High Availability'
+	site=sle-ha/$version
+	about='cluster installation, fencing and SBD, resources and constraints, maintenance, crmsh and Hawk'
+	;;
+sles-sap)
+	product='SUSE Linux Enterprise Server for SAP applications'
+	site=sles-sap/$version
+	about="installing and configuring a system for SAP applications, saptune, Ansible for SAP, and the administration of SLES $version as it applies to them"
+	;;
+*)
+	echo "convert: unknown PRODUCT $name (sles, sle-ha, sles-sap; -16.0 or -16.1)" >&2
+	exit 2
+	;;
+esac
 title="$product $version"
 out=${1:-build/$name}
 
@@ -74,11 +90,11 @@ fi
 
 rm -rf "$out"
 mkdir -p "$out"
-"$convert" --strict --src "$src" --dcs "$here/$name" --out "$out" \
+"$convert" --strict --src "$src/$subdir" --dcs "$here/$name" --out "$out" \
 	--name "$name" --title "$title" --product "$product" --product-version "$version" \
 	--description "The documentation of $title from documentation.suse.com, converted from its DocBook sources." \
 	--site-url "https://documentation.suse.com/$site/html/%s/" \
-	--source-url "https://github.com/SUSE/doc-modular/blob/$rev/%s" \
+	--source-url "https://github.com/SUSE/doc-modular/blob/$rev/$subdir%s" \
 	--revision "$(echo "$rev" | cut -c1-7)"
 
 root=${2:-$(cd "$out" && pwd)}

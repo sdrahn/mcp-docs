@@ -45,6 +45,28 @@ func TestSLESSAP16(t *testing.T) {
 	answeredFirst(t, "sles-sap-16.0", dir, slesSAP16Questions)
 }
 
+// The 16.1 family (tools/suse-docs/convert, PRODUCT=sles-16.1,
+// sle-ha-16.1): the questions of 16.0, which 16.1's documentation answers
+// too. MCP_DOCS_SLES161 and MCP_DOCS_SLE_HA161 name the converted
+// collections. SLES for SAP 16.1 answers 12 of its 16 first: its Agama
+// installation is split into steps none of which answers "install SLES
+// for SAP with Agama" (docs/architecture.md §14.11).
+func TestSLES161(t *testing.T) {
+	dir := os.Getenv("MCP_DOCS_SLES161")
+	if dir == "" {
+		t.Skip("MCP_DOCS_SLES161 is not set (tools/suse-docs/README.md)")
+	}
+	answeredFirst(t, "sles-16.1", dir, sles16Questions)
+}
+
+func TestSLEHA161(t *testing.T) {
+	dir := os.Getenv("MCP_DOCS_SLE_HA161")
+	if dir == "" {
+		t.Skip("MCP_DOCS_SLE_HA161 is not set (tools/suse-docs/README.md)")
+	}
+	answeredFirst(t, "sle-ha-16.1", dir, sleHA16Questions)
+}
+
 // SUSE Linux Micro 6.0, 6.1 and 6.2, one collection, a directory per
 // version (tools/suse-docs/convert-sle-micro): questions asked of one
 // version (doc: its directory) find the answering section of that

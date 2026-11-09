@@ -287,6 +287,31 @@ func (r *renderer) block(n *Node, level int) []block {
 			out = append(out, item("- ", body))
 		}
 		return out
+	case "qandaset", "qandadiv":
+		// Questions and answers as a variablelist is rendered: the set's
+		// title, then an item per question, the question in bold and the
+		// answer under it.
+		var out []block
+		if t := r.title(n); t != "" {
+			out = append(out, block{"**" + t + "**"})
+		}
+		for _, c := range n.Children {
+			switch c.Name {
+			case "", "title", "info", "blockinfo":
+			case "qandaentry":
+				var body []block
+				if q := c.Child("question"); q != nil {
+					body = append(body, block{"**" + strings.Join(r.paragraphText(q.Children), " ") + "**"})
+				}
+				for _, a := range c.Elements("answer") {
+					body = append(body, r.blocks(a.Children, level)...)
+				}
+				out = append(out, item("- ", body))
+			default:
+				out = append(out, r.block(c, level)...)
+			}
+		}
+		return out
 	case "screen", "programlisting", "synopsis", "literallayout", "cmdsynopsis":
 		return []block{fenced(verbatim(n), n.Attr["language"])}
 	case "calloutlist":
