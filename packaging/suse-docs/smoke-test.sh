@@ -6,7 +6,7 @@
 #   packaging/suse-docs/smoke-test.sh [PACKAGE]
 #
 # PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0,
-# suse-docs-mcp-sles-sap-16.0 or suse-docs-mcp-sle-micro.
+# suse-docs-mcp-sles-sap-16.0, the same for 16.1, or suse-docs-mcp-sle-micro.
 set -eu
 
 pkg=${1:-suse-docs-mcp-sles-16.0}
@@ -18,46 +18,46 @@ call() { # id, tool, arguments
 	echo "{\"jsonrpc\":\"2.0\",\"id\":$1,\"method\":\"tools/call\",\"params\":{\"name\":\"$2\",\"arguments\":$3}}"
 }
 case $pkg in
-suse-docs-mcp-sles-16.0)
-	coll=sles-16.0
-	title='SUSE Linux Enterprise Server 16.0'
+suse-docs-mcp-sles-16.[01])
+	coll=${pkg#suse-docs-mcp-}
+	title="SUSE Linux Enterprise Server ${coll##*-}"
 	owned=topics/selinux-switching-modes.md
 	calls() {
-		call 2 find_sections '{"query":"make a SELinux domain permissive"}'
-		call 3 read_section '{"doc":"sles-16.0/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes"}'
-		call 4 find_sections '{"query":"build an RPM package from a live patch"}'
+		call 2 find_sections "{\"query\":\"make a SELinux domain permissive\",\"collection\":\"$coll\"}"
+		call 3 read_section "{\"doc\":\"$coll/topics/selinux-switching-modes.md#sellinux-temporary-mode-changes\"}"
+		call 4 find_sections "{\"query\":\"build an RPM package from a live patch\",\"collection\":\"$coll\"}"
 	}
-	answers='sles-16.0/topics/selinux-permissive-domains.md
+	answers="$coll/topics/selinux-permissive-domains.md
 #setting-permissive-domain
 Changing the SELinux mode temporarily
 setenforce
-#ulp-pack-livepatch'
+#ulp-pack-livepatch"
 	;;
-suse-docs-mcp-sle-ha-16.0)
-	coll=sle-ha-16.0
-	title='SUSE Linux Enterprise High Availability 16.0'
+suse-docs-mcp-sle-ha-16.[01])
+	coll=${pkg#suse-docs-mcp-}
+	title="SUSE Linux Enterprise High Availability ${coll##*-}"
 	owned=topics/ha-sbd-setting-up-diskless.md
 	calls() {
-		call 2 find_sections '{"query":"set up diskless SBD","collection":"sle-ha-16.0"}'
-		call 3 find_sections '{"query":"put a node into maintenance mode","collection":"sle-ha-16.0"}'
-		call 4 read_section '{"doc":"sle-ha-16.0/topics/ha-sbd-setting-up-diskless.md#ha-sbd-setting-up-diskless"}'
+		call 2 find_sections "{\"query\":\"set up diskless SBD\",\"collection\":\"$coll\"}"
+		call 3 find_sections "{\"query\":\"put a node into maintenance mode\",\"collection\":\"$coll\"}"
+		call 4 read_section "{\"doc\":\"$coll/topics/ha-sbd-setting-up-diskless.md#ha-sbd-setting-up-diskless\"}"
 	}
-	answers='sle-ha-16.0/topics/ha-sbd-setting-up-diskless.md
+	answers="$coll/topics/ha-sbd-setting-up-diskless.md
 #ha-maintenance-putting-node-into-maintenance-mode
-Setting up diskless SBD'
+Setting up diskless SBD"
 	;;
-suse-docs-mcp-sles-sap-16.0)
-	coll=sles-sap-16.0
-	title='SUSE Linux Enterprise Server for SAP applications 16.0'
+suse-docs-mcp-sles-sap-16.[01])
+	coll=${pkg#suse-docs-mcp-}
+	title="SUSE Linux Enterprise Server for SAP applications ${coll##*-}"
 	owned=topics/task-convert-sles-to-sap.md
 	calls() {
-		call 2 find_sections '{"query":"revert a saptune solution","collection":"sles-sap-16.0"}'
-		call 3 find_sections '{"query":"convert a SLES system to SLES for SAP","collection":"sles-sap-16.0"}'
-		call 4 read_section '{"doc":"sles-sap-16.0/topics/task-convert-sles-to-sap.md#task-convert-sles-to-sap"}'
+		call 2 find_sections "{\"query\":\"revert a saptune solution\",\"collection\":\"$coll\"}"
+		call 3 find_sections "{\"query\":\"convert a SLES system to SLES for SAP\",\"collection\":\"$coll\"}"
+		call 4 read_section "{\"doc\":\"$coll/topics/task-convert-sles-to-sap.md#task-convert-sles-to-sap\"}"
 	}
-	answers='#sec-saptune-revert-solution
-sles-sap-16.0/topics/task-convert-sles-to-sap.md
-Migrate_SLES_to_SLES-for-SAP.sh'
+	answers="#sec-saptune-revert-solution
+$coll/topics/task-convert-sles-to-sap.md
+Migrate_SLES_to_SLES-for-SAP.sh"
 	;;
 suse-docs-mcp-sle-micro)
 	coll=sle-micro

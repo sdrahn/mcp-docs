@@ -535,8 +535,8 @@ Tools stay the main way in: a resource read cannot carry `depth`,
 7. **HTTP and containers** (done): `--listen`, stateless Streamable
    HTTP (§13); a container image (`packaging/container`), built and
    queried in CI.
-8. **SUSE documentation** (§14; SLES 16.0, SLE HA 16.0, SLES for SAP
-   16.0 and SUSE Linux Micro 6.0 to 6.2 converted, §14.7 to §14.10): a
+8. **SUSE documentation** (§14; SLES, SLE HA and SLES for SAP 16.0 and
+   16.1, and SUSE Linux Micro 6.0 to 6.2 converted, §14.7 to §14.11): a
    converter, `mcp-docs-convert`, from SUSE's DocBook sources to
    Markdown collections, so that the documentation of
    documentation.suse.com is served offline, a section at a time. All 48
@@ -547,8 +547,10 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    (`tools/suse-docs/convert-sle-micro`), packaged as
    `suse-docs-mcp-sle-micro`; SLE HA 16.0's 18 articles as
    `suse-docs-mcp-sle-ha-16.0`; SLES for SAP 16.0's 42 articles as
-   `suse-docs-mcp-sles-sap-16.0`; next, the container image, SLE 15
-   guides after.
+   `suse-docs-mcp-sles-sap-16.0`; the 16.1 family (SLES 87, SLE HA 19,
+   SLES for SAP 71 articles) as `suse-docs-mcp-sles-16.1`,
+   `suse-docs-mcp-sle-ha-16.1` and `suse-docs-mcp-sles-sap-16.1`; next,
+   the container image, SLE 15 guides after.
 9. **Token cost** (§15; phases 1 to 4 done, §15.3 to §15.5 and §15.7, measured in §15.6 and §15.7): a result
    once and compact (`--structured` opt-in), `list_docs` paged, large
    outlines at two levels, `--max-read` 16 KiB; `find_sections` answers
@@ -957,6 +959,36 @@ over 8 KiB, four of them the Ansible deployment procedures for SAP
 (10.8 to 15.3 KiB), which `find_sections` answers from with a passage.
 `TestSLESSAP16`: 13 of 16 questions answered first. Packaged as
 `suse-docs-mcp-sles-sap-16.0`, from SLES 16.0's source tarball.
+
+### 14.11 The 16.1 family
+
+SLES, SLE HA and SLES for SAP 16.1: the 87, 19 and 71 articles the site
+publishes under `/sles/16.1/`, `/sle-ha/16.1/` and `/sles-sap/16.1/`,
+from doc-modular's `maintenance/SLE16.1` at a pinned revision (1a99298).
+On that branch the sources moved below `en/` (doc-modular #854; the
+16.0 branch since too, after the revision 16.0 is pinned at), and
+`topicmaps/` holds images: `convert` takes the family from the product
+(`PRODUCT=sles-16.1`, `sle-ha-16.1`, `sles-sap-16.1`) and with it the
+branch, the revision and the directory the sources are in. Each 16.1
+collection is its own, beside the 16.0 one; the packages install both.
+
+- 725, 147 and 640 documents, nothing lost. 16.1 brought one element the
+  converter did not know, a question-and-answer set (`qandaset`, in the
+  real-time CPU shielding troubleshooting): rendered as a variablelist
+  is, the set's title, then an item per question in bold with its
+  answer.
+- All 1509 source links lead to a page and anchor on the site; the
+  modification dates match for all 177 articles, the architectures as
+  the site shows them, the creation dates for 173: four articles list a
+  last revision of 2026-11-03, after their latest, which the site shows
+  and the converter leaves out (§14.3).
+- The questions of 16.0: `TestSLES161` 13 of 16, `TestSLEHA161` 15 of
+  16 answered first. SLES for SAP 16.1 answers 12 of its 16 first, below
+  the tests' 80%, and has no test: its manual Agama installation is
+  split into a dozen step topics (booting, product selection,
+  registration, storage, …), none of which answers "install SLES for
+  SAP with Agama" alone, and "apply a saptune solution" finds the
+  verification of the tuning before the solutions.
 
 ## 15. Token cost
 

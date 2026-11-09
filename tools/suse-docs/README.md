@@ -67,6 +67,22 @@ PRODUCT=sles-sap-16.0 tools/suse-docs/convert
 MCP_DOCS_SLES_SAP=$PWD/build/sles-sap-16.0 go test -run TestSLESSAP16 -v ./internal/docbook/
 ```
 
+## The 16.1 family
+
+`PRODUCT=sles-16.1`, `sle-ha-16.1` and `sles-sap-16.1` convert SLES,
+SLE HA and SLES for SAP 16.1 (87, 19 and 71 articles, from the site's
+sitemap: `sles-16.1`, `sle-ha-16.1`, `sles-sap-16.1`) from
+`maintenance/SLE16.1` at a pinned revision. On that branch the sources
+are below `en/`; `convert` knows each family's branch, revision and
+directory. For a package, `source-tarball REV DIR maintenance/SLE16.1`
+makes the tarball.
+
+```sh
+PRODUCT=sles-16.1 tools/suse-docs/convert
+MCP_DOCS_SLES161=$PWD/build/sles-16.1 MCP_DOCS_SLE_HA161=$PWD/build/sle-ha-16.1 \
+    go test -run 'TestSLES161|TestSLEHA161' -v ./internal/docbook/
+```
+
 ## SUSE Linux Micro 6.0, 6.1 and 6.2
 
 `convert-sle-micro` makes one collection, `sle-micro`, of the three
