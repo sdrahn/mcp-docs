@@ -576,6 +576,8 @@ Tools stay the main way in: a resource read cannot carry `depth`,
     ranked as one, copies folded, `search` shared among collections;
     next, bounded reads and cheaper file access, an index file in the
     packages, the converter's trust in its sources.
+11. **Fewer calls, fewer tokens** (§17): what is left to gain without a
+    RAG pipeline, measured by an eval of collections served together.
 
 ## 12. Decisions
 
@@ -1547,3 +1549,76 @@ the four together, before as after ("install a three-node cluster",
 before and is second now: "tune the system for SAP HANA with saptune",
 by SLES 16.1's copy of the topic, which SLES for SAP's verification of
 the tuning now precedes, as it does in SLES for SAP alone.
+
+## 17. Fewer calls, fewer tokens
+
+After the review (§16), the server's own time is small: what an answer
+costs is the calls an agent needs for it and what each returns. On the
+four collections of §16.1, a `find_sections` answer is about 2.3 KB
+(~600 tokens); 10 of 48 questions are not answered by the first result,
+and cost a second call; and every session pays about 6.5 KB (~1,600
+tokens) for the tool definitions and the instructions before it asks
+anything. This section is what can still be gained without embeddings
+or a model (D7 stands), in the order it is to be built; each step is
+recorded as it is.
+
+### 17.1 What can be gained
+
+**Fewer calls for an answer**
+
+1. **The system's own product first.** A server on a SLES 16.1 machine
+   ranks the collection of SLES 16.1 before those of other products and
+   versions, without the agent naming one: a collection file says which
+   system it documents, the server compares that with the system it
+   runs on. Wrong-version answers and most repeats across collections
+   go.
+2. **A task of many steps answered by its overview.** When several of
+   the best sections are steps of one article, the article's index is
+   the answer, not one step ("install SLES for SAP with Agama", §14.11).
+3. **Spelling variants at query time.** "roll back" that finds little
+   where the index has "rollback" is asked as that too, and the
+   reverse: a look into the index's words, no model.
+4. **Near-copies folded.** Sections with the same path and id whose
+   texts differ in a word (a product's name) are one result with its
+   variants named, as the same texts are (§16.2).
+
+**Fewer tokens for a call**
+
+5. **`search` leaves the front matter out.** It is 11% of the bytes of
+   SLES 16.1's topics, and a title matches there and in its heading.
+   `find_sections` does not rank it either.
+6. **Fewer tools behind the gateway.** A tool's definition is 750 to
+   1,070 bytes: `find_sections`, `read_section` and `search` in
+   `mcp-docs-gateway`'s definition are half the fixed cost of six.
+7. **The fixed text the same to the byte** between starts and whatever
+   the order of the collection files, so that a client's cache of its
+   prompt holds: to be checked, and pinned by a test.
+
+Not worth it: shorter link targets in the documents (1.7% of the text).
+
+**Time**
+
+8. **One server for a host** (`--listen`): the indexes are read once,
+   not once a session. A deployment, no code.
+9. **`search` for an expression over several documents at a time**: the
+   slowest call left (140 ms), about a third of that on four cores.
+10. **No walk of the collection on every call** where a server runs
+    long: a `find_sections` after the first is mostly one `stat` a
+    document.
+
+**What measures the rest**
+
+11. **An eval of collections served together**: the questions of the
+    collection tests asked without naming a collection, counting those
+    answered first, the results that repeat a topic, and the bytes.
+    Without it, 1 to 4 cannot be told from a guess.
+
+### 17.2 Plan
+
+| Step | What | State |
+|---|---|---|
+| A | The eval (11) | |
+| B | The system's product first (1); `search` without front matter (5) | |
+| C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | |
+| D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
+| E | `search` for expressions in parallel (9), no walk on every call (10) | |
