@@ -297,10 +297,18 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 		return true
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	// The front matter is not searched: it is the document's metadata,
+	// which list_docs shows, and a title there is the heading again
+	// (find_sections does not rank it either). mcp-server-fs's
+	// search_text searches files as they are.
+	skip := 0
+	if !sr.compat {
+		skip = e.Outline.FrontMatter
+	}
 	var hits []int
 	for i, l := range lines {
 		lines[i] = strings.TrimSuffix(l, "\r")
-		if sr.match(lines[i]) {
+		if i >= skip && sr.match(lines[i]) {
 			hits = append(hits, i)
 		}
 	}
@@ -334,7 +342,7 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 		if !sr.compat {
 			// Context stays in the match's section's own text (up to the
 			// next heading), so that every line is shown under its own.
-			first, last := 1, len(lines)
+			first, last := skip+1, len(lines)
 			if sec >= 0 {
 				first = o.Headings[sec].Line
 			}

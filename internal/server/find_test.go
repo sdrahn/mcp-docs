@@ -263,3 +263,76 @@ func TestIndexFileUsed(t *testing.T) {
 		t.Errorf("log of a stale file: %q", log)
 	}
 }
+
+// TestSystemCollectionsFirst: the collection whose index names the
+// system the server runs on is ranked first where collections answer
+// alike, and is the result of a section others hold too.
+func TestSystemCollectionsFirst(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "aaa-1.0", "prod-1.1", "addon-1.1")
+	prod := filepath.Join(t.TempDir(), "addon.prod")
+	write(t, prod, "")
+	index := func(dir, system string) {
+		write(t, filepath.Join(dir, "README.md"), "---\ntitle: Index\nrank: false\n"+system+"---\n\n# Index\n")
+	}
+	index(dirs["aaa-1.0"], `system: {"os_release": {"ID": "prod", "VERSION_ID": "1.0"}}`+"\n")
+	index(dirs["prod-1.1"], `system: {"os_release": {"ID": "prod", "VERSION_ID": "1.1"}}`+"\n")
+	index(dirs["addon-1.1"], `system: {"os_release": {"VERSION_ID": "1.1"}, "file": "`+prod+`"}`+"\n")
+	// The same topic in both versions, and one that differs in a word.
+	for _, c := range []string{"aaa-1.0", "prod-1.1"} {
+		write(t, filepath.Join(dirs[c], "topics/shared.md"), "# Rotating the keys\n\nRotate the keys every month.\n")
+		write(t, filepath.Join(dirs[c], "topics/differs.md"), "# Mounting the volume\n\nMount the volume of version "+c+" first.\n")
+	}
+	write(t, filepath.Join(dirs["addon-1.1"], "topics/fence.md"), "# Fencing a node\n\nFence the node.\n")
+	first := func(s *Server, q string) string {
+		t.Helper()
+		r := call(t, s, "find_sections", map[string]any{"query": q, "read": false})
+		mustOK(t, r)
+		ss := r.Structured["sections"].([]any)
+		if len(ss) == 0 {
+			t.Fatalf("%q: nothing", q)
+		}
+		return ss[0].(map[string]any)["doc"].(string)
+	}
+	on := func(osr map[string]string, prefer []string) *Server {
+		return &Server{Cat: catalog.New(s.Cat.Collections, s.Cat.Exts, s.Cat.MaxEntries), MaxRead: s.MaxRead, MaxFile: s.MaxFile,
+			Structured: true, OSRelease: osr, Prefer: prefer}
+	}
+	// No system known: the first collection's, as before.
+	if got := first(on(nil, nil), "rotate the keys"); got != "aaa-1.0/topics/shared.md" {
+		t.Errorf("no system: %s", got)
+	}
+	// On prod 1.1: its collection's copy is the result, and its variant first.
+	sys := on(map[string]string{"ID": "prod", "VERSION_ID": "1.1"}, nil)
+	if got := first(sys, "rotate the keys"); got != "prod-1.1/topics/shared.md" {
+		t.Errorf("the shared topic on prod 1.1: %s", got)
+	}
+	if got := first(sys, "mount the volume"); got != "prod-1.1/topics/differs.md" {
+		t.Errorf("the differing topic on prod 1.1: %s", got)
+	}
+	// The addon is this system's too (its version, and its file is
+	// there); another product's question is still answered by its own
+	// collection.
+	if !sys.prefers(s.Cat.Collection("addon-1.1")) || sys.prefers(s.Cat.Collection("aaa-1.0")) {
+		t.Error("the addon of 1.1 is preferred on 1.1, and 1.0 is not")
+	}
+	if got := mustOK(t, call(t, sys, "find_sections", map[string]any{"query": "rotate the keys", "read": false})); !strings.Contains(got, "also in aaa-1.0") {
+		t.Errorf("the other version is named: %s", got)
+	}
+	if text := sys.Instructions(); !strings.Contains(text, "- prod-1.1 (this system's)") || strings.Contains(text, "- aaa-1.0 (this system's)") {
+		t.Errorf("instructions: %s", text)
+	}
+	// A system whose file is missing is not the addon's.
+	if err := os.Remove(prod); err != nil {
+		t.Fatal(err)
+	}
+	if on(map[string]string{"ID": "prod", "VERSION_ID": "1.1"}, nil).prefers(s.Cat.Collection("addon-1.1")) {
+		t.Error("the addon is preferred without its file")
+	}
+	// Named collections replace the system's; none is none.
+	if got := first(on(map[string]string{"ID": "prod", "VERSION_ID": "1.1"}, []string{"aaa-1.0"}), "mount the volume"); got != "aaa-1.0/topics/differs.md" {
+		t.Errorf("--prefer aaa-1.0: %s", got)
+	}
+	if on(map[string]string{"ID": "prod", "VERSION_ID": "1.1"}, []string{}).prefers(s.Cat.Collection("prod-1.1")) {
+		t.Error("--prefer none prefers")
+	}
+}

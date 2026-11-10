@@ -3,6 +3,28 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- An eval of collections served together (`make eval-together`,
+  docs/architecture.md §17.3): the questions of SUSE's documentation
+  asked of all its collections at once; CI runs it on the installed
+  packages. 53 of 64 questions are answered first.
+- `find_sections` ranks the collections of the system the server runs
+  on first: a collection's index names its system in its front matter
+  (`system: {"os_release": {"ID": "sles", "VERSION_ID": "16.1"}}`),
+  the server compares it with `/etc/os-release` (`--os-release`), and
+  `--prefer` names collections instead. On a SLES 16.1 system the
+  first result is SLES 16.1's for every question of the eval, where
+  one in seven was another version's or product's, and half as many
+  results repeat a topic. The instructions mark the collection
+  ("this system's").
+- `mcp-docs-convert --system-os-release KEY=VALUE` and `--system-file`
+  write a collection's system into its index; `tools/suse-docs/convert`
+  does for each product.
+- `search` does not match in a document's front matter, nor show it:
+  a title there was the heading again. (`search_text` of `--fs-compat`
+  searches files as they are.)
+
 ## v0.2.0 — 2026-11-10
 
 The result of a review of the code (docs/architecture.md §16, with what

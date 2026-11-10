@@ -76,6 +76,7 @@ done
 title: "SUSE Linux Micro 6.0, 6.1 and 6.2"
 description: "The documentation of SUSE Linux Micro 6.0, 6.1 and 6.2 from documentation.suse.com, a directory per version."
 rank: false
+system: {"os_release": {"ID": "sl-micro"}}
 ---
 
 # SUSE Linux Micro 6.0, 6.1 and 6.2

@@ -53,6 +53,11 @@ func main() {
 	flag.StringVar(&o.Product, "product", "", "the product the articles document, in every document's front matter (SUSE Linux Enterprise Server)")
 	flag.StringVar(&o.Version, "product-version", "", "the product's version, with --product (16.0)")
 	flag.IntVar(&o.MaxSection, "max-section", 8<<10, "report sections whose own text is over this many bytes (0: none)")
+	var osRelease list
+	flag.Var(&osRelease, "system-os-release", "a field of /etc/os-release of the system the collection documents, KEY=VALUE "+
+		"(ID=sles; more than one for more fields): a server on such a system ranks the collection first")
+	flag.StringVar(&o.SystemFile, "system-file", "", "a file the system the collection documents has (an installed product's: "+
+		"/etc/products.d/sle-ha.prod), with or without --system-os-release")
 	index := flag.String("index", "", "write the index file of the collection in this directory ("+rank.FileName+
 		") and exit: the last step of making a collection, after its last document is written")
 	strict := flag.Bool("strict", false, "fail when an element, entity or link could not be converted")
@@ -68,6 +73,17 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+	for _, f := range osRelease {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok || k == "" {
+			fmt.Fprintf(os.Stderr, "mcp-docs-convert: --system-os-release %q: give KEY=VALUE\n", f)
+			os.Exit(2)
+		}
+		if o.SystemOSRelease == nil {
+			o.SystemOSRelease = map[string]string{}
+		}
+		o.SystemOSRelease[k] = v
 	}
 	o.DCs = dcs
 	if *dcFile != "" {

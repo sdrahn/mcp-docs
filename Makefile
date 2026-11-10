@@ -7,7 +7,7 @@ GO         ?= go
 # Position-independent executables, as openSUSE's rpmlint asks for.
 BUILDMODE  ?= pie
 
-.PHONY: all build test check eval install clean
+.PHONY: all build test check eval eval-together install clean
 
 all: build
 
@@ -27,6 +27,12 @@ check:
 # per question against reading the whole document.
 eval:
 	$(GO) test -count=1 -run TestCost -v ./internal/eval
+
+# The collections of MCP_DOCS_TOGETHER asked together, no collection
+# named (docs/architecture.md §17): questions answered first, results
+# repeating a topic, bytes.
+eval-together:
+	$(GO) test -count=1 -run TestTogether -v ./internal/eval
 
 # The programs, and the directories of collection files: packages ship
 # theirs below $(DATADIR)/mcp-docs/collections.d, the administrator's go

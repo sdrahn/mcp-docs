@@ -122,6 +122,12 @@ jobs:
             packaging/suse-docs/smoke-test.sh suse-docs-mcp-$p-16.1
             packaging/suse-docs/smoke-test.sh suse-docs-mcp-$p-16.0
           done
+      # All the collections are installed now: their questions asked of
+      # them together, no collection named (docs/architecture.md §17).
+      - name: Collections served together
+        run: |
+          MCP_DOCS_TOGETHER=/usr/share/mcp-docs/docs/suse EVAL_REPORT="$GITHUB_STEP_SUMMARY" \
+            go test -count=1 -run TestTogether -v ./internal/eval
 
   # The container image (packaging/container), built as a user builds it,
   # then run as a container runtime runs it: read-only, any user.

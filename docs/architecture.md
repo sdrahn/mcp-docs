@@ -572,10 +572,12 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    in one call; shorter tool descriptions and `--tools`; the eval
    measuring both ways clients forward results; `rank: false`, the
    converter's compact index and its report of large sections.
-10. **Review** (§16; steps 0 and 1 done): benchmarks, the collections
-    ranked as one, copies folded, `search` shared among collections;
-    next, bounded reads and cheaper file access, an index file in the
-    packages, the converter's trust in its sources.
+10. **Review** (§16; done, released as 0.2.0): benchmarks, the
+    collections ranked as one, copies folded, `search` shared among
+    collections, bounded reads and cheaper file access, an index file
+    in the packages, a converter that keeps to its sources.
+11. **Fewer calls, fewer tokens** (§17): what is left to gain without a
+    RAG pipeline, measured by an eval of collections served together.
 
 ## 12. Decisions
 
@@ -1547,3 +1549,181 @@ the four together, before as after ("install a three-node cluster",
 before and is second now: "tune the system for SAP HANA with saptune",
 by SLES 16.1's copy of the topic, which SLES for SAP's verification of
 the tuning now precedes, as it does in SLES for SAP alone.
+
+## 17. Fewer calls, fewer tokens
+
+After the review (§16), the server's own time is small: what an answer
+costs is the calls an agent needs for it and what each returns. On the
+four collections of §16.1, a `find_sections` answer is about 2.3 KB
+(~600 tokens); 10 of 48 questions are not answered by the first result,
+and cost a second call; and every session pays about 6.5 KB (~1,600
+tokens) for the tool definitions and the instructions before it asks
+anything. This section is what can still be gained without embeddings
+or a model (D7 stands), in the order it is to be built; each step is
+recorded as it is.
+
+### 17.1 What can be gained
+
+**Fewer calls for an answer**
+
+1. **The system's own product first.** A server on a SLES 16.1 machine
+   ranks the collection of SLES 16.1 before those of other products and
+   versions, without the agent naming one: a collection file says which
+   system it documents, the server compares that with the system it
+   runs on. Wrong-version answers and most repeats across collections
+   go.
+2. **A task of many steps answered by its overview.** When several of
+   the best sections are steps of one article, the article's index is
+   the answer, not one step ("install SLES for SAP with Agama", §14.11).
+3. **Spelling variants at query time.** "roll back" that finds little
+   where the index has "rollback" is asked as that too, and the
+   reverse: a look into the index's words, no model.
+4. **Near-copies folded.** Sections with the same path and id whose
+   texts differ in a word (a product's name) are one result with its
+   variants named, as the same texts are (§16.2).
+
+**Fewer tokens for a call**
+
+5. **`search` leaves the front matter out.** It is 11% of the bytes of
+   SLES 16.1's topics, and a title matches there and in its heading.
+   `find_sections` does not rank it either.
+6. **Fewer tools behind the gateway.** A tool's definition is 750 to
+   1,070 bytes: `find_sections`, `read_section` and `search` in
+   `mcp-docs-gateway`'s definition are half the fixed cost of six.
+7. **The fixed text the same to the byte** between starts and whatever
+   the order of the collection files, so that a client's cache of its
+   prompt holds: to be checked, and pinned by a test.
+
+Not worth it: shorter link targets in the documents (1.7% of the text).
+
+**Time**
+
+8. **One server for a host** (`--listen`): the indexes are read once,
+   not once a session. A deployment, no code.
+9. **`search` for an expression over several documents at a time**: the
+   slowest call left (140 ms), about a third of that on four cores.
+10. **No walk of the collection on every call** where a server runs
+    long: a `find_sections` after the first is mostly one `stat` a
+    document.
+
+**What measures the rest**
+
+11. **An eval of collections served together**: the questions of the
+    collection tests asked without naming a collection, counting those
+    answered first, the results that repeat a topic, and the bytes.
+    Without it, 1 to 4 cannot be told from a guess.
+
+### 17.2 Plan
+
+| Step | What | State |
+|---|---|---|
+| A | The eval (11) | done (§17.3) |
+| B | The system's product first (1); `search` without front matter (5) | done (§17.4) |
+| C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | |
+| D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
+| E | `search` for expressions in parallel (9), no walk on every call (10) | |
+
+### 17.3 The eval of collections served together
+
+`internal/eval/together_test.go` (`make eval-together`) asks the
+questions of the collection tests (`internal/eval/suse.go`: 16 each of
+SLES, SLE HA, SLES for SAP and SLE Micro, with the ids of the sections
+that answer) of all collections at once, with `find_sections` as an
+agent calls it that names nothing. For each product's questions and for
+all, it reports:
+
+- the questions **answered first**: the first result is an answering
+  section, or the part of it whose text the answer holds;
+- the **results repeating a topic**: a result of the document and
+  section an earlier result of the same answer has, in another
+  collection or version;
+- the **bytes** of the answers, and of one.
+
+The collections are not in the repository: `MCP_DOCS_TOGETHER` names a
+directory whose subdirectories they are, and without it the test is
+skipped. CI runs it at the end of the package job, where all seven
+`suse-docs-mcp-*` packages are installed
+(`/usr/share/mcp-docs/docs/suse`), and writes the table into the job's
+summary. With those seven, at their pinned revisions, a run must not
+answer fewer questions first nor repeat more than the floors in the
+test, which are raised when a change does better.
+
+The floors, as first measured (0.2.0):
+
+| Questions of | Answered first | Results repeating a topic | A question |
+|---|---|---|---|
+| SLE HA | 13 of 16 | 7 | 2,786 B |
+| SLE Micro | 15 of 16 | 12 | 2,579 B |
+| SLES | 13 of 16 | 11 | 2,143 B |
+| SLES for SAP | 12 of 16 | 8 | 2,381 B |
+| **all** | **53 of 64** | **38** | **2,472 B** |
+
+### 17.4 The system's collections first; `search` without front matter
+
+**Which collections are a system's.** A collection's index says which
+system it documents, in its front matter:
+
+```yaml
+system: {"os_release": {"ID": "sles", "VERSION_ID": "16.1"}}
+```
+
+`os_release` are fields of the system's `/etc/os-release` that must be
+these (values as strings: `"16.1"`); `file`, a file the system has, for
+what os-release does not tell (an extension's product file). A server
+compares them with the system it runs on (`--os-release`, default
+`/etc/os-release`) the first time it ranks, and logs what it found
+("this system's collections, ranked first: sles-16.1"). `--prefer`
+names the collections instead, or `none`. The index, and not the
+collection file: a server before this one refuses a collection file
+with a field it does not know, and the documentation packages do not
+require a server's version; front matter it does not know, it ignores.
+
+`mcp-docs-convert` writes it (`--system-os-release KEY=VALUE`,
+`--system-file`), and `tools/suse-docs/convert` says for each product:
+
+| Collection | A system's if |
+|---|---|
+| `sles-V` | `ID=sles`, `VERSION_ID=V` |
+| `sles-sap-V` | `ID=sles_sap`, `VERSION_ID=V` |
+| `sle-ha-V` | `VERSION_ID=V`, and `/etc/products.d/sle-ha.prod` is there |
+| `sle-micro` | `ID=sl-micro` (its versions are directories of one collection: the agent names the version's, as the collection's instructions say) |
+
+Only SLES's are from a system looked at; the others are as their
+products have named themselves so far, **to be confirmed on a system of
+each**. Where one is wrong, the collection is not preferred, and
+everything is as without.
+
+**What being first means.** In `find_sections`, a preferred
+collection's scores are multiplied by 1.25, and of a section that
+several collections hold with the same text, the preferred one's is
+the result and the others its copies. The instructions mark the
+collection ("this system's"), so that an agent that names a collection
+names that one. Nothing is left out: another product's collection
+still answers its questions.
+
+The factor is from the eval (`TestTogetherOnSystems`: servers on SLES
+16.1, SLES 16.1 with SLE HA, SLES for SAP 16.1, SLES 16.0 and SLE
+Micro, asked their products' questions, and one on SLES 16.1 asked
+those of SLE HA and SLES for SAP, which it is not):
+
+| Factor | Own products' questions: answered first | first result of the system's collection | results repeating a topic | Other products' questions answered first |
+|---|---|---|---|---|
+| 1 (none) | 79 of 96 | 83 | 60 | 25 of 32 |
+| 1.1 | 80 | 95 | 39 | |
+| **1.25** | 79 | **96** | **31** | **26** |
+| 1.5 | 79 | 96 | 25 | 21 |
+| 2 | 79 | 96 | 13 | 16 |
+
+So the preference does not answer more questions first: the questions
+missed are missed by the product's own collection too, and want steps
+C. What it changes is which version answers, always the system's
+where 13 of 96 answers were another version's or product's, and half
+the repeats. A larger factor removes more repeats and then puts the
+system's passing mentions before another product's answer.
+
+**`search` leaves the front matter out** (not `search_text` of
+`--fs-compat`, which searches files as they are): no match in it, and
+none of its lines as context. One call returns as much as before where
+it fills its limit, of other lines: ten searches of SLES for SAP 16.1
+showed 94 lines of front matter among 215 matching lines, and now
+none, and reach 69 documents where they reached 63.

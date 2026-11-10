@@ -95,6 +95,20 @@ type Meta struct {
 	// ranking: a license, a legal notice, a changelog. It is still
 	// listed, searched and read.
 	Unranked bool `yaml:"-"`
+	// System ("system:", in a collection's index) is the system the
+	// collection documents: what a server compares with the system it
+	// runs on, to rank that system's collection first (§17.4).
+	System *System `yaml:"-"`
+}
+
+// System names a system by what it tells of itself.
+type System struct {
+	// OSRelease are fields of /etc/os-release that must be these
+	// (ID: sles, VERSION_ID: "16.1").
+	OSRelease map[string]string
+	// File, if set, is a file the system has (an installed product's:
+	// /etc/products.d/sle-ha.prod).
+	File string
 }
 
 // SummaryLength bounds a summary.
@@ -211,6 +225,23 @@ func parseMeta(lines []string) Meta {
 	}
 	if r, ok := raw["rank"].(bool); ok && !r {
 		m.Unranked = true
+	}
+	if sys, ok := raw["system"].(map[string]any); ok {
+		s := &System{OSRelease: map[string]string{}}
+		if osr, ok := sys["os_release"].(map[string]any); ok {
+			for k, v := range osr {
+				if x, ok := v.(string); ok {
+					s.OSRelease[k] = x
+				}
+			}
+		}
+		if f, ok := sys["file"].(string); ok {
+			s.File = f
+		}
+		// A system that names nothing is every system: none.
+		if len(s.OSRelease) > 0 || s.File != "" {
+			m.System = s
+		}
 	}
 	switch t := raw["tags"].(type) {
 	case []any:

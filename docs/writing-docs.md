@@ -320,6 +320,13 @@ For documentation installed on a system and served by mcp-docs:
 - Document the installed version. An agent on a machine asks about the
   software there; say which version a document describes when it
   matters, and keep upgrade notes in the changelog.
+- Say which system the documentation is of, where it is of one: in
+  the front matter of the collection's index,
+  `system: {"os_release": {"ID": "sles", "VERSION_ID": "16.1"}}`
+  (fields of the system's `/etc/os-release`; `"file"` for a file only
+  such a system has). A server on that system ranks the collection
+  before those of other versions and products, and tells the agent
+  which it is.
 - Ship the collection's index file. Without one, every session's first
   `find_sections` reads and indexes all documents (0.4 s for 1,650 of
   them); with `mcp-docs.index` in the collection's directory it reads
