@@ -31,12 +31,15 @@ mcp-docs reads a document as a tree of sections:
   and a size in lines and bytes.
 - `outline` lists the headings with ids and sizes; `search` gives each
   match with the section it is in; `find_sections` ranks sections for a
-  question in words, a section's own title counting most;
-  `read_section` returns one section, and a section larger than one
-  call (16 KiB by default) in parts.
+  question in words, a section's own title counting most, and returns
+  the best one's text with the list; `read_section` returns one
+  section, and a section larger than one call (16 KiB by default) in
+  parts.
 - The document's **title** and **description** come from its front
   matter, or else from its first `#` heading and its first paragraph;
-  `list_docs` shows them for every document.
+  `list_docs` shows them for every document. Other front matter (a product, a version, dates) is in the
+  file but not in what the tools show: what an agent must know to
+  answer, such as the version a page is for, belongs in the text too.
 
 What the scanner does not see as headings: lines in fenced code blocks
 (` ``` ` or `~~~`), indented code, `#tag` without a space, and setext
@@ -67,14 +70,31 @@ section that explains it.
 
 | Section size | What an agent does |
 |---|---|
-| up to 8 KiB (about 2,000 tokens) | reads the section whole: the cheap case |
+| up to 4 KiB (about 1,000 tokens) | gets it whole with the `find_sections` that finds it: one call, the cheapest case |
+| 4 to 8 KiB | `find_sections` gives its best-matching subsection, or a passage of at most 2 KiB around the matching words, and lists the other parts; the agent reads the section whole in a second call if it needs to |
 | 8 to 16 KiB | reads the lines around a match, or the section's introduction and outline (`depth: 0`), then a subsection |
 | over 16 KiB (the default `--max-read`) | gets it in parts, with the outline of the rest after each |
 
 Aim for sections of a few hundred bytes to a few KiB, each answering
-one question. When a section grows past 8 KiB, split it with `###`
+one question: under 4 KiB, the question is answered in the call that
+finds the section. When a section grows past 8 KiB, split it with `###`
 headings rather than letting it grow: a subsection can be read alone,
-a paragraph in the middle of a long section cannot.
+a paragraph in the middle of a long section cannot. Between 4 and
+8 KiB, subsections whose headings name what they answer are what
+`find_sections` can choose from; without them it can only cut a
+passage.
+
+### A task split into steps needs an overview
+
+Splitting has a limit: the question has to be answered somewhere. When
+a long procedure is split into a section per step, no step answers
+"how do I do the whole thing", and a search for it finds one step or
+none first. SLES for SAP 16.1's manual installation is a dozen step
+topics (booting, product selection, registration, storage, …): "install
+SLES for SAP with Agama" is answered by none of them alone. Give such a
+task a short section of its own, under the task's name, that lists the
+steps in order with a sentence and a link each: it answers the question
+whole, and each link leads to a step's detail.
 
 Very small sections are not a problem in themselves, but a section of
 one line under its own heading usually belongs with its neighbours.
@@ -138,7 +158,9 @@ tags: [upgrade, migration]
 `rank: false` keeps a document out of the ranking of `find_sections`
 (it is still listed, searched and read): for a license, a legal notice
 or a changelog, text that shares many words with questions and answers
-none of them.
+none of them, and for navigation, such as an index or a page that only
+lists other pages' titles, which shares the words of every question it
+links to and should not come before the page that answers.
 
 Without front matter, the first `#` heading is the title and the first
 paragraph is the description, cut to 200 characters. Then make that
@@ -198,7 +220,10 @@ it stands alone:
 - Avoid "as described above" and "see the previous section". Link to
   the section instead, with its anchor: `[approval scopes](07-approvals.md#scopes-and-grants)`.
   An agent can follow such a link as it is: `read_section` takes
-  `user-guide/07-approvals.md#scopes-and-grants`.
+  `user-guide/07-approvals.md#scopes-and-grants`. Link to the Markdown
+  document, relative to the linking one, not to a published `.html`
+  page or a file in `images/`: the agent can read only what is in the
+  collection.
 - Define a term where it is used, or link to its definition.
 - Keep the conditions with the instruction: "On SLES 16, enable the
   repository first:" rather than a condition three paragraphs earlier.
@@ -224,6 +249,23 @@ the right place first:
   link to them from the table.
 - **Use one name for one thing.** A server called "gateway-docs" in one
   chapter and "the documentation server" in another is two searches.
+  The same goes for spellings: "roll back" and "rollback", "set up" and
+  "setup" are different words to `find_sections`. Use one, and where
+  readers use both (the noun and the verb, a command and the task),
+  write the other once near the top of the section.
+- **Write names with ordinary spaces.** Agents type spaces. A name
+  written with no-break spaces (`SLES&nbsp;for&nbsp;SAP`, as typesetting
+  does to keep it on one line) is another string to tools that match
+  text. mcp-docs' `search` matches no-break spaces as spaces (from the
+  release after 0.1.3); other tools may not, and `find_sections` ranks
+  words either way.
+- **Keep one copy of each text.** Two copies of a text, such as a
+  glossary in every guide or a shared topic included in several, are
+  two matches of the same weight: the agent reads both or guesses.
+  Keep one copy and link to it. Where versions differ, keep each
+  version in its own collection or directory, and let the agent choose
+  it (`doc` scopes `search` and `find_sections` to a directory) rather
+  than mixing versions in one text.
 
 ## The index document
 
@@ -240,7 +282,12 @@ introduction:
   configuration on the machine, another server, another package).
 
 Keep it under a few KiB: agents read it whole. mcp-gateway's
-`docs/README.md` is an example.
+`docs/README.md` is an example. For a large collection, list titles
+grouped by task, one line each, rather than a table with a
+description per document: SLES 16.0's index of 48 articles went from
+9.6 KB to 5.2 KB that way, and the descriptions are still in
+`list_docs`. Give the index `rank: false` (see [front
+matter](#front-matter-if-you-have-metadata)).
 
 ## Tables, code and images
 
@@ -335,7 +382,8 @@ the right section. Run it again when the documentation changes.
 
 - [ ] One `#` title per document, then `##` and `###`, no skipped levels.
 - [ ] A short introduction under the title; the substance under `##`.
-- [ ] Sections answer one question each, mostly under 8 KiB.
+- [ ] Sections answer one question each, mostly under 4 KiB, none over 8 KiB without subsections.
+- [ ] A task split into steps has an overview section that answers it whole.
 - [ ] Items read one at a time (steps, decisions, releases) have headings.
 - [ ] Fences closed; ATX headings only.
 - [ ] Headings say what the section answers, in the readers' words; no duplicate titles.
@@ -343,7 +391,12 @@ the right section. Run it again when the documentation changes.
 - [ ] Explicit `{#id}` on sections other documents link to.
 - [ ] Each section readable alone; links with anchors instead of "above".
 - [ ] Keys, options, paths and error messages written exactly, explained in one place.
+- [ ] One copy of each text; versions in their own collections or directories.
+- [ ] One spelling per term; names with ordinary spaces.
+- [ ] Links to Markdown documents and anchors, not to `.html` pages.
 - [ ] A title and a summary first paragraph, or front matter.
-- [ ] An index document that maps questions to sections.
+- [ ] Product, version and dates in the text, not only in front matter.
+- [ ] `rank: false` on legal notices, changelogs and navigation pages.
+- [ ] A compact index document that maps questions to sections.
 - [ ] Diagrams described in text.
 - [ ] Installed outside `%doc`, with a collection file.
