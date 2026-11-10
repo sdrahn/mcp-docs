@@ -3,6 +3,12 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- `search` matches no-break spaces as spaces: a query "SLES for SAP"
+  finds the lines that write it with no-break spaces, as SUSE's
+  documents do.
+
 ## v0.1.3 — 2026-11-09
 
 - The 16.1 family: SLES, SLE HA and SLES for SAP 16.1, their 87, 19 and

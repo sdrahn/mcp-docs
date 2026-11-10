@@ -262,6 +262,9 @@ RE2, caps, `truncated`, binary files skipped), over documents rather
 than paths, and with **each match placed in its section**: the
 section's id, its heading path, and its size. Matches are grouped by
 section, so ten hits in one section read as one place.
+No-break spaces in a line match spaces in the query (and `\s` in an
+expression): SUSE's documents write names such as "SLES for SAP" with
+them, and an agent types spaces.
 
 ```
 mcp-gateway/user-guide/03-configuration.md
