@@ -3,24 +3,40 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.3.0 — 2026-11-10
+
+Fewer calls for an answer and fewer tokens for a call
+(docs/architecture.md §17), each change measured by a new eval of
+collections served together: on a system, its own product's and
+version's collection answers first; a topic that several collections
+hold is one result; a question finds what the documents spell another
+way. The documentation packages are to be rebuilt with this release's
+`mcp-docs-convert`: it writes into each collection's index which
+system the collection is of.
 
 - An eval of collections served together (`make eval-together`,
   docs/architecture.md §17.3): the questions of SUSE's documentation
   asked of all its collections at once; CI runs it on the installed
-  packages. 53 of 64 questions are answered first.
+  packages. 55 of 64 questions are answered first, from 53 with
+  0.2.0, and 1 result repeats a topic, from 38.
 - `find_sections` ranks the collections of the system the server runs
   on first: a collection's index names its system in its front matter
-  (`system: {"os_release": {"ID": "sles", "VERSION_ID": "16.1"}}`),
-  the server compares it with `/etc/os-release` (`--os-release`), and
-  `--prefer` names collections instead. On a SLES 16.1 system the
+  (`system: {"os_release": {"VERSION_ID": "16.1"}, "file":
+  "/etc/products.d/SLES.prod"}`), the server compares it with
+  `/etc/os-release` (`--os-release`) and the file, and `--prefer`
+  names collections instead. On a SLES 16.1 system the
   first result is SLES 16.1's for every question of the eval, where
   one in seven was another version's or product's, and half as many
   results repeat a topic. The instructions mark the collection
   ("this system's").
 - `mcp-docs-convert --system-os-release KEY=VALUE` and `--system-file`
   write a collection's system into its index; `tools/suse-docs/convert`
-  does for each product.
+  does for each product, by the product's file in `/etc/products.d`
+  (SUSE Linux Micro 6.2 is `ID=sles`, `VERSION_ID=16.0` in its
+  os-release). SLES's and SUSE Linux Micro's are as on their systems;
+  SLES for SAP's (`SLES_SAP.prod`) and SLE HA's (`sle-ha.prod`) are
+  not confirmed on one yet: where a name is wrong, the collection is
+  ranked as without.
 - `search` does not match in a document's front matter, nor show it:
   a title there was the heading again. (`search_text` of `--fs-compat`
   searches files as they are.)
@@ -44,10 +60,6 @@ OBS changelog entry (packaging/suse/README.md).
 - With `--listen`, the server watches its collections' directories
   and no longer walks them on every `find_sections`: 0.6 ms for a
   later call across four collections, from 5 ms.
-- The systems of SUSE's collections are told by their products' files
-  (`/etc/products.d/SL-Micro.prod`, `SLES.prod`, …): SUSE Linux Micro
-  6.2 is `ID=sles`, `VERSION_ID=16.0` in its os-release, which made
-  SLES 16.0's collection that system's.
 
 ## v0.2.0 — 2026-11-10
 
