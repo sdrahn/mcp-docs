@@ -1460,3 +1460,50 @@ made once and served often has its index written once instead: the file
   289 ms; the answers are the same (`TestIndexFilesAnswerAsBuilt`
   compares sections, scores and sums on the collections of
   `MCP_DOCS_BENCH`).
+
+### 16.4 Before and after
+
+The server before the review (main at d3b7e9b, 0.1.3 and the no-break
+spaces of `search`) and after steps 0 to 3, as programs: a stdio
+session each, the time from a request to its answer (medians), with the
+four collections of §16.1 (1,652 documents, 9.3 MB; 4 cores).
+
+| | before | after |
+|---|---|---|
+| the first `find_sections` of a session | 394 ms | 36 ms with the collections' index files; 451 ms without (the index's sums of the units' text) |
+| peak memory after it | 39 MB | 21 MB with index files; 38 MB without |
+| `find_sections`, later ones, all collections | 12.8 ms | 5.0 ms |
+| `find_sections`, later ones, one collection (SLES 16.1) | 5.4 ms | 2.7 ms |
+| `search`, a text, all collections | 107 ms | 27 ms |
+| `search`, an expression | 199 ms | 140 ms |
+| `list_docs`, a page of SLES 16.1 | 6.8 ms | 3.8 ms |
+| `read_section`, a section of 1 KiB | 0.1 ms | 0.1 ms |
+| `read_lines` of a 64 MiB document without a range | 114 ms | 0.3 ms |
+| peak memory after `outline`, `read_lines` and `read_section` of that document | 321 MB | 14 MB |
+
+What a client pays in tokens, and what it gets for them: the 48
+questions of the collection tests (SLES, SLE HA, SLES for SAP) asked of
+the four collections together, without naming one, as an agent does
+that does not know where the answer is.
+
+| | before | after |
+|---|---|---|
+| questions whose answering section is the first result (its text is in the answer) | 35 of 48 | 38 of 48 |
+| results that repeat a topic of the same answer (the same path and section in another collection) | 35 | 15 (those whose text differs between the collections) |
+| the answers together | 114.5 KB, ~28.6k tokens | 112.5 KB, ~28.1k tokens |
+| per question | 2,386 B | 2,345 B |
+| `tools/list` and `initialize` | 5,122 B and 1,410 B | the same |
+| the eval's 20 questions on mcp-gateway's documentation (one collection) | 67.2 KiB | 67.2 KiB |
+
+The tokens of an answer are as before: the review did not change what
+a result says, but which sections it is of. A question whose section
+is not first costs the agent a second call (a section of about 2 KB,
+or a search): three questions fewer need one, and a result's other
+places are no longer spent on copies. Of the ten questions still not
+answered first, seven are not answered first by any of the collections
+asked alone either (§14). Two are answered by SLE HA alone and not by
+the four together, before as after ("install a three-node cluster",
+"put the whole cluster into maintenance mode"). One was answered first
+before and is second now: "tune the system for SAP HANA with saptune",
+by SLES 16.1's copy of the topic, which SLES for SAP's verification of
+the tuning now precedes, as it does in SLES for SAP alone.
