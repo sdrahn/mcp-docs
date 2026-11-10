@@ -91,8 +91,9 @@ func togetherServer(t *testing.T) (*server.Server, []string) {
 		t.Skipf("%s: no collections", root)
 	}
 	sort.Strings(names)
+	// No system: the collections as they rank by themselves.
 	return &server.Server{Cat: catalog.New(colls, []string{".md"}, 100000), MaxRead: 16 << 10, MaxFile: 16 << 20,
-		Structured: true, Version: "eval"}, names
+		Structured: true, Version: "eval", Prefer: []string{}}, names
 }
 
 // ask asks find_sections a family's questions, of all collections.
@@ -139,6 +140,98 @@ func ask(t *testing.T, s *server.Server, questions []Question) tally {
 	}
 	return out
 }
+
+// systems are the systems the eval is run as: the collections a server
+// there prefers (those whose index names the system), and the products
+// whose questions someone on that system asks.
+var systems = []struct {
+	name     string
+	prefer   []string
+	families []string
+}{
+	{"SLES 16.1", []string{"sles-16.1"}, []string{"sles"}},
+	{"SLES 16.1 with SLE HA", []string{"sles-16.1", "sle-ha-16.1"}, []string{"sles", "sle-ha"}},
+	{"SLES for SAP 16.1", []string{"sles-sap-16.1"}, []string{"sles-sap"}},
+	{"SLES 16.0", []string{"sles-16.0"}, []string{"sles"}},
+	{"SLE Micro", []string{"sle-micro"}, []string{"sle-micro"}},
+	// Questions of products the system is not: their collections must
+	// still answer, before the system's passing mentions.
+	{"SLES 16.1, asked about SLE HA and SLES for SAP", []string{"sles-16.1"}, []string{"sle-ha", "sles-sap"}},
+}
+
+// askAs asks as ask does, on a system: it also counts the answers whose
+// first result is of one of the system's collections.
+func askAs(t *testing.T, s *server.Server, prefer []string, questions []Question) (tally, int) {
+	t.Helper()
+	var out tally
+	own := 0
+	for _, q := range questions {
+		one := ask(t, s, []Question{q})
+		out.add(one)
+		p, _ := json.Marshal(map[string]any{"name": "find_sections", "arguments": map[string]any{"query": q.Ask, "read": false, "maxResults": 1}})
+		res, err := s.Handle(context.Background(), "tools/call", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(res)
+		var r struct {
+			S struct{ Sections []struct{ Doc string } } `json:"structuredContent"`
+		}
+		_ = json.Unmarshal(b, &r)
+		if len(r.S.Sections) > 0 && slices.ContainsFunc(prefer, func(c string) bool { return strings.HasPrefix(r.S.Sections[0].Doc, c+"/") }) {
+			own++
+		}
+	}
+	return out, own
+}
+
+// TestTogetherOnSystems: the same, as servers on systems whose
+// collections they prefer.
+func TestTogetherOnSystems(t *testing.T) {
+	base, names := togetherServer(t)
+	rows := []string{}
+	var total tally
+	totalOwn := 0
+	for _, sys := range systems {
+		if !slices.ContainsFunc(sys.prefer, func(c string) bool { return slices.Contains(names, c) }) {
+			continue
+		}
+		s := &server.Server{Cat: base.Cat, MaxRead: base.MaxRead, MaxFile: base.MaxFile, Structured: true, Version: "eval",
+			Prefer: sys.prefer}
+		var qs []Question
+		for _, f := range sys.families {
+			qs = append(qs, families[f]...)
+		}
+		a, own := askAs(t, s, sys.prefer, qs)
+		total.add(a)
+		totalOwn += own
+		rows = append(rows, fmt.Sprintf("| %s | %d of %d | %d | %d | %d B |", sys.name, a.first, a.questions, own, a.repeats,
+			a.bytes/max(a.questions, 1)))
+	}
+	report := "| A server on | Answered first | First result of the system's collection | Results repeating a topic | A question |\n" +
+		"|---|---|---|---|---|\n" + strings.Join(rows, "\n") +
+		fmt.Sprintf("\n| **all** | **%d of %d** | **%d** | **%d** | %d B |\n", total.first, total.questions, totalOwn, total.repeats,
+			total.bytes/max(total.questions, 1))
+	t.Log("\n" + report)
+	if p := os.Getenv("EVAL_REPORT"); p != "" {
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		_, _ = fmt.Fprintf(f, "## Collections served together, on their systems (mcp-docs eval)\n\n%s\n", report)
+	}
+	if !slices.Equal(names, togetherAll) {
+		return
+	}
+	if total.first < systemFloors.first || totalOwn < systemFloors.own {
+		t.Errorf("%d answered first and %d of the system's collection, fewer than the %d and %d before", total.first, totalOwn,
+			systemFloors.first, systemFloors.own)
+	}
+}
+
+// systemFloors are togetherFloors' of TestTogetherOnSystems.
+var systemFloors = struct{ first, own int }{first: 105, own: 102}
 
 // togetherFloors are what the eval came to when it was last looked at,
 // with the collections of togetherAll: a run must not answer fewer

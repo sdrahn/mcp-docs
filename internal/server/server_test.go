@@ -700,3 +700,25 @@ func TestSearchSharesAcrossCollections(t *testing.T) {
 		t.Errorf("%d bytes:\n%s", len(text), text[len(text)-200:])
 	}
 }
+
+// search does not match in the front matter, nor show it as context.
+func TestSearchSkipsFrontMatter(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "app")
+	s.FSCompat = true
+	write(t, filepath.Join(dirs["app"], "t.md"), "---\ntitle: \"Converting a system\"\ndescription: \"Converting is simple.\"\n---\n\nConverting, before the heading.\n\n# Converting a system\n\nRun the script.\n")
+	r := call(t, s, "search", map[string]any{"query": "converting"})
+	text := mustOK(t, r)
+	if n := len(r.Structured["matches"].([]any)); n != 2 {
+		t.Errorf("%d matches, want the line before the heading and the heading:\n%s", n, text)
+	}
+	if strings.Contains(text, "title:") || strings.Contains(text, "description:") || strings.Contains(text, "---") {
+		t.Errorf("front matter in the result:\n%s", text)
+	}
+	if got := mustOK(t, call(t, s, "search", map[string]any{"query": "is simple"})); got != "no matches" {
+		t.Errorf("a text only the front matter has: %s", got)
+	}
+	// mcp-server-fs's search_text searches the file as it is.
+	if got := mustOK(t, call(t, s, "search_text", map[string]any{"path": dirs["app"], "query": "is simple"})); !strings.Contains(got, "description:") {
+		t.Errorf("search_text: %s", got)
+	}
+}

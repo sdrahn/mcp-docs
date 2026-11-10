@@ -106,3 +106,17 @@ func TestListenPort(t *testing.T) {
 		}
 	}
 }
+
+func TestOSRelease(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "os-release")
+	if err := os.WriteFile(f, []byte("NAME=\"SLES\"\n# a comment\nVERSION_ID=\"16.1\"\nID=sles\nPRETTY_NAME='SUSE Linux'\n\nBROKEN\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := osRelease(f)
+	if got["NAME"] != "SLES" || got["VERSION_ID"] != "16.1" || got["ID"] != "sles" || got["PRETTY_NAME"] != "SUSE Linux" || len(got) != 4 {
+		t.Errorf("%v", got)
+	}
+	if got := osRelease(filepath.Join(t.TempDir(), "none")); len(got) != 0 {
+		t.Errorf("a missing file: %v", got)
+	}
+}

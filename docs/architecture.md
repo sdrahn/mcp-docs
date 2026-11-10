@@ -1618,7 +1618,7 @@ Not worth it: shorter link targets in the documents (1.7% of the text).
 | Step | What | State |
 |---|---|---|
 | A | The eval (11) | done (§17.3) |
-| B | The system's product first (1); `search` without front matter (5) | |
+| B | The system's product first (1); `search` without front matter (5) | done (§17.4) |
 | C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | |
 | D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
 | E | `search` for expressions in parallel (9), no walk on every call (10) | |
@@ -1657,3 +1657,73 @@ The floors, as first measured (0.2.0):
 | SLES | 13 of 16 | 11 | 2,143 B |
 | SLES for SAP | 12 of 16 | 8 | 2,381 B |
 | **all** | **53 of 64** | **38** | **2,472 B** |
+
+### 17.4 The system's collections first; `search` without front matter
+
+**Which collections are a system's.** A collection's index says which
+system it documents, in its front matter:
+
+```yaml
+system: {"os_release": {"ID": "sles", "VERSION_ID": "16.1"}}
+```
+
+`os_release` are fields of the system's `/etc/os-release` that must be
+these (values as strings: `"16.1"`); `file`, a file the system has, for
+what os-release does not tell (an extension's product file). A server
+compares them with the system it runs on (`--os-release`, default
+`/etc/os-release`) the first time it ranks, and logs what it found
+("this system's collections, ranked first: sles-16.1"). `--prefer`
+names the collections instead, or `none`. The index, and not the
+collection file: a server before this one refuses a collection file
+with a field it does not know, and the documentation packages do not
+require a server's version; front matter it does not know, it ignores.
+
+`mcp-docs-convert` writes it (`--system-os-release KEY=VALUE`,
+`--system-file`), and `tools/suse-docs/convert` says for each product:
+
+| Collection | A system's if |
+|---|---|
+| `sles-V` | `ID=sles`, `VERSION_ID=V` |
+| `sles-sap-V` | `ID=sles_sap`, `VERSION_ID=V` |
+| `sle-ha-V` | `VERSION_ID=V`, and `/etc/products.d/sle-ha.prod` is there |
+| `sle-micro` | `ID=sl-micro` (its versions are directories of one collection: the agent names the version's, as the collection's instructions say) |
+
+Only SLES's are from a system looked at; the others are as their
+products have named themselves so far, **to be confirmed on a system of
+each**. Where one is wrong, the collection is not preferred, and
+everything is as without.
+
+**What being first means.** In `find_sections`, a preferred
+collection's scores are multiplied by 1.25, and of a section that
+several collections hold with the same text, the preferred one's is
+the result and the others its copies. The instructions mark the
+collection ("this system's"), so that an agent that names a collection
+names that one. Nothing is left out: another product's collection
+still answers its questions.
+
+The factor is from the eval (`TestTogetherOnSystems`: servers on SLES
+16.1, SLES 16.1 with SLE HA, SLES for SAP 16.1, SLES 16.0 and SLE
+Micro, asked their products' questions, and one on SLES 16.1 asked
+those of SLE HA and SLES for SAP, which it is not):
+
+| Factor | Own products' questions: answered first | first result of the system's collection | results repeating a topic | Other products' questions answered first |
+|---|---|---|---|---|
+| 1 (none) | 79 of 96 | 83 | 60 | 25 of 32 |
+| 1.1 | 80 | 95 | 39 | |
+| **1.25** | 79 | **96** | **31** | **26** |
+| 1.5 | 79 | 96 | 25 | 21 |
+| 2 | 79 | 96 | 13 | 16 |
+
+So the preference does not answer more questions first: the questions
+missed are missed by the product's own collection too, and want steps
+C. What it changes is which version answers, always the system's
+where 13 of 96 answers were another version's or product's, and half
+the repeats. A larger factor removes more repeats and then puts the
+system's passing mentions before another product's answer.
+
+**`search` leaves the front matter out** (not `search_text` of
+`--fs-compat`, which searches files as they are): no match in it, and
+none of its lines as context. One call returns as much as before where
+it fills its limit, of other lines: ten searches of SLES for SAP 16.1
+showed 94 lines of front matter among 215 matching lines, and now
+none, and reach 69 documents where they reached 63.

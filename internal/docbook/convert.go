@@ -49,6 +49,12 @@ type Options struct {
 	// sources' own productname metadata is not used: it names other
 	// products and versions too (an assembly shared with SLES 15 SP6).
 	Product, Version string
+	// SystemOSRelease and SystemFile name the system the collection
+	// documents, in its index's front matter ("system"): fields of the
+	// system's /etc/os-release, and a file it has. A server on that
+	// system ranks the collection first (docs/architecture.md §17.4).
+	SystemOSRelease map[string]string
+	SystemFile      string
 }
 
 // Report says what a conversion did and what it could not.
@@ -687,7 +693,18 @@ func (c *conversion) readme(arts []*article) string {
 	var readme strings.Builder
 	// Like an article's index, the way in, not an answer: out of the
 	// ranking.
-	readme.WriteString(frontMatter([][2]any{{"title", o.Title}, {"description", o.Description}, {"rank", false}}))
+	fields := [][2]any{{"title", o.Title}, {"description", o.Description}, {"rank", false}}
+	if len(o.SystemOSRelease) > 0 || o.SystemFile != "" {
+		sys := map[string]any{}
+		if len(o.SystemOSRelease) > 0 {
+			sys["os_release"] = o.SystemOSRelease
+		}
+		if o.SystemFile != "" {
+			sys["file"] = o.SystemFile
+		}
+		fields = append(fields, [2]any{"system", sys})
+	}
+	readme.WriteString(frontMatter(fields))
 	fmt.Fprintf(&readme, "# %s\n\n%s\n\n## Articles\n", o.Title, o.Description)
 	groups := map[string][]*article{}
 	for _, a := range arts {

@@ -8,11 +8,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
+	"github.com/sdrahn/mcp-docs/internal/markdown"
 	"github.com/sdrahn/mcp-docs/internal/mcpserver"
 )
 
@@ -40,11 +44,83 @@ type Server struct {
 	// only these.
 	Tools   []string
 	Version string
+	// Prefer, if not nil, are the collections ranked first, by name:
+	// those of the system the server runs on. If nil, they are the
+	// collections whose index names a system (its front matter's
+	// "system") that OSRelease and the files of this system match
+	// (§17.4).
+	Prefer []string
+	// OSRelease are the fields of the system's /etc/os-release.
+	OSRelease map[string]string
+	preferred struct {
+		once  sync.Once
+		names map[string]bool
+	}
 	// Logf, if set, takes a line for the server's log (stderr): what an
 	// operator wants to know and no client is told.
 	Logf func(format string, args ...any)
 
 	ranked indexes
+}
+
+// preferBoost multiplies the scores of a preferred collection's
+// sections in find_sections: enough to put the system's own version of
+// a topic before another's that differs in a few words, not enough to
+// put a passing mention before another collection's section on the
+// question (the eval of collections served together, §17.4).
+const preferBoost = 1.25
+
+// prefers reports whether a collection is one of the system the server
+// runs on.
+func (s *Server) prefers(k *catalog.Collection) bool {
+	s.preferred.once.Do(func() {
+		s.preferred.names = map[string]bool{}
+		if s.Prefer != nil {
+			for _, n := range s.Prefer {
+				s.preferred.names[n] = true
+			}
+			return
+		}
+		var found []string
+		for _, c := range s.Cat.Collections {
+			d, ok := s.Cat.Index(c)
+			if !ok {
+				continue
+			}
+			e, err := s.Cat.Load(context.Background(), d)
+			if err != nil || !s.isSystem(e.Outline.Meta.System) {
+				continue
+			}
+			s.preferred.names[c.Name] = true
+			found = append(found, c.Name)
+		}
+		if len(found) > 0 {
+			s.logf("this system's collections, ranked first: %s", strings.Join(found, ", "))
+		}
+	})
+	return s.preferred.names[k.Name]
+}
+
+// isSystem reports whether the system the server runs on is the one a
+// collection's index names.
+func (s *Server) isSystem(sys *markdown.System) bool {
+	if sys == nil {
+		return false
+	}
+	for k, v := range sys.OSRelease {
+		if s.OSRelease[k] != v {
+			return false
+		}
+	}
+	if sys.File != "" {
+		if !filepath.IsAbs(sys.File) {
+			return false
+		}
+		if _, err := os.Stat(sys.File); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -253,8 +329,13 @@ func (s *Server) Instructions() string {
 	example := ""
 	for _, k := range s.Cat.Collections {
 		fmt.Fprintf(&b, "- %s", k.Name)
-		if k.Title != "" {
+		switch {
+		case k.Title != "" && s.prefers(k):
+			fmt.Fprintf(&b, " (%s; this system's)", k.Title)
+		case k.Title != "":
 			fmt.Fprintf(&b, " (%s)", k.Title)
+		case s.prefers(k):
+			b.WriteString(" (this system's)")
 		}
 		if k.Description != "" {
 			fmt.Fprintf(&b, ": %s", k.Description)

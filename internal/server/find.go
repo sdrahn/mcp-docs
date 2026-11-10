@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -183,8 +184,15 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		if err != nil {
 			return nil, err
 		}
-		parts = append(parts, rank.Part{Index: ix, Under: d})
+		p := rank.Part{Index: ix, Under: d}
+		if s.prefers(d.Coll) {
+			p.Boost = preferBoost
+		}
+		parts = append(parts, p)
 	}
+	// The system's collections first: of a section that several hold
+	// with the same text, theirs is the result, the others its copies.
+	sort.SliceStable(parts, func(i, j int) bool { return parts[i].Boost > parts[j].Boost })
 	// The collections are ranked as one (rank.Search), and a section that
 	// several documents hold (a topic two products' collections share) is
 	// one result that names the others: more candidates than results, for

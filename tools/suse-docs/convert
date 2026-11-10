@@ -48,16 +48,20 @@ case ${name%-*} in
 sles)
 	product='SUSE Linux Enterprise Server'
 	site=sles/$version
+	system="--system-os-release ID=sles --system-os-release VERSION_ID=$version"
 	about='installation, administration, security, virtualization, containers'
 	;;
 sle-ha)
 	product='SUSE Linux Enterprise High Availability'
 	site=sle-ha/$version
+	# An extension: the system's version, and its product file.
+	system="--system-os-release VERSION_ID=$version --system-file /etc/products.d/sle-ha.prod"
 	about='cluster installation, fencing and SBD, resources and constraints, maintenance, crmsh and Hawk'
 	;;
 sles-sap)
 	product='SUSE Linux Enterprise Server for SAP applications'
 	site=sles-sap/$version
+	system="--system-os-release ID=sles_sap --system-os-release VERSION_ID=$version"
 	about="installing and configuring a system for SAP applications, saptune, Ansible for SAP, and the administration of SLES $version as it applies to them"
 	;;
 *)
@@ -95,7 +99,7 @@ mkdir -p "$out"
 	--description "The documentation of $title from documentation.suse.com, converted from its DocBook sources." \
 	--site-url "https://documentation.suse.com/$site/html/%s/" \
 	--source-url "https://github.com/SUSE/doc-modular/blob/$rev/$subdir%s" \
-	--revision "$(echo "$rev" | cut -c1-7)"
+	--revision "$(echo "$rev" | cut -c1-7)" $system
 
 root=${2:-$(cd "$out" && pwd)}
 cat >"$out/$name.yaml" <<YAML

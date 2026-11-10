@@ -344,6 +344,10 @@ func (ix *Index) locate(u *unit) (*catalog.Entry, int, bool) {
 type Part struct {
 	Index *Index
 	Under catalog.Doc
+	// Boost, if not 0, multiplies the scores of the part's sections:
+	// above 1 for a collection to rank before others where they answer
+	// alike (the collection of the system the server runs on).
+	Boost float64
 }
 
 // Search returns the n sections of the parts that best match the query,
@@ -366,7 +370,13 @@ func Search(query string, n int, parts []Part) ([]Hit, error) {
 	st := statsOf(terms, ixs...)
 	var sc []scored
 	for _, p := range parts {
-		sc = append(sc, p.Index.score(terms, st, under(p.Under))...)
+		part := p.Index.score(terms, st, under(p.Under))
+		if p.Boost != 0 {
+			for i := range part {
+				part[i].score *= p.Boost
+			}
+		}
+		sc = append(sc, part...)
 	}
 	return hits(sc, n), nil
 }

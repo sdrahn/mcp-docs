@@ -66,6 +66,9 @@ func main() {
 	flag.Var(&origins, "allow-origin", "with --listen, a browser origin (\"https://app.example\") requests may come from "+
 		"(repeatable); requests without an Origin header are always served")
 	maxConcurrent := flag.Int("max-concurrent", 32, "with --listen, requests handled at once")
+	prefer := flag.String("prefer", "", "the collections ranked first by find_sections, comma-separated, or \"none\" "+
+		"(default: those whose index names this system, by --os-release)")
+	osReleaseFile := flag.String("os-release", "/etc/os-release", "the file that tells what system this is, for the default of --prefer")
 	writeIndex := flag.Bool("write-index", false, "write each collection's index file ("+rank.FileName+", in its directory) and exit: "+
 		"a server then reads the index where it would build it from every document (when a collection is made: a package's build)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -148,6 +151,21 @@ func main() {
 		return
 	}
 
+	// The collections ranked first: named, or (nil) those of this system.
+	var preferred []string
+	switch *prefer {
+	case "":
+	case "none":
+		preferred = []string{}
+	default:
+		for _, n := range splitList(*prefer) {
+			if !slices.ContainsFunc(collections, func(k *catalog.Collection) bool { return k.Name == n }) {
+				fail(2, fmt.Sprintf("--prefer: no collection %q", n))
+			}
+			preferred = append(preferred, n)
+		}
+	}
+
 	// The kernel keeps the server to reading its collections (Landlock,
 	// docs/architecture.md §8), whatever starts it.
 	rules := landlockRules(collections, dirs, port)
@@ -168,6 +186,7 @@ func main() {
 
 	s := &server.Server{Cat: catalog.New(collections, extList, *maxEntries), About: *about, MaxRead: *maxRead,
 		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Tools: tools, Version: version,
+		Prefer: preferred, OSRelease: osRelease(*osReleaseFile),
 		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, server.Name+": "+format+"\n", args...) }}
 	if *listen == "" {
 		if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
@@ -178,6 +197,27 @@ func main() {
 	if err := serveHTTP(*listen, s.Handle, mcphttp.Options{AllowedOrigins: origins, MaxConcurrent: *maxConcurrent}); err != nil {
 		fail(1, err.Error())
 	}
+}
+
+// osRelease reads the fields of an os-release file (KEY=VALUE, the
+// value quoted or not); none if it cannot be read.
+func osRelease(file string) map[string]string {
+	out := map[string]string{}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return out
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(l), "=")
+		if !ok || strings.HasPrefix(k, "#") {
+			continue
+		}
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // listenPort is the TCP port of a --listen address, for the Landlock
