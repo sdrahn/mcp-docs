@@ -24,6 +24,21 @@ OBS changelog entry (packaging/suse/README.md).
 - `search` does not match in a document's front matter, nor show it:
   a title there was the heading again. (`search_text` of `--fs-compat`
   searches files as they are.)
+- `find_sections` folds variants: a result whose section has the id of
+  an earlier one's and nearly its text (the topic in another product's
+  or version's collection) is named with that one ("variants in
+  sles-sap-16.1"; `variants` with `--structured`) and leaves its place
+  to the next section. With SUSE's seven collections, 1 result of the
+  eval's answers repeats a topic, from 38.
+- `find_sections` also asks a question in the spelling the documents
+  have: "login" finds "log in", "live patch" finds "livepatch", "file
+  systems" finds "filesystem", by the collections' own words (two of
+  the query's as one where the documents have it; one as two where
+  they have both more often).
+- The systems of SUSE's collections are told by their products' files
+  (`/etc/products.d/SL-Micro.prod`, `SLES.prod`, …): SUSE Linux Micro
+  6.2 is `ID=sles`, `VERSION_ID=16.0` in its os-release, which made
+  SLES 16.0's collection that system's.
 
 ## v0.2.0 — 2026-11-10
 

@@ -171,3 +171,51 @@ func TestCurrentWithUnreadable(t *testing.T) {
 		t.Error("current after a document went")
 	}
 }
+
+// A query finds what the documents write the other way: two words they
+// write as one, and one they write as two.
+func TestSpellings(t *testing.T) {
+	dir := t.TempDir()
+	docs := map[string]string{
+		"a.md": "# Kernel livepatch\n\nApply a livepatch to the kernel.\n",
+		"b.md": "# Access\n\nLog in to the console. To log in, give the password.\n",
+		"c.md": "# Limits\n\nThe request has a time limit; when the time is out, it ends. Out of time means late.\n",
+		"d.md": "# Network\n\nThe network is a net that does the work; the network has a name.\n",
+		"e.md": "# Filler\n\nNothing about the others: plain words to count against.\n",
+	}
+	for n, text := range docs {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k := &catalog.Collection{Name: "k", Path: dir}
+	cat := catalog.New([]*catalog.Collection{k}, []string{".md"}, 100)
+	ix, err := Build(context.Background(), cat, k, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := func(q string) string {
+		hs, err := ix.Search(q, 1)
+		if err != nil || len(hs) == 0 {
+			return ""
+		}
+		return hs[0].Doc.Rel
+	}
+	for q, want := range map[string]string{
+		"live patch the kernel": "a.md", // two words, written as one
+		"login":                 "b.md", // one word, written as two (a particle)
+		"timeout":               "c.md", // one word, written as two
+	} {
+		if got := first(q); got != want {
+			t.Errorf("%q: %q, want %s", q, got, want)
+		}
+	}
+	// A word the documents write as it is asked is not taken apart:
+	// "network" is more frequent than "net" and "work".
+	if got := QueryTerms("network", ix); len(got) != 1 {
+		t.Errorf("network: %v", got)
+	}
+	if got := QueryTerms("live patch", ix); len(got) != 3 {
+		t.Errorf("live patch: %v", got)
+	}
+}

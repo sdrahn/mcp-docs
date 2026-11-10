@@ -101,6 +101,9 @@ type found struct {
 	// AlsoIn are the other documents that hold the same section, with
 	// the same text.
 	AlsoIn []string `json:"alsoIn,omitempty"`
+	// Variants are the other documents that hold the section with
+	// nearly the same text: another product's or version's.
+	Variants []string `json:"variants,omitempty"`
 }
 
 func findSectionsTool() tool {
@@ -120,7 +123,8 @@ func findSectionsTool() tool {
 				"doc": strType, "section": strType, "path": map[string]any{"type": "array", "items": strType},
 				"line": intType, "lines": intType, "bytes": intType, "score": map[string]any{"type": "number"},
 				"matchLine": intType, "matchText": strType, "version": strType,
-				"alsoIn": map[string]any{"type": "array", "items": strType}},
+				"alsoIn":   map[string]any{"type": "array", "items": strType},
+				"variants": map[string]any{"type": "array", "items": strType}},
 				"doc", "path", "line", "lines", "bytes", "score", "version")},
 			"read": obj(map[string]any{"doc": strType, "section": strType, "text": strType}, "doc", "section", "text"),
 		}, "sections"),
@@ -201,10 +205,16 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	if err != nil {
 		return nil, err
 	}
-	hits, copies := foldCopies(all, n)
+	hits, copies, variants := s.fold(all, n)
 
+	// The words to show in the results: the query's, in the spellings
+	// the indexes were asked for.
+	var ixs []*rank.Index
+	for _, p := range parts {
+		ixs = append(ixs, p.Index)
+	}
 	terms := map[string]bool{}
-	for _, t := range rank.Tokens(a.Query) {
+	for _, t := range rank.QueryTerms(a.Query, ixs...) {
 		terms[t] = true
 	}
 	out := []found{}
@@ -212,7 +222,8 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	var addrs []string   // one per hit: doc#id
 	for i, h := range hits {
 		o := h.Entry.Outline
-		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version, AlsoIn: copies[i]}
+		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version, AlsoIn: copies[i],
+			Variants: variants[i]}
 		if h.Heading >= 0 {
 			hd := o.Headings[h.Heading]
 			f.Section, f.Path, f.Line, f.Lines, f.Bytes = hd.ID, shortPath(o, h.Heading), hd.Line, hd.Lines, hd.Bytes
@@ -242,7 +253,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		}
 		addrs = append(addrs, addr)
 		entry := fmt.Sprintf("%d. %s  %s  (%s%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes),
-			alsoIn(h.Doc, f.AlsoIn))
+			alsoIn("also in", h.Doc, f.AlsoIn)+alsoIn("variants in", h.Doc, f.Variants))
 		if f.MatchLine > 0 {
 			entry += fmt.Sprintf("   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
 		}
@@ -537,33 +548,77 @@ func bestLine(lines []string, first int, terms map[string]bool) (int, string) {
 	return first + best, strings.TrimRight(lines[best], "\r\n")
 }
 
-// foldCopies returns the first n of the hits, best first, without the
-// copies among them: a hit whose section has the id and the text of an
-// earlier one's is not a result of its own, but named with that one
-// (copies[i]: the documents of hit i's copies).
-func foldCopies(all []rank.Hit, n int) (hits []rank.Hit, copies [][]string) {
-	type key struct {
-		id  string
-		sum uint64
-	}
-	first := map[key]int{}
-	for _, h := range all {
-		k := key{sum: h.Sum}
-		if h.Heading >= 0 {
-			k.id = h.Entry.Outline.Headings[h.Heading].ID
+// fold returns the first n of the hits, best first, without those that
+// are another's section again: a hit whose section has the id of an
+// earlier one's and its text (a copy), or nearly its text (a variant:
+// the topic in another product's or version's collection, a word or a
+// sentence changed), is not a result of its own, but named with that
+// one. copies[i] and variants[i] are the documents of hit i's.
+func (s *Server) fold(all []rank.Hit, n int) (hits []rank.Hit, copies, variants [][]string) {
+	id := func(h rank.Hit) string {
+		if h.Heading < 0 {
+			return ""
 		}
-		if i, ok := first[k]; ok {
-			copies[i] = append(copies[i], h.Doc.Address())
-			continue
+		return h.Entry.Outline.Headings[h.Heading].ID
+	}
+	// The words of a hit's own text, read when a hit of its id follows.
+	words := map[int]map[string]bool{}
+	wordsOf := func(i int, h rank.Hit) map[string]bool {
+		if w, ok := words[i]; ok {
+			return w
+		}
+		w := map[string]bool{}
+		first, last := rank.OwnLines(h.Entry.Outline, h.Heading)
+		_ = s.Cat.EachLine(h.Doc, h.Entry, first, last, func(_ int, l string) bool {
+			for _, t := range rank.Tokens(l) {
+				w[t] = true
+			}
+			return true
+		})
+		words[i] = w
+		return w
+	}
+	byID := map[string][]int{} // id → the results that have it
+next:
+	for k, h := range all {
+		for _, i := range byID[id(h)] {
+			switch {
+			case hits[i].Sum == h.Sum:
+				copies[i] = append(copies[i], h.Doc.Address())
+				continue next
+			case similar(wordsOf(i, hits[i]), wordsOf(-1-k, h)):
+				variants[i] = append(variants[i], h.Doc.Address())
+				continue next
+			}
 		}
 		if len(hits) == n {
 			continue // its copies may still follow
 		}
-		first[k] = len(hits)
+		byID[id(h)] = append(byID[id(h)], len(hits))
 		hits = append(hits, h)
-		copies = append(copies, nil)
+		copies, variants = append(copies, nil), append(variants, nil)
 	}
-	return hits, copies
+	return hits, copies, variants
+}
+
+// variantSimilarity is how much of two sections' words they must share
+// (of all the words either has) to be variants of one topic. Sections
+// of one id in SUSE's collections share nine tenths of their words or
+// more where they are one topic in two products or versions, and half
+// or less where they are two topics under one id; few are between.
+const variantSimilarity = 0.7
+
+func similar(a, b map[string]bool) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	shared := 0
+	for w := range a {
+		if b[w] {
+			shared++
+		}
+	}
+	return float64(shared)/float64(len(a)+len(b)-shared) >= variantSimilarity
 }
 
 // maxAlsoIn bounds the copies a result's line names.
@@ -572,7 +627,7 @@ const maxAlsoIn = 3
 // alsoIn names a result's copies in its line: a copy at the same path
 // in another collection by the collection's name, any other by its
 // address.
-func alsoIn(d catalog.Doc, copies []string) string {
+func alsoIn(what string, d catalog.Doc, copies []string) string {
 	if len(copies) == 0 {
 		return ""
 	}
@@ -587,7 +642,7 @@ func alsoIn(d catalog.Doc, copies []string) string {
 		}
 		names = append(names, c)
 	}
-	return "; also in " + strings.Join(names, ", ")
+	return "; " + what + " " + strings.Join(names, ", ")
 }
 
 func round(f float64) float64 { return float64(int(f*100+0.5)) / 100 }

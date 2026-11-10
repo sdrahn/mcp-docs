@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
 	"github.com/sdrahn/mcp-docs/internal/markdown"
@@ -267,11 +268,83 @@ func (ix *Index) Within(query string, d catalog.Doc, heading, n int) ([]Hit, err
 }
 
 func (ix *Index) search(query string, n int, keep func(*unit) bool) ([]Hit, error) {
-	terms := unique(Tokens(query))
+	terms, also := queryTerms(query, ix)
 	if len(terms) == 0 {
 		return nil, ErrNoTerms
 	}
-	return hits(ix.score(terms, statsOf(terms, ix), keep), n), nil
+	return hits(ix.score(terms, statsOf(terms, also, ix), keep), n), nil
+}
+
+// QueryTerms are the words a query is ranked by in the indexes: its own
+// (Tokens) and those of its other spellings.
+func QueryTerms(query string, ixs ...*Index) []string {
+	terms, _ := queryTerms(query, ixs...)
+	return terms
+}
+
+// spellingWeight is what a word of another spelling counts, of a word
+// of the query's own.
+const spellingWeight = 0.6
+
+// particles end a word that is also written as two ("login", "setup",
+// "timeout"), and are too common to be looked for.
+var particles = map[string]bool{"in": true, "up": true, "on": true, "out": true, "off": true, "down": true}
+
+// queryTerms returns the query's words and, in also, those among them
+// that are of another spelling of what the query says: a word the
+// documents write as two, and two they write as one ("login" and "log
+// in", "live patch" and "livepatch"). The index has no meanings, but it
+// has the documents' words: two of the query's words are also asked as
+// one where the documents have that word, and a word as two where they
+// have both and each more often than the word. So a question finds what
+// is written the other way, which it missed.
+func queryTerms(query string, ixs ...*Index) (terms []string, also map[string]bool) {
+	terms = unique(Tokens(query))
+	df := func(t string) int {
+		n := 0
+		for _, ix := range ixs {
+			n += len(ix.postings[t])
+		}
+		return n
+	}
+	also = map[string]bool{}
+	add := func(t string) {
+		if !slices.Contains(terms, t) {
+			terms = append(terms, t)
+			also[t] = true
+		}
+	}
+	words := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for i, w := range words {
+		// Two words as one.
+		if i+1 < len(words) {
+			if j := stem(w + words[i+1]); df(j) > 0 {
+				add(j)
+			}
+		}
+		// One word as two.
+		if stopwords[w] || len(w) < 5 {
+			continue
+		}
+		own := df(stem(w))
+		for k := 3; k <= len(w)-2; k++ {
+			if !utf8.RuneStart(w[k]) {
+				continue
+			}
+			a, b := stem(w[:k]), w[k:]
+			if stopwords[w[:k]] || df(a) <= own {
+				continue
+			}
+			switch {
+			case particles[b]:
+				add(a)
+			case len(b) >= 3 && !stopwords[b] && df(stem(b)) > own:
+				add(a)
+				add(stem(b))
+			}
+		}
+	}
+	return terms, also
 }
 
 // scored is a unit of an index and its score.
@@ -357,17 +430,17 @@ type Part struct {
 // (a word rare in one and common in the other would else rank the
 // first's passing mention above the second's section on it).
 func Search(query string, n int, parts []Part) ([]Hit, error) {
-	terms := unique(Tokens(query))
-	if len(terms) == 0 {
-		return nil, ErrNoTerms
-	}
 	var ixs []*Index
 	for _, p := range parts {
 		if !slices.Contains(ixs, p.Index) {
 			ixs = append(ixs, p.Index)
 		}
 	}
-	st := statsOf(terms, ixs...)
+	terms, also := queryTerms(query, ixs...)
+	if len(terms) == 0 {
+		return nil, ErrNoTerms
+	}
+	st := statsOf(terms, also, ixs...)
 	var sc []scored
 	for _, p := range parts {
 		part := p.Index.score(terms, st, under(p.Under))
@@ -386,10 +459,12 @@ func Search(query string, n int, parts []Part) ([]Hit, error) {
 type stats struct {
 	n, avgLen float64
 	df        map[string]float64
+	// also are the words of another spelling: they count less.
+	also map[string]bool
 }
 
-func statsOf(terms []string, ixs ...*Index) stats {
-	st := stats{df: map[string]float64{}}
+func statsOf(terms []string, also map[string]bool, ixs ...*Index) stats {
+	st := stats{df: map[string]float64{}, also: also}
 	var total float64
 	for _, ix := range ixs {
 		st.n += float64(len(ix.units))
@@ -414,6 +489,9 @@ func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []scored
 			continue
 		}
 		idf := math.Log(1 + (st.n-st.df[t]+0.5)/(st.df[t]+0.5))
+		if st.also[t] {
+			idf *= spellingWeight
+		}
 		for _, p := range ps {
 			u := &ix.units[p.unit]
 			if keep != nil && !keep(u) {

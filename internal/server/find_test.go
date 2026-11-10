@@ -336,3 +336,33 @@ func TestSystemCollectionsFirst(t *testing.T) {
 		t.Error("--prefer none prefers")
 	}
 }
+
+// TestVariantsFolded: a section another collection holds with nearly
+// the same text is one result that names the other; one of the same id
+// and another text is a result of its own.
+func TestVariantsFolded(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "one", "two", "three")
+	body := "Mount the volume before you start the service. The volume holds the data of the service, and the service " +
+		"does not start without it. Check the mount with findmnt, then start the service and look at its log.\n"
+	write(t, filepath.Join(dirs["one"], "topics/mount.md"), "# Mounting the volume {#mount}\n\nOn Product One: "+body)
+	write(t, filepath.Join(dirs["two"], "topics/mount.md"), "# Mounting the volume {#mount}\n\nOn Product Two: "+body)
+	write(t, filepath.Join(dirs["three"], "other.md"), "# Mounting the volume {#mount}\n\nA volume is mounted by the kernel when the unit asks.\n")
+	r := call(t, s, "find_sections", map[string]any{"query": "mount the volume", "read": false, "maxResults": 5})
+	text := mustOK(t, r)
+	ss := r.Structured["sections"].([]any)
+	if len(ss) != 2 {
+		t.Fatalf("%d results, want the topic and the other section:\n%s", len(ss), text)
+	}
+	var folded map[string]any
+	for _, x := range ss {
+		if m := x.(map[string]any); m["doc"] == "one/topics/mount.md" {
+			folded = m
+		}
+	}
+	if v, _ := folded["variants"].([]any); len(v) != 1 || v[0] != "two/topics/mount.md" {
+		t.Errorf("variants: %v\n%s", folded["variants"], text)
+	}
+	if !strings.Contains(text, "; variants in two)") || !strings.Contains(text, "three/other.md#mount") {
+		t.Errorf("%s", text)
+	}
+}

@@ -250,9 +250,11 @@ the right place first:
 - **Use one name for one thing.** A server called "gateway-docs" in one
   chapter and "the documentation server" in another is two searches.
   The same goes for spellings: "roll back" and "rollback", "set up" and
-  "setup" are different words to `find_sections`. Use one, and where
-  readers use both (the noun and the verb, a command and the task),
-  write the other once near the top of the section.
+  "setup" are different words to `search`, and to `find_sections`
+  unless the collection has the other spelling somewhere (it then asks
+  for both, the other counting less). Use one, and where readers use
+  both (the noun and the verb, a command and the task), write the
+  other once near the top of the section.
 - **Write names with ordinary spaces.** Agents type spaces. A name
   written with no-break spaces (`SLES&nbsp;for&nbsp;SAP`, as typesetting
   does to keep it on one line) is another string to tools that match
@@ -262,8 +264,8 @@ the right place first:
 - **Keep one copy of each text.** Two copies of a text, such as a
   glossary in every guide or a shared topic included in several, are
   two matches of the same weight: the agent reads both or guesses
-  (`find_sections` folds sections whose text is the same to the byte;
-  `search`, and copies that differ in a word, show each).
+  (`find_sections` folds sections of one id whose text is the same or
+  nearly so, and names the others; `search` shows each).
   Keep one copy and link to it. Where versions differ, keep each
   version in its own collection or directory, and let the agent choose
   it (`doc` scopes `search` and `find_sections` to a directory) rather
@@ -343,15 +345,14 @@ once, and they are ranked as one. What that asks of documentation that
 comes in several collections (a product family, versions, a product
 and its add-ons):
 
-- **Keep shared text the same to the byte.** `find_sections` returns a
-  section that several collections hold once, and names the others
-  ("also in sles-sap-16.1"), when its id and its text are the same. A
-  shared topic that differs in one word, a product name filled in for
-  each collection, is a result of its own in each: of three results,
-  two are then the same topic. Write shared topics without the product
-  name where the sentence allows it, and say which product a document
-  is for in its front matter, which is not compared, and in the
-  collection's index.
+- **Keep shared topics under one id, and their text close.**
+  `find_sections` returns a section that several collections hold
+  once, and names the others, when their ids are the same and their
+  texts the same ("also in sles-sap-16.1") or nearly so ("variants in
+  …": a product's name filled in, a sentence changed). The agent gets
+  one of them, on a system that system's. A topic rewritten for a
+  product under the same id is a result of its own; one that says
+  something else there should have a title that says so.
 - **Give what differs a title that says so.** Where two collections
   answer the same question differently, both sections come back, and
   the agent chooses by their titles and paths: "Installing on IBM Z",
@@ -465,4 +466,4 @@ is better not written:
 - [ ] A compact index document that maps questions to sections.
 - [ ] Diagrams described in text.
 - [ ] Installed outside `%doc`, with a collection file and the index file, written last.
-- [ ] Topics shared between collections the same to the byte; the questions tested with the collections together.
+- [ ] Topics shared between collections under one id; the questions tested with the collections together.
