@@ -21,6 +21,19 @@ OBS changelog entry (packaging/suse/README.md).
   until the limit.
 - Benchmarks on real collections (`MCP_DOCS_BENCH`,
   docs/architecture.md §16).
+- Reads keep to what one call returns in memory, too: `read_lines`
+  without a range, `read_section` of a large section and a `docs://`
+  resource read every line asked for before cutting (155 MB for a
+  document of 64 MiB).
+- `search` for a text is about four times as fast (31 ms for 1,652
+  documents, from 133 ms): each document is opened once, and its lines
+  are looked at only if it holds the text.
+- `find_sections` checks that its index is current without opening the
+  documents, once a call; a collection with a document that is no text
+  no longer has its index rebuilt on every call. Over HTTP, a
+  collection's index being built does not hold up the others.
+- With `--fs-compat`, `search_files`, `list_directory` and
+  `outline_file` stop at `--max-read` and say so.
 
 ## v0.1.3 — 2026-11-09
 

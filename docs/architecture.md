@@ -1331,7 +1331,7 @@ and the plan from them; the steps are recorded as they are built.
 |---|---|---|
 | 0 | Benchmarks on real collections (`MCP_DOCS_BENCH`, below); a test of collections that share topics and differ in vocabulary | done |
 | 1 | The collections in scope ranked as one; copies folded; `search` shared among collections | done |
-| 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | |
+| 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | done |
 | 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | |
 | 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | |
 
@@ -1352,6 +1352,48 @@ output until the whole fits.
 
 With the four collections, "put a node into maintenance mode" now finds
 SLE HA's section first ("also in sle-ha-16.1"), and no topic twice.
+
+**Step 2, as built.**
+
+- *Reads.* `catalog.EachLine` hands the lines of a range to its caller
+  one at a time, which stops it: `read_lines` (and a `docs://` resource)
+  at what one call returns; `read_section` reads its section through
+  once and packs it into parts as it goes, keeping only the part asked
+  for (the packer cuts the parts the packing of all lines cut: a test
+  compares them on random sections). A document of 64 MiB read without
+  a range: 0.07 ms and 0.1 MB, from 113 ms and 155 MB. A single line
+  larger than memory is still read whole, as the scan reads it.
+- *`search`.* A document is opened once and read with its known size
+  (`catalog.LoadText`), its bytes the text without a copy. A text is in
+  a line only if it is in the document, so most documents are done
+  with one look, without their lines; an expression is still matched a
+  line at a time (`^` and `$` are a line's; matching the document first
+  was tried and gained nothing where case is ignored, the default).
+  Case is ignored without making the lowercase text (`containsFold`,
+  for a query in ASCII), and no-break spaces are looked for as three
+  strings, not as any of three characters.
+- *The index's currency.* A document's version is of what the
+  directory tells of the file (`rank.Index.Current` opens none), the
+  check runs once a call, and each collection has its own lock.
+  A document that is no text is recorded with its version: a
+  collection with one had its index rebuilt on every call.
+- *`list_docs`* does not open a document it has listed before while
+  the directory tells the same of it.
+- *fs-compat:* `search_files`, `list_directory` and `outline_file` stop
+  at what one call returns and say so.
+
+| four collections, 1,652 documents | before | after step 2 |
+|---|---|---|
+| `find_sections`, warm, all collections | 12.1 ms | 5.4 ms |
+| `find_sections`, warm, one collection (SLE HA 16.0) | 1.0 ms | 0.7 ms |
+| `search`, a text | 133 ms | 31 ms |
+| `search`, an expression | 203 ms | 139 ms |
+| `list_docs`, a page | 2.8 ms | 1.9 ms |
+| `read_lines` of 64 MiB without a range | 113 ms, 155 MB | 0.07 ms, 0.1 MB |
+
+What is left of a warm `find_sections` is the walk of the collections
+(a `stat` for each document); of `search`, opening and reading each
+document.
 
 **Benchmarks.** `internal/server/bench_test.go`, skipped without
 `MCP_DOCS_BENCH`, a directory whose subdirectories are collections with

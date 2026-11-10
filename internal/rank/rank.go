@@ -71,11 +71,17 @@ func Build(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection, max
 		if e.IsDir() {
 			return true
 		}
+		// Every document's version, also of one that cannot be read or
+		// is no text: the index is current while it stays as it is.
+		fi, err := e.Info()
+		if err != nil {
+			return true
+		}
+		ix.versions[d.Address()] = catalog.Version(fi)
 		en, err := cat.Load(ctx, d)
 		if err != nil {
 			return ctx.Err() == nil
 		}
-		ix.versions[d.Address()] = en.Version
 		if en.Outline.Meta.Unranked {
 			return true
 		}
@@ -159,7 +165,9 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 }
 
 // Current reports whether the index was built from the documents as
-// they are: the same documents, of the same versions.
+// they are: the same documents, of the same versions. It walks the
+// collection and opens no document: a version is of what the directory
+// tells of a file.
 func (ix *Index) Current(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection) bool {
 	seen := 0
 	current := true
@@ -168,8 +176,8 @@ func (ix *Index) Current(ctx context.Context, cat *catalog.Catalog, k *catalog.C
 			return true
 		}
 		seen++
-		en, err := cat.Load(ctx, d)
-		if err != nil || ix.versions[d.Address()] != en.Version {
+		fi, err := e.Info()
+		if err != nil || ix.versions[d.Address()] != catalog.Version(fi) {
 			current = false
 			return false
 		}

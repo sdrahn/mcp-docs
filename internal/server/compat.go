@@ -131,9 +131,15 @@ func outlineFile(s *Server, ctx context.Context, args json.RawMessage) (*result,
 		out.WriteString("no Markdown headings: read it with read_text_file (head, or offset and limit)")
 	} else {
 		w := len(strconv.Itoa(shown[len(shown)-1].Line))
-		for _, h := range shown {
-			fmt.Fprintf(&out, "%*d  %s %s  [%d lines, %s]\n", w, h.Line, strings.Repeat("#", h.Level), h.Title,
+		for i, h := range shown {
+			line := fmt.Sprintf("%*d  %s %s  [%d lines, %s]\n", w, h.Line, strings.Repeat("#", h.Level), h.Title,
 				h.Lines, size(h.Bytes))
+			if int64(out.Len()+len(line)) > s.MaxRead-256 {
+				shown = shown[:i]
+				out.WriteString("(more headings than one call returns: give maxLevel)\n")
+				break
+			}
+			out.WriteString(line)
 		}
 		out.WriteString("(read a section: read_text_file with offset = its line, limit = its lines)")
 	}
@@ -237,15 +243,17 @@ func searchFiles(s *Server, ctx context.Context, args json.RawMessage) (*result,
 	}
 	matches := []string{}
 	truncated := false
+	var bytes int64
 	err = s.Cat.Walk(ctx, d, excluder(d, a.ExcludePatterns), func(doc catalog.Doc, _ fs.DirEntry) bool {
 		if !glob.Match(a.Pattern, relTo(d, doc)) {
 			return true
 		}
-		if len(matches) >= s.Cat.MaxEntries {
+		full := doc.Full()
+		if bytes += int64(len(full)) + 1; len(matches) >= s.Cat.MaxEntries || bytes > s.MaxRead-256 {
 			truncated = true
 			return false
 		}
-		matches = append(matches, doc.Full())
+		matches = append(matches, full)
 		return true
 	})
 	if err != nil {
@@ -253,10 +261,10 @@ func searchFiles(s *Server, ctx context.Context, args json.RawMessage) (*result,
 	}
 	body := strings.Join(matches, "\n")
 	switch {
-	case len(matches) == 0:
+	case len(matches) == 0 && !truncated:
 		body = "no matches"
 	case truncated:
-		body += fmt.Sprintf("\n(stopped at %d entries)", s.Cat.MaxEntries)
+		body += fmt.Sprintf("\n(stopped at %d entries: narrow the pattern, or search below a directory)", len(matches))
 	}
 	return &result{text: body, structured: map[string]any{"matches": matches, "truncated": truncated}}, nil
 }
@@ -280,17 +288,19 @@ func listDirectory(s *Server, ctx context.Context, args json.RawMessage) (*resul
 		return nil, fmt.Errorf("%s: not a directory", d.Full())
 	}
 	var lines []string
+	var bytes int64
 	oneLevel := func(doc catalog.Doc) bool { return strings.Contains(relTo(d, doc), "/") }
 	err = s.Cat.Walk(ctx, d, oneLevel, func(doc catalog.Doc, e fs.DirEntry) bool {
-		if len(lines) >= s.Cat.MaxEntries {
-			lines = append(lines, fmt.Sprintf("(stopped at %d entries)", s.Cat.MaxEntries))
-			return false
-		}
 		kind := "[FILE] "
 		if e.IsDir() {
 			kind = "[DIR] "
 		}
-		lines = append(lines, kind+path.Base(doc.Rel))
+		line := kind + path.Base(doc.Rel)
+		if bytes += int64(len(line)) + 1; len(lines) >= s.Cat.MaxEntries || bytes > s.MaxRead-256 {
+			lines = append(lines, fmt.Sprintf("(stopped at %d entries)", len(lines)))
+			return false
+		}
+		lines = append(lines, line)
 		return true
 	})
 	if err != nil {
