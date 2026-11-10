@@ -24,7 +24,9 @@ OBS changelog entry (packaging/suse/README.md).
 - Reads keep to what one call returns in memory, too: `read_lines`
   without a range, `read_section` of a large section and a `docs://`
   resource read every line asked for before cutting (155 MB for a
-  document of 64 MiB).
+  document of 64 MiB), and scanning a document without a blank line
+  kept all of it as its first paragraph. The server's peak memory on
+  that document: 14 MB, from 321 MB.
 - `search` for a text is about four times as fast (31 ms for 1,652
   documents, from 133 ms): each document is opened once, and its lines
   are looked at only if it holds the text.

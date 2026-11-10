@@ -1363,6 +1363,11 @@ SLE HA's section first ("also in sle-ha-16.1"), and no topic twice.
   compares them on random sections). A document of 64 MiB read without
   a range: 0.07 ms and 0.1 MB, from 113 ms and 155 MB. A single line
   larger than memory is still read whole, as the scan reads it.
+  The scan itself held such a document several times over when it had
+  no blank line: all of it was the first paragraph, kept for a summary
+  of 200 bytes. It now keeps a paragraph's first 16 KiB. The server's
+  peak memory after an outline, `read_lines` and `read_section` of that
+  document: 14 MB, from 321 MB.
 - *`search`.* A document is opened once and read with its known size
   (`catalog.LoadText`), its bytes the text without a copy. A text is in
   a line only if it is in the document, so most documents are done
