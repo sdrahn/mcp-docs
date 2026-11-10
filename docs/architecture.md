@@ -1681,17 +1681,22 @@ require a server's version; front matter it does not know, it ignores.
 `mcp-docs-convert` writes it (`--system-os-release KEY=VALUE`,
 `--system-file`), and `tools/suse-docs/convert` says for each product:
 
-| Collection | A system's if |
-|---|---|
-| `sles-V` | `ID=sles`, `VERSION_ID=V` |
-| `sles-sap-V` | `ID=sles_sap`, `VERSION_ID=V` |
-| `sle-ha-V` | `VERSION_ID=V`, and `/etc/products.d/sle-ha.prod` is there |
-| `sle-micro` | `ID=sl-micro` (its versions are directories of one collection: the agent names the version's, as the collection's instructions say) |
+| Collection | A system's if | |
+|---|---|---|
+| `sles-V` | `VERSION_ID=V`, and `/etc/products.d/SLES.prod` is there | to be confirmed |
+| `sles-sap-V` | `VERSION_ID=V`, and `/etc/products.d/SLES_SAP.prod` is there | to be confirmed |
+| `sle-ha-V` | `VERSION_ID=V`, and `/etc/products.d/sle-ha.prod` is there | to be confirmed |
+| `sle-micro` | `/etc/products.d/SL-Micro.prod` is there (its versions are directories of one collection: the agent names the version's, as the collection's instructions say) | as on a system of 6.2 |
 
-Only SLES's are from a system looked at; the others are as their
-products have named themselves so far, **to be confirmed on a system of
-each**. Where one is wrong, the collection is not preferred, and
-everything is as without.
+The products' files, not `ID`: SUSE Linux Micro 6.2 is `ID="sles"`,
+`VERSION_ID="16.0"` in its os-release (with `VARIANT="Micro"` and
+`SUSE_SUPPORT_PRODUCT="SUSE Linux Micro"`), so those two fields, as
+first written for SLES, made SLES 16.0's collection that system's and
+Micro's not. Only Micro's is from a system looked at (6.2: its
+`/etc/products.d` holds `SL-Micro.prod` and `baseproduct`); the file
+names of the others are as their products have named them so far, **to
+be confirmed on a system of each**. Where one is wrong, the collection
+is not preferred, and everything is as without.
 
 **What being first means.** In `find_sections`, a preferred
 collection's scores are multiplied by 1.25, and of a section that

@@ -48,7 +48,9 @@ case ${name%-*} in
 sles)
 	product='SUSE Linux Enterprise Server'
 	site=sles/$version
-	system="--system-os-release ID=sles --system-os-release VERSION_ID=$version"
+	# The product's file tells SLES from what is built on it: SUSE Linux
+	# Micro 6.2 is ID=sles, VERSION_ID=16.0 in its os-release, too.
+	system="--system-os-release VERSION_ID=$version --system-file /etc/products.d/SLES.prod"
 	about='installation, administration, security, virtualization, containers'
 	;;
 sle-ha)
@@ -61,7 +63,7 @@ sle-ha)
 sles-sap)
 	product='SUSE Linux Enterprise Server for SAP applications'
 	site=sles-sap/$version
-	system="--system-os-release ID=sles_sap --system-os-release VERSION_ID=$version"
+	system="--system-os-release VERSION_ID=$version --system-file /etc/products.d/SLES_SAP.prod"
 	about="installing and configuring a system for SAP applications, saptune, Ansible for SAP, and the administration of SLES $version as it applies to them"
 	;;
 *)

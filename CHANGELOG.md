@@ -24,6 +24,10 @@ OBS changelog entry (packaging/suse/README.md).
 - `search` does not match in a document's front matter, nor show it:
   a title there was the heading again. (`search_text` of `--fs-compat`
   searches files as they are.)
+- The systems of SUSE's collections are told by their products' files
+  (`/etc/products.d/SL-Micro.prod`, `SLES.prod`, …): SUSE Linux Micro
+  6.2 is `ID=sles`, `VERSION_ID=16.0` in its os-release, which made
+  SLES 16.0's collection that system's.
 
 ## v0.2.0 — 2026-11-10
 
