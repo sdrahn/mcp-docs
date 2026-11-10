@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sdrahn/mcp-docs/internal/catalog"
+	"github.com/sdrahn/mcp-docs/internal/rank"
 )
 
 func TestFindSections(t *testing.T) {
@@ -216,5 +220,46 @@ func TestFindAcrossCollections(t *testing.T) {
 	r = call(t, s, "find_sections", map[string]any{"query": "node.js update strategy", "read": false})
 	if text := mustOK(t, r); !strings.Contains(text, "1. base/topics/nodejs.md#nodejs-update-strategy") || !strings.Contains(text, "; also in sap)") {
 		t.Errorf("copy named: %s", text)
+	}
+}
+
+// TestIndexFileUsed: a collection's index file is read where the index
+// would be built, answers the same, and gives way when a document
+// changes.
+func TestIndexFileUsed(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "app")
+	write(t, filepath.Join(dirs["app"], "guide.md"), "# Guide\n\n## Timeouts\n\nSet the timeout in the file.\n\n## Approvals\n\nApprovals expire.\n")
+	want := mustOK(t, call(t, s, "find_sections", map[string]any{"query": "timeouts"}))
+
+	if err := rank.WriteFile(context.Background(), s.Cat, s.Cat.Collections[0], s.MaxFile); err != nil {
+		t.Fatal(err)
+	}
+	var log []string
+	s2 := &Server{Cat: catalog.New(s.Cat.Collections, s.Cat.Exts, s.Cat.MaxEntries), MaxRead: s.MaxRead, MaxFile: s.MaxFile,
+		Logf: func(f string, a ...any) { log = append(log, fmt.Sprintf(f, a...)) }}
+	if got := mustOK(t, call(t, s2, "find_sections", map[string]any{"query": "timeouts"})); got != want {
+		t.Errorf("with the index file:\n%s\nwant:\n%s", got, want)
+	}
+	if len(log) != 1 || !strings.Contains(log[0], "app: index read from mcp-docs.index") {
+		t.Errorf("log: %q", log)
+	}
+	// The index file is no document.
+	if got := mustOK(t, call(t, s2, "list_docs", map[string]any{})); strings.Contains(got, "mcp-docs.index") {
+		t.Errorf("the index file is listed: %s", got)
+	}
+	// A document changes: the index is built, and the new text found.
+	write(t, filepath.Join(dirs["app"], "guide.md"), "# Guide\n\n## Deadlines\n\nSet the deadline in the file.\n")
+	if got := mustOK(t, call(t, s2, "find_sections", map[string]any{"query": "deadlines"})); !strings.Contains(got, "app/guide.md#deadlines") {
+		t.Errorf("after a change: %s", got)
+	}
+	// A server that starts now finds the file stale, says so, and builds.
+	log = nil
+	s3 := &Server{Cat: catalog.New(s.Cat.Collections, s.Cat.Exts, s.Cat.MaxEntries), MaxRead: s.MaxRead, MaxFile: s.MaxFile,
+		Logf: func(f string, a ...any) { log = append(log, fmt.Sprintf(f, a...)) }}
+	if got := mustOK(t, call(t, s3, "find_sections", map[string]any{"query": "deadlines"})); !strings.Contains(got, "app/guide.md#deadlines") {
+		t.Errorf("a stale file: %s", got)
+	}
+	if len(log) != 1 || !strings.Contains(log[0], "not used") {
+		t.Errorf("log of a stale file: %q", log)
 	}
 }

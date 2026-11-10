@@ -124,4 +124,7 @@ instructions: >
   for. Each document's source front matter is its page on
   documentation.suse.com: cite it.
 YAML
+# The index file, last: of the documents as they are now, read by the
+# server where it would build the index from every document.
+"$convert" --index "$out"
 echo "$out/sle-micro.yaml"

@@ -22,7 +22,12 @@ package `mcp-docs-convert`, the script is
 converter ([packaging/suse](../../packaging/suse/README.md)).
 
 The second argument is where the documents will be installed; the
-collection file `sles-16.0.yaml` names it as the root. To try the
+collection file `sles-16.0.yaml` names it as the root. The script's
+last step writes the collection's index file, `mcp-docs.index`
+(`mcp-docs-convert --index DIR`), which the server reads where it would
+build the index of `find_sections` from every document: change a
+document afterwards, and the file is no longer used until it is written
+again. To try the
 collection without installing it:
 
 ```sh

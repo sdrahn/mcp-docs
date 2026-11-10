@@ -34,6 +34,16 @@ OBS changelog entry (packaging/suse/README.md).
   collection's index being built does not hold up the others.
 - With `--fs-compat`, `search_files`, `list_directory` and
   `outline_file` stop at `--max-read` and say so.
+- Index files: a collection's directory may hold `mcp-docs.index`, the
+  index of `find_sections`, which the server reads where it would
+  build the index from every document (four collections, 1,652
+  documents: 31 ms, from 289 ms in every session). `mcp-docs
+  --write-index` writes it for the server's collections,
+  `mcp-docs-convert --index DIR` for a converted one;
+  `tools/suse-docs/convert` and `convert-sle-micro` do, so the
+  `suse-docs-mcp-*` packages built with this release ship theirs. A file
+  that is not of the documents as they are (their paths, sizes and
+  checksums) is not used, and the server's log says why.
 
 ## v0.1.3 — 2026-11-09
 

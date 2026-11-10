@@ -40,8 +40,9 @@ type indexes struct {
 }
 
 type indexSlot struct {
-	mu sync.Mutex
-	ix *rank.Index
+	mu    sync.Mutex
+	ix    *rank.Index
+	tried bool // the index file was looked at
 }
 
 func (s *Server) index(ctx context.Context, k *catalog.Collection) (*rank.Index, error) {
@@ -59,6 +60,23 @@ func (s *Server) index(ctx context.Context, k *catalog.Collection) (*rank.Index,
 	defer slot.mu.Unlock()
 	if slot.ix != nil && slot.ix.Current(ctx, s.Cat, k) {
 		return slot.ix, nil
+	}
+	// The first time, the collection's index file, if it has one that is
+	// of its documents (§16.3): read where the index would be built.
+	if !slot.tried {
+		slot.tried = true
+		ix, err := rank.LoadFile(ctx, s.Cat, k)
+		switch {
+		case err == nil:
+			s.logf("%s: index read from %s", k.Name, rank.FileName)
+			slot.ix = ix
+			return ix, nil
+		case ctx.Err() != nil:
+			slot.tried = false
+			return nil, ctx.Err()
+		case !errors.Is(err, rank.ErrNoFile):
+			s.logf("%s: %s not used, the index is built: %v", k.Name, rank.FileName, err)
+		}
 	}
 	ix, err := rank.Build(ctx, s.Cat, k, s.MaxFile)
 	if err != nil {

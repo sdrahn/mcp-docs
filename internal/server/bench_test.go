@@ -75,6 +75,55 @@ func BenchmarkIndexBuild(b *testing.B) {
 	}
 }
 
+// BenchmarkIndexLoad: the same with index files (mcp-docs --write-index
+// or the converter writes them): read and checked against the
+// documents, not built.
+func BenchmarkIndexLoad(b *testing.B) {
+	s := benchServer(b)
+	for b.Loop() {
+		for _, k := range s.Cat.Collections {
+			if _, err := rank.LoadFile(context.Background(), s.Cat, k); err != nil {
+				b.Skipf("%s: %v", k.Name, err)
+			}
+		}
+	}
+}
+
+// TestIndexFilesAnswerAsBuilt: on the collections of MCP_DOCS_BENCH, an
+// index read from its file ranks as the one built.
+func TestIndexFilesAnswerAsBuilt(t *testing.T) {
+	root := os.Getenv("MCP_DOCS_BENCH")
+	if root == "" {
+		t.Skip("MCP_DOCS_BENCH is not set")
+	}
+	s := benchServer(&testing.B{})
+	queries := []string{benchQuery(), "put a node into maintenance mode", "install with Agama", "revert a saptune solution",
+		"configure the firewall", "snapper rollback", "timeout", "what is new"}
+	for _, k := range s.Cat.Collections {
+		built, err := rank.Build(context.Background(), s.Cat, k, s.MaxFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read, err := rank.LoadFile(context.Background(), s.Cat, k)
+		if err != nil {
+			t.Fatalf("%s: %v", k.Name, err)
+		}
+		for _, q := range queries {
+			x, _ := built.Search(q, 25)
+			y, _ := read.Search(q, 25)
+			if len(x) != len(y) {
+				t.Fatalf("%s %q: %d and %d sections", k.Name, q, len(x), len(y))
+			}
+			for i := range x {
+				if x[i].Doc != y[i].Doc || x[i].Heading != y[i].Heading || x[i].Score != y[i].Score || x[i].Sum != y[i].Sum {
+					t.Fatalf("%s %q, %d: built %s %d %v, read %s %d %v", k.Name, q, i, x[i].Doc.Address(), x[i].Heading,
+						x[i].Score, y[i].Doc.Address(), y[i].Heading, y[i].Score)
+				}
+			}
+		}
+	}
+}
+
 // BenchmarkFindSections: every later one, across the collections.
 func BenchmarkFindSections(b *testing.B) {
 	s := benchServer(b)

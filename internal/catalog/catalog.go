@@ -510,6 +510,32 @@ func (c *Catalog) ReadAll(d Doc, max int64) ([]byte, error) {
 	return b, nil
 }
 
+// Open opens a document for reading it whole.
+func (c *Catalog) Open(d Doc) (io.ReadCloser, error) { return c.open(d) }
+
+// ReadFile reads a file of at most max bytes in a collection's
+// directory that is not a document: what mcp-docs keeps beside them
+// (the index file).
+func (c *Catalog) ReadFile(k *Collection, name string, max int64) ([]byte, error) {
+	root, err := k.open()
+	if err != nil {
+		return nil, err
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, ErrTooLarge
+	}
+	return b, nil
+}
+
 // ErrTooLarge is a file larger than a read may be.
 var ErrTooLarge = errors.New("too large")
 

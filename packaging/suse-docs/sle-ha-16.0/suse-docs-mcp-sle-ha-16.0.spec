@@ -62,6 +62,7 @@ done
 
 %check
 d=%{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
+test -s "$d/mcp-docs.index"
 test "$(find "$d" -name '*.md' | wc -l)" -ge 120
 grep -qx 'root: %{_datadir}/mcp-docs/docs/suse/%{coll}' %{buildroot}%{_datadir}/mcp-docs/collections.d/%{coll}.yaml
 grep -q '^source: "https://documentation.suse.com/sle-ha/16.0/html/HA-sbd-configuring-diskless/index.html#ha-sbd-setting-up-diskless"' \

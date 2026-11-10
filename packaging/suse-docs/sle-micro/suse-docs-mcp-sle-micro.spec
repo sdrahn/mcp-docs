@@ -74,6 +74,7 @@ done
 
 %check
 d=%{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
+test -s "$d/mcp-docs.index"
 for v in 6.0 6.1 6.2; do
 	test "$(find "$d/$v" -name '*.md' | wc -l)" -ge 250
 done

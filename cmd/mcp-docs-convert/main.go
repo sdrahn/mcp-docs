@@ -13,12 +13,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/sdrahn/mcp-docs/internal/catalog"
+
 	"github.com/sdrahn/mcp-docs/internal/docbook"
+	"github.com/sdrahn/mcp-docs/internal/rank"
 )
 
 // version is set at build time (-ldflags "-X main.version=...").
@@ -48,11 +53,20 @@ func main() {
 	flag.StringVar(&o.Product, "product", "", "the product the articles document, in every document's front matter (SUSE Linux Enterprise Server)")
 	flag.StringVar(&o.Version, "product-version", "", "the product's version, with --product (16.0)")
 	flag.IntVar(&o.MaxSection, "max-section", 8<<10, "report sections whose own text is over this many bytes (0: none)")
+	index := flag.String("index", "", "write the index file of the collection in this directory ("+rank.FileName+
+		") and exit: the last step of making a collection, after its last document is written")
 	strict := flag.Bool("strict", false, "fail when an element, entity or link could not be converted")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("mcp-docs-convert", version)
+		return
+	}
+	if *index != "" {
+		if err := writeIndex(*index); err != nil {
+			fmt.Fprintln(os.Stderr, "mcp-docs-convert:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	o.DCs = dcs
@@ -78,6 +92,19 @@ func main() {
 	if *strict && !rep.OK() {
 		os.Exit(1)
 	}
+}
+
+// writeIndex writes the index file of the collection in dir, as
+// mcp-docs --write-index does for a collection without patterns or
+// list items (the collections of the converter are such).
+func writeIndex(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	k := &catalog.Collection{Name: filepath.Base(abs), Path: abs}
+	cat := catalog.New([]*catalog.Collection{k}, []string{".md", ".markdown"}, 1<<30)
+	return rank.WriteFile(context.Background(), cat, k, 16<<20)
 }
 
 func readList(file string) ([]string, error) {

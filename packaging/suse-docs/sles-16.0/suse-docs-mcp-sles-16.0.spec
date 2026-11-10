@@ -60,6 +60,7 @@ done
 
 %check
 d=%{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
+test -s "$d/mcp-docs.index"
 test "$(find "$d" -name '*.md' | wc -l)" -ge 400
 grep -qx 'root: %{_datadir}/mcp-docs/docs/suse/%{coll}' %{buildroot}%{_datadir}/mcp-docs/collections.d/%{coll}.yaml
 grep -q '^source: "https://documentation.suse.com/sles/16.0/html/SLES-SELinux/index.html#selinux-switching-modes"' \

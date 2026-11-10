@@ -33,6 +33,7 @@ import (
 	"github.com/sdrahn/mcp-docs/internal/landlock"
 	"github.com/sdrahn/mcp-docs/internal/mcphttp"
 	"github.com/sdrahn/mcp-docs/internal/mcpserver"
+	"github.com/sdrahn/mcp-docs/internal/rank"
 	"github.com/sdrahn/mcp-docs/internal/server"
 )
 
@@ -65,6 +66,8 @@ func main() {
 	flag.Var(&origins, "allow-origin", "with --listen, a browser origin (\"https://app.example\") requests may come from "+
 		"(repeatable); requests without an Origin header are always served")
 	maxConcurrent := flag.Int("max-concurrent", 32, "with --listen, requests handled at once")
+	writeIndex := flag.Bool("write-index", false, "write each collection's index file ("+rank.FileName+", in its directory) and exit: "+
+		"a server then reads the index where it would build it from every document (when a collection is made: a package's build)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [options]\n\nAn MCP server for the documentation on this system, on stdin/stdout or HTTP (--listen).\n\n", server.Name)
@@ -133,6 +136,18 @@ func main() {
 		}
 	}
 
+	if *writeIndex {
+		// Before Landlock, which leaves nothing to write.
+		cat := catalog.New(collections, extList, *maxEntries)
+		for _, k := range collections {
+			if err := rank.WriteFile(context.Background(), cat, k, *maxFile); err != nil {
+				fail(1, fmt.Sprintf("%s: %v", k.Name, err))
+			}
+			fmt.Println(filepath.Join(k.Path, rank.FileName))
+		}
+		return
+	}
+
 	// The kernel keeps the server to reading its collections (Landlock,
 	// docs/architecture.md §8), whatever starts it.
 	rules := landlockRules(collections, dirs, port)
@@ -152,7 +167,8 @@ func main() {
 	fmt.Fprintf(os.Stderr, "%s: serving %s; %s%s\n", server.Name, strings.Join(names, ", "), ll, tcpNote(ll, rules))
 
 	s := &server.Server{Cat: catalog.New(collections, extList, *maxEntries), About: *about, MaxRead: *maxRead,
-		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Tools: tools, Version: version}
+		MaxFile: *maxFile, FSCompat: *fsCompat, Structured: *structured, Tools: tools, Version: version,
+		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, server.Name+": "+format+"\n", args...) }}
 	if *listen == "" {
 		if err := mcpserver.New(s.Handle, os.Stdout).Serve(os.Stdin, 1<<20); err != nil {
 			fail(1, err.Error())

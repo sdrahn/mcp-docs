@@ -1332,7 +1332,7 @@ and the plan from them; the steps are recorded as they are built.
 | 0 | Benchmarks on real collections (`MCP_DOCS_BENCH`, below); a test of collections that share topics and differ in vocabulary | done |
 | 1 | The collections in scope ranked as one; copies folded; `search` shared among collections | done |
 | 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | done |
-| 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | |
+| 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | done (§16.3) |
 | 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | |
 
 **Step 1, as built.** `rank.Search` ranks the parts of several indexes
@@ -1402,3 +1402,56 @@ their collection files (`build/` after `tools/suse-docs/convert`):
 ```sh
 MCP_DOCS_BENCH=$PWD/build go test ./internal/server -run '^$' -bench . -benchmem
 ```
+
+### 16.3 The index file
+
+A stdio server lives for a session, and the first `find_sections` of
+each built the index of every collection in scope: all documents read
+and tokenized, 289 ms for the four collections. A collection that is
+made once and served often has its index written once instead: the file
+`mcp-docs.index` in its directory (`internal/rank/file.go`).
+
+- **Who writes it.** `mcp-docs --write-index`, for the collections the
+  server is configured with (their patterns, `list_items` and
+  extensions as it serves them), and `mcp-docs-convert --index DIR`,
+  for a converted collection; `tools/suse-docs/convert` and
+  `convert-sle-micro` end with it, so a package's build needs nothing
+  new and the spec files only check that the file is there. The same
+  documents give the same file, byte for byte.
+- **When it is used.** The first time a collection's index is needed,
+  the server reads the file and checks it against the documents as a
+  walk finds them: the same paths, each of the same size and CRC-32.
+  Every document is read for that (several at a time), which costs a
+  tenth of building; what the directory tells of a file (its time) is
+  not enough to go by, as a package's installation sets it. Any
+  difference, a damaged file, or one made with another `list_items`
+  or another version of the index's words, and the file is not used:
+  the index is built as before, and the server's log says why
+  ("sles-16.1: mcp-docs.index not used, the index is built: …"). When
+  it is used, the log says "index read from mcp-docs.index". From then
+  on the index is one like any other: current while the documents stay
+  as they are, built anew when one changes.
+- **What it holds.** The documents (path, size, checksum), the words,
+  the units (document, heading id, length, the sum of its text, its
+  title's words) and each word's postings; no text, and no outline.
+  A unit names its heading by id: the outline is of the server's own
+  reading of the document, loaded when a hit needs it (only the best
+  hits' documents are opened), so a server that reads headings
+  otherwise than the writer did finds an id missing, takes the index as
+  stale and builds its own.
+- **The words' version.** The file's words are `rank.Tokens`' of the
+  writer, the query's the reader's: `rank.TokensVersion` is in the
+  file, and a file of another version is not used. `TestTokensVersion`
+  holds a sum of what `Tokens` makes of a fixed text, and fails when
+  that changes without the version.
+- **Not trusted.** The file is read with bounds on every count and
+  index and a checksum over all of it; a test changes each byte and
+  cuts each length, a fuzz test feeds the reader files with a right
+  checksum. A file that names other documents than the collection has
+  is not used; documents are opened through the collection's
+  `os.Root` in any case.
+- **Size and time.** SLES 16.1: 458 KB beside 3.0 MB of documents
+  (15%). The four collections: read and checked in 31 ms, built in
+  289 ms; the answers are the same (`TestIndexFilesAnswerAsBuilt`
+  compares sections, scores and sums on the collections of
+  `MCP_DOCS_BENCH`).
