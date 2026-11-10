@@ -230,14 +230,71 @@ func TestTogetherOnSystems(t *testing.T) {
 	}
 }
 
+// spellings are questions asked in two spellings of a word that the
+// documents write one way, or both: the answer should not depend on it.
+var spellings = [][2]string{
+	{"roll back the system", "rollback the system"},
+	{"set up a firewall", "setup a firewall"},
+	{"log in to Hawk", "login to Hawk"},
+	{"back up the system", "backup the system"},
+	{"live patch the kernel", "livepatch the kernel"},
+	{"time out of SBD", "timeout of SBD"},
+	{"multi path devices", "multipath devices"},
+	{"create a snap shot", "create a snapshot"},
+	{"file system check", "filesystem check"},
+	{"change the host name", "change the hostname"},
+	{"run level and targets", "runlevel and targets"},
+	{"start up the cluster", "startup the cluster"},
+}
+
+// TestTogetherSpellings counts the pairs whose first result is the
+// same section in both spellings.
+func TestTogetherSpellings(t *testing.T) {
+	s, names := togetherServer(t)
+	first := func(q string) string {
+		p, _ := json.Marshal(map[string]any{"name": "find_sections", "arguments": map[string]any{"query": q, "read": false, "maxResults": 1}})
+		res, err := s.Handle(context.Background(), "tools/call", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(res)
+		var r struct {
+			S struct {
+				Sections []struct{ Doc, Section string }
+			} `json:"structuredContent"`
+		}
+		_ = json.Unmarshal(b, &r)
+		if len(r.S.Sections) == 0 {
+			return ""
+		}
+		return path.Base(r.S.Sections[0].Doc) + "#" + r.S.Sections[0].Section
+	}
+	same := 0
+	for _, p := range spellings {
+		a, b := first(p[0]), first(p[1])
+		if a == b && a != "" {
+			same++
+		} else {
+			t.Logf("%q: %s; %q: %s", p[0], a, p[1], b)
+		}
+	}
+	t.Logf("%d of %d pairs of spellings have the same first result", same, len(spellings))
+	if slices.Equal(names, togetherAll) && same < spellingFloor {
+		t.Errorf("%d pairs of spellings with the same first result, fewer than the %d before", same, spellingFloor)
+	}
+}
+
+// spellingFloor is togetherFloors' of TestTogetherSpellings.
+const spellingFloor = 9
+
 // systemFloors are togetherFloors' of TestTogetherOnSystems.
-var systemFloors = struct{ first, own int }{first: 105, own: 102}
+var systemFloors = struct{ first, own int }{first: 110, own: 102}
 
 // togetherFloors are what the eval came to when it was last looked at,
 // with the collections of togetherAll: a run must not answer fewer
 // questions first, nor repeat more. When a change does better, raise
 // them: they are what the next change is measured against.
-var togetherFloors = struct{ first, repeats int }{first: 53, repeats: 38}
+var togetherFloors = struct{ first, repeats int }{first: 55, repeats: 1}
 
 func TestTogether(t *testing.T) {
 	s, names := togetherServer(t)

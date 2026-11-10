@@ -31,7 +31,7 @@ var SLES = []Question{
 	{"which file systems are supported by SLES 16", []string{"migration-guide-sle16-kernel-storage", "migration-filesystem-support"}, ""},
 	{"NetworkManager network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, ""},
 	{"make a SELinux domain permissive", []string{"setting-permissive-domain"}, ""},
-	{"configure the opensm InfiniBand subnet manager", []string{"task-example"}, ""},
+	{"configure the opensm InfiniBand subnet manager", []string{"task-example", "opensm-configuring"}, ""},
 	{"switch SELinux to permissive until the next boot", []string{"sec-getenforce-setenforce", "concept-SELinux"}, ""},
 	{"migrate from Redis to Valkey", []string{"valkey-migrate"}, ""},
 }
@@ -72,7 +72,7 @@ var SLEHA = []Question{
 	{"clean up a failed resource", []string{"ha-resources-cleaning-up"}, ""},
 	{"change the SBD timeout", []string{"ha-sbd-changing-timeout-settings"}, ""},
 	{"what is a primitive resource", []string{"ha-resources-what-is-primitive"}, ""},
-	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode"}, ""},
+	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode", "ha-maintenance-putting-cluster-into-maintenance-mode"}, ""},
 	{"resolve cluster issues after an upgrade", []string{"ha-upgrade-resolving-cluster-issues"}, ""},
 	{"remove an SBD device", []string{"ha-sbd-removing-device"}, ""},
 }

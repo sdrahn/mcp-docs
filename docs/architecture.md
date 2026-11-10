@@ -1619,7 +1619,7 @@ Not worth it: shorter link targets in the documents (1.7% of the text).
 |---|---|---|
 | A | The eval (11) | done (§17.3) |
 | B | The system's product first (1); `search` without front matter (5) | done (§17.4) |
-| C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | |
+| C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | 3 and 4 done; 2 tried and not kept (§17.5) |
 | D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
 | E | `search` for expressions in parallel (9), no walk on every call (10) | |
 
@@ -1683,7 +1683,7 @@ require a server's version; front matter it does not know, it ignores.
 
 | Collection | A system's if | |
 |---|---|---|
-| `sles-V` | `VERSION_ID=V`, and `/etc/products.d/SLES.prod` is there | to be confirmed |
+| `sles-V` | `VERSION_ID=V`, and `/etc/products.d/SLES.prod` is there | as on a system of 16.1 |
 | `sles-sap-V` | `VERSION_ID=V`, and `/etc/products.d/SLES_SAP.prod` is there | to be confirmed |
 | `sle-ha-V` | `VERSION_ID=V`, and `/etc/products.d/sle-ha.prod` is there | to be confirmed |
 | `sle-micro` | `/etc/products.d/SL-Micro.prod` is there (its versions are directories of one collection: the agent names the version's, as the collection's instructions say) | as on a system of 6.2 |
@@ -1692,10 +1692,12 @@ The products' files, not `ID`: SUSE Linux Micro 6.2 is `ID="sles"`,
 `VERSION_ID="16.0"` in its os-release (with `VARIANT="Micro"` and
 `SUSE_SUPPORT_PRODUCT="SUSE Linux Micro"`), so those two fields, as
 first written for SLES, made SLES 16.0's collection that system's and
-Micro's not. Only Micro's is from a system looked at (6.2: its
-`/etc/products.d` holds `SL-Micro.prod` and `baseproduct`); the file
-names of the others are as their products have named them so far, **to
-be confirmed on a system of each**. Where one is wrong, the collection
+Micro's not. Micro's and SLES's are from systems looked at (SUSE Linux
+Micro 6.2: `/etc/products.d` holds `SL-Micro.prod` and `baseproduct`;
+SLES 16.1: `SLES.prod`, `PackageHub.prod` and `baseproduct`, with
+`VERSION_ID="16.1"`); the file names of SLES for SAP's and SLE HA's are
+as their products have named them so far, **to be confirmed on a system
+of each**. Where one is wrong, the collection
 is not preferred, and everything is as without.
 
 **What being first means.** In `find_sections`, a preferred
@@ -1732,3 +1734,86 @@ none of its lines as context. One call returns as much as before where
 it fills its limit, of other lines: ten searches of SLES for SAP 16.1
 showed 94 lines of front matter among 215 matching lines, and now
 none, and reach 69 documents where they reached 63.
+
+### 17.5 Variants folded, other spellings asked, overviews not
+
+Each against the eval of §17.3, with the seven collections and no
+system known:
+
+| | Answered first | Results repeating a topic | Pairs of spellings with the same first result |
+|---|---|---|---|
+| before | 53 of 64 | 38 | 0 of 12 |
+| the questions' answers corrected (below) | 54 | 38 | |
+| variants folded | 54 | 1 | |
+| other spellings asked | **55** | **1** | **9 of 12** |
+
+As servers on their systems (§17.4): 110 of 128 answered first, from
+105; 1 result repeats a topic, from 44.
+
+**Variants folded.** A result whose section has the id of an earlier
+one's and nearly its text is that topic again, in another product's or
+version's collection: it is named with the earlier one ("variants in
+sles-sap-16.1"; `variants` with `--structured`), as a copy with the
+same text is ("also in"), and its place goes to the next section.
+Nearly: the two sections share at least 0.7 of the words either has
+(of their own text, read when a result of the same id follows; no more
+than the candidates of one call). The sections of one id in SUSE's
+collections are apart: 0.9 and more where they are one topic twice,
+0.5 and less where an id is used for two topics; 8 of 133 pairs were
+between. Which of the variants is the result is the ranking's, so on a
+system it is the system's (§17.4). The index is as it was: no file
+changes.
+
+**Other spellings asked.** The documents write "log in", "set up",
+"time out", "live patch" and "file system", and their readers also
+"login", "setup", "timeout", "livepatch" and "filesystem", or the
+reverse; to the index these are other words. A query is now also asked
+in the spelling the documents have (`rank.queryTerms`): two of its
+words as one, where the indexes have that word; and a word as two,
+where they have both and each in more sections than the word itself
+(so "network" is not "net" and "work", nor "snapshot" "snap" and
+"shot"), the second also being one of "in", "up", "on", "out", "off"
+and "down". A word of another spelling counts 0.6 of one of the
+query's own: at 1, all twelve pairs of the eval agree and two of the
+64 questions are lost to the added words; at 0.6, nine pairs agree and
+one question is gained ("which file systems are supported": the
+section says "filesystem"). No list of words, and no model: what is
+tried is what the collections' own words allow.
+
+**Overviews, not kept.** The plan's step 2 was to answer a task of
+many steps with its article. Tried as the title of an index above the
+documents it links to (an article's title counted with the titles of
+the headings above each of its topics' sections), it lost two
+questions and gained none (51 of 64): every topic of an article then
+has the article's words, and the article's small topics outrank the
+section that answers. The questions it was for are answered otherwise
+by now ("install SLES for SAP with Agama" by the overview topic of
+16.0's sources), or missed for another reason ("install a three-node
+cluster": its "Installation overview" is eighth).
+
+**The questions' answers corrected.** Two questions named one section
+where another answers as well: "put the whole cluster into maintenance
+mode" is also answered by "Putting the cluster into maintenance mode"
+(the first result), and "configure the opensm InfiniBand subnet
+manager" by `opensm-configuring`, the id the topic has from 16.1 on.
+The first is one question more answered, by the count and not by the
+server.
+
+**What is still missed** (9 of 64), by what would take to find it:
+
+- another verb than the title's: "configure disk-based SBD" (the title
+  says "Setting up"), "tune the system for SAP HANA" ("Configuring
+  `saptune` tuning"), "apply a saptune solution" ("Managing SAP
+  Solutions");
+- a small section whose title has more of the question's words than
+  the answer's: "what is SLES for SAP" (an installation topic with the
+  product's name in its title), "configure the opensm subnet manager"
+  ("What is a Subnet Manager?"), "NetworkManager network is not
+  running", "what is the sles_sap_automation pattern", "upgrade SLE
+  Micro to 6.2" (the preparation before the procedure);
+- an overview whose title does not say of what: "install a three-node
+  cluster".
+
+The first kind is the sources' to fix where it is anyone's (a title in
+the reader's words, docs/writing-docs.md); synonyms are meanings, which
+this server has none of.
