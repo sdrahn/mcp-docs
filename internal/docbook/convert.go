@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -147,11 +148,11 @@ func (c *conversion) parse(file string, depth int) (*Node, error) {
 	if depth > 8 {
 		return nil, fmt.Errorf("%s: includes nested too deep", file)
 	}
-	raw, err := os.ReadFile(file)
+	raw, err := c.readFile(file)
 	if err != nil {
 		return nil, err
 	}
-	ents, err := EntitiesOf(raw, filepath.Dir(file))
+	ents, err := entitiesOf(raw, filepath.Dir(file), c.readFile)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", file, err)
 	}
@@ -178,7 +179,7 @@ func (c *conversion) include(n *Node, dir string, depth int) error {
 		}
 		file := filepath.Join(dir, ch.Attr["href"])
 		if ch.Attr["parse"] == "text" {
-			b, err := os.ReadFile(file)
+			b, err := c.readFile(file)
 			if err != nil {
 				return err
 			}
@@ -206,7 +207,36 @@ func (c *conversion) read(rel string, prof map[string][]string) (*source, error)
 type conversion struct {
 	o          Options
 	unresolved map[string]bool
+	// The sources: every file a source names (an include, a resource,
+	// a file of entities) is read below them, through root.
+	src  string // absolute
+	root *os.Root
 }
+
+// readFile reads a file of the sources. A path that leads out of them
+// ("../", or a symbolic link) is an error: what a source file names is
+// not trusted to stay where the converter was pointed.
+func (c *conversion) readFile(file string) ([]byte, error) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := filepath.Rel(c.src, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("%s: outside the sources (%s)", file, c.src)
+	}
+	f, err := c.root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
+}
+
+// fileName reports whether an id can name a document: letters, digits,
+// ".", "_" and "-", not starting with a ".". An xml:id is the name of
+// its topic's file, and nothing makes the parser refuse "../../x".
+var fileName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
 
 // module is a topic of an article, in its order and nesting; a module
 // without a resource is a heading of its own (a title, an abstract)
@@ -274,6 +304,12 @@ func assignFiles(arts []*article) {
 			}
 		}
 	}
+}
+
+// urlOf is a URL pattern with its "%s" replaced by a name. Not a
+// format: a pattern's percent escapes ("%20") are its own.
+func urlOf(pattern, name string) string {
+	return strings.ReplaceAll(pattern, "%s", name)
 }
 
 // links is a renderer that knows where the article's ids are.
@@ -371,6 +407,9 @@ func (c *conversion) load(dcName string) (*article, error) {
 				if id == "" {
 					return nil, fmt.Errorf("%s: the topic has no xml:id", mod.resource)
 				}
+				if !fileName.MatchString(id) {
+					return nil, fmt.Errorf("%s: the topic's xml:id %q cannot name its document", mod.resource, id)
+				}
 				if mod.page == "" {
 					mod.page = id + ".html"
 				}
@@ -404,6 +443,45 @@ func Convert(o Options) (*Report, error) {
 		return nil, fmt.Errorf("no build definition")
 	}
 	c := &conversion{o: o, unresolved: map[string]bool{}}
+	var err error
+	if c.src, err = filepath.Abs(o.Src); err != nil {
+		return nil, err
+	}
+	if c.root, err = os.OpenRoot(c.src); err != nil {
+		return nil, err
+	}
+	defer func() { _ = c.root.Close() }()
+	arts, err := c.articles()
+	if err != nil {
+		return nil, err
+	}
+	unknown, broken, conflicts := resolve(arts)
+	docs, large, err := c.write(arts)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(o.Out, "README.md"), []byte(c.readme(arts)), 0o644); err != nil {
+		return nil, err
+	}
+	docs++
+
+	rep := &Report{Articles: len(arts), Documents: docs, Unknown: unknown, Conflicts: conflicts,
+		Large: large, MaxSection: o.MaxSection}
+	for u := range c.unresolved {
+		rep.Unresolved = append(rep.Unresolved, u)
+	}
+	for b := range broken {
+		rep.Broken = append(rep.Broken, b)
+	}
+	sort.Strings(rep.Unresolved)
+	sort.Strings(rep.Broken)
+	return rep, nil
+}
+
+// articles reads the articles of the build definitions and their
+// topics.
+func (c *conversion) articles() ([]*article, error) {
+	o := c.o
 	var arts []*article
 	names := map[string]bool{}
 	for _, d := range o.DCs {
@@ -417,7 +495,14 @@ func Convert(o Options) (*Report, error) {
 		names[a.name] = true
 		arts = append(arts, a)
 	}
+	return arts, nil
+}
 
+// resolve names the topics' documents and renders them, until every
+// document is the same for all articles that share it. It returns the
+// elements the renderers did not know, the link targets they did not
+// find, and the topics that still differ.
+func resolve(arts []*article) (map[string]int, map[string]bool, []string) {
 	// Documents: a topic is topics/ID.md; one that articles profile
 	// differently, topics/ID--ARTICLE.md per variant, named by the first
 	// article that has it. A topic that articles profile alike but whose
@@ -432,6 +517,7 @@ func Convert(o Options) (*Report, error) {
 		for _, a := range arts {
 			a.renderer = a.links(unknown, broken)
 			r := a.renderer
+			r.file = a.file // its links are from the article's index
 			a.title, a.desc, a.abstract, a.tasks = articleMeta(r, a.st)
 			a.date, a.created = revised(a.st)
 			a.arches = architectures(a.st)
@@ -470,10 +556,16 @@ func Convert(o Options) (*Report, error) {
 			}
 		}
 	}
+	return unknown, broken, conflicts
+}
 
+// write writes the topics' documents and the articles' indexes, and
+// returns their number and the sections over Options.MaxSection.
+func (c *conversion) write(arts []*article) (int, []string, error) {
+	o := c.o
 	for _, d := range []string{"topics", "articles"} {
 		if err := os.MkdirAll(filepath.Join(o.Out, d), 0o755); err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 	}
 	written := map[string]bool{}
@@ -487,6 +579,7 @@ func Convert(o Options) (*Report, error) {
 			}
 			written[t.file] = true
 			desc := ""
+			r.file = t.file
 			if info := t.src.root.Child("info"); info != nil {
 				if ab := info.Child("abstract"); ab != nil {
 					desc = strings.Join(r.paragraphText(ab.Children), " ")
@@ -508,13 +601,13 @@ func Convert(o Options) (*Report, error) {
 			fields = append(fields, [2]any{"source", c.sourceOf(a, t.src.rel, t.page, t.id)})
 			text := frontMatter(fields) + t.body
 			if err := os.WriteFile(filepath.Join(o.Out, t.file), []byte(text), 0o644); err != nil {
-				return nil, err
+				return 0, nil, err
 			}
 			docs++
 			if o.MaxSection > 0 && !legalTopic(t) {
 				l, err := largeSections(text, int64(o.MaxSection))
 				if err != nil {
-					return nil, err
+					return 0, nil, err
 				}
 				for _, sec := range l {
 					large = append(large, t.file+sec)
@@ -578,11 +671,16 @@ func Convert(o Options) (*Report, error) {
 		}
 		list(a.tree, "")
 		if err := os.WriteFile(filepath.Join(o.Out, a.file), []byte(idx.String()), 0o644); err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		docs++
 	}
+	return docs, large, nil
+}
 
+// readme is the collection's index.
+func (c *conversion) readme(arts []*article) string {
+	o := c.o
 	// The collection's index: the articles' titles, grouped by their
 	// first task ("Security"), short enough to read whole; the articles'
 	// descriptions are in their own front matter (list_docs).
@@ -627,7 +725,7 @@ func Convert(o Options) (*Report, error) {
 		dcs = []string{fmt.Sprintf("%d build definitions", len(o.DCs))}
 	}
 	fmt.Fprintf(&readme, "Converted by mcp-docs-convert from SUSE's DocBook sources (%s, %s",
-		strings.TrimSuffix(fmt.Sprintf(o.SourceURL, ""), "/"), strings.Join(dcs, ", "))
+		strings.TrimSuffix(urlOf(o.SourceURL, ""), "/"), strings.Join(dcs, ", "))
 	if o.Revision != "" {
 		fmt.Fprintf(&readme, ", revision %s", o.Revision)
 	}
@@ -653,22 +751,7 @@ func Convert(o Options) (*Report, error) {
 		readme.WriteString(": " + strings.Join(legal, ", "))
 	}
 	readme.WriteString(".\n")
-	if err := os.WriteFile(filepath.Join(o.Out, "README.md"), []byte(readme.String()), 0o644); err != nil {
-		return nil, err
-	}
-	docs++
-
-	rep := &Report{Articles: len(arts), Documents: docs, Unknown: unknown, Conflicts: conflicts,
-		Large: large, MaxSection: o.MaxSection}
-	for u := range c.unresolved {
-		rep.Unresolved = append(rep.Unresolved, u)
-	}
-	for b := range broken {
-		rep.Broken = append(rep.Broken, b)
-	}
-	sort.Strings(rep.Unresolved)
-	sort.Strings(rep.Broken)
-	return rep, nil
+	return readme.String()
 }
 
 // legalTopic reports whether a topic is a legal notice: the sources'
@@ -703,9 +786,9 @@ func kib(n int64) string { return fmt.Sprintf("%.1f KiB", float64(n)/1024) }
 // documentation.suse.com, or else its source file.
 func (c *conversion) sourceOf(a *article, rel, page, id string) string {
 	if c.o.SiteURL == "" {
-		return fmt.Sprintf(c.o.SourceURL, rel)
+		return urlOf(c.o.SourceURL, rel)
 	}
-	u := fmt.Sprintf(c.o.SiteURL, a.name)
+	u := urlOf(c.o.SiteURL, a.name)
 	if !strings.HasSuffix(u, "/") {
 		u += "/"
 	}

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +29,12 @@ var (
 	entityRef  = regexp.MustCompile(`&([A-Za-z_][\w.\-:]*);`)
 	doctype    = regexp.MustCompile(`(?s)<!DOCTYPE\s+\w+\s*\[(.*?)\]\s*>`)
 )
+
+// noEntities is what entities are not expanded in.
+var noEntities = regexp.MustCompile(`(?s)<!\[CDATA\[.*?\]\]>|<!--.*?-->`)
+
+// maxExpanded bounds a document's text with its entities expanded.
+const maxExpanded = 64 << 20
 
 // predefined are XML's own entities, left to the parser.
 var predefined = map[string]bool{"amp": true, "lt": true, "gt": true, "quot": true, "apos": true}
@@ -43,10 +50,11 @@ type entityLoader struct {
 	ents  Entities
 	files map[string]bool
 	pes   map[string]string // parameter entity → absolute file
+	read  func(string) ([]byte, error)
 }
 
-func newEntityLoader() *entityLoader {
-	return &entityLoader{ents: Entities{}, files: map[string]bool{}, pes: map[string]string{}}
+func newEntityLoader(read func(string) ([]byte, error)) *entityLoader {
+	return &entityLoader{ents: Entities{}, files: map[string]bool{}, pes: map[string]string{}, read: read}
 }
 
 // declarations reads a DTD fragment whose relative paths are relative
@@ -115,7 +123,7 @@ func (l *entityLoader) file(path string) error {
 		return nil
 	}
 	l.files[abs] = true
-	b, err := os.ReadFile(abs)
+	b, err := l.read(abs)
 	if err != nil {
 		return err
 	}
@@ -125,7 +133,13 @@ func (l *entityLoader) file(path string) error {
 // EntitiesOf returns the entities a source file declares in its
 // DOCTYPE, following the files it names.
 func EntitiesOf(src []byte, dir string) (Entities, error) {
-	l := newEntityLoader()
+	return entitiesOf(src, dir, os.ReadFile)
+}
+
+// entitiesOf is EntitiesOf reading the files it follows with read (the
+// converter's, which keeps to its sources).
+func entitiesOf(src []byte, dir string, read func(string) ([]byte, error)) (Entities, error) {
+	l := newEntityLoader(read)
 	if m := doctype.FindSubmatch(src); m != nil {
 		if err := l.declarations(string(m[1]), dir); err != nil {
 			return nil, err
@@ -142,20 +156,38 @@ func Expand(src []byte, ents Entities) ([]byte, []string) {
 	unresolved := map[string]bool{}
 	for depth := 0; depth < 10; depth++ {
 		changed := false
-		text = entityRef.ReplaceAllStringFunc(text, func(ref string) string {
-			name := ref[1 : len(ref)-1]
-			if predefined[name] {
-				return ref
-			}
-			v, ok := ents[name]
-			if !ok {
-				unresolved[name] = true
-				return "&amp;" + name + ";" // kept visible, and parsable
-			}
-			changed = true
-			return v
-		})
+		expand := func(s string) string {
+			return entityRef.ReplaceAllStringFunc(s, func(ref string) string {
+				name := ref[1 : len(ref)-1]
+				if predefined[name] {
+					return ref
+				}
+				v, ok := ents[name]
+				if !ok {
+					unresolved[name] = true
+					return "&amp;" + name + ";" // kept visible, and parsable
+				}
+				changed = true
+				return v
+			})
+		}
+		// Not in CDATA sections and comments, where "&name;" is text.
+		var b strings.Builder
+		last := 0
+		for _, m := range noEntities.FindAllStringIndex(text, -1) {
+			b.WriteString(expand(text[last:m[0]]))
+			b.WriteString(text[m[0]:m[1]])
+			last = m[1]
+		}
+		b.WriteString(expand(text[last:]))
+		text = b.String()
 		if !changed {
+			break
+		}
+		// Entities that hold entities grow with each pass: a text that
+		// has grown this large is no document.
+		if len(text) > maxExpanded {
+			unresolved["(entities expand to more than "+strconv.Itoa(maxExpanded>>20)+" MiB)"] = true
 			break
 		}
 	}

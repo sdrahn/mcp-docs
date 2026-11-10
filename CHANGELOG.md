@@ -36,6 +36,18 @@ OBS changelog entry (packaging/suse/README.md).
   collection's index being built does not hold up the others.
 - With `--fs-compat`, `search_files`, `list_directory` and
   `outline_file` stop at `--max-read` and say so.
+- `mcp-docs-convert` keeps to its sources: an include, a resource or
+  a file of entities outside `--src` (by `../` or a symbolic link) is
+  an error, and so is an `xml:id` that is no file name (`../../x` wrote
+  outside `--out`). `--site-url` and `--source-url` may hold percent
+  escapes.
+- `mcp-docs-convert` renders an index term or remark inside a
+  paragraph without splitting it, an inline image as its description
+  in the text, table cells that span columns or rows in their columns,
+  and a paragraph that starts like a heading or list item as text;
+  links in an article's abstract lead to the topics (`../topics/…`;
+  SLES 16.1's and SLE HA 16.1's upgrade articles had them broken).
+  Entities in CDATA sections are left as written.
 - Index files: a collection's directory may hold `mcp-docs.index`, the
   index of `find_sections`, which the server reads where it would
   build the index from every document (four collections, 1,652
