@@ -256,9 +256,9 @@ the right place first:
 - **Write names with ordinary spaces.** Agents type spaces. A name
   written with no-break spaces (`SLES&nbsp;for&nbsp;SAP`, as typesetting
   does to keep it on one line) is another string to tools that match
-  text. mcp-docs' `search` matches no-break spaces as spaces (from the
-  release after 0.1.3); other tools may not, and `find_sections` ranks
-  words either way.
+  text. mcp-docs' `search` matches no-break spaces as spaces (from
+  0.2.0); other tools may not, and `find_sections` ranks words either
+  way.
 - **Keep one copy of each text.** Two copies of a text, such as a
   glossary in every guide or a shared topic included in several, are
   two matches of the same weight: the agent reads both or guesses
@@ -320,6 +320,42 @@ For documentation installed on a system and served by mcp-docs:
 - Document the installed version. An agent on a machine asks about the
   software there; say which version a document describes when it
   matters, and keep upgrade notes in the changelog.
+- Ship the collection's index file. Without one, every session's first
+  `find_sections` reads and indexes all documents (0.4 s for 1,650 of
+  them); with `mcp-docs.index` in the collection's directory it reads
+  the file (36 ms). Write it as the last step of the package's build,
+  after the last change to a document: `mcp-docs --write-index` with
+  the collection's own settings. It is used only while every document
+  is as it was then, so a document patched afterwards costs the gain,
+  not the answer: the server's log says when a file is not used.
+
+## Collections that are served together
+
+An agent that does not know where the answer is asks all collections at
+once, and they are ranked as one. What that asks of documentation that
+comes in several collections (a product family, versions, a product
+and its add-ons):
+
+- **Keep shared text the same to the byte.** `find_sections` returns a
+  section that several collections hold once, and names the others
+  ("also in sles-sap-16.1"), when its id and its text are the same. A
+  shared topic that differs in one word, a product name filled in for
+  each collection, is a result of its own in each: of three results,
+  two are then the same topic. Write shared topics without the product
+  name where the sentence allows it, and say which product a document
+  is for in its front matter, which is not compared, and in the
+  collection's index.
+- **Give what differs a title that says so.** Where two collections
+  answer the same question differently, both sections come back, and
+  the agent chooses by their titles and paths: "Installing on IBM Z",
+  not a second "Installing".
+- **Test the questions against all of them together.** A question a
+  collection answers first when asked alone can come second among its
+  neighbours: SUSE's High Availability documentation answers "install
+  a three-node cluster" first alone, and not beside the collections of
+  the products it runs on. The collection's `instructions` can say
+  what it is the place for ("cluster questions: collection sle-ha"),
+  so that the agent names it.
 
 ## Checking a document
 
@@ -378,7 +414,27 @@ For a set of documents that matters, write down the questions readers
 ask and the section that answers each, and measure what answering them
 costs, as `internal/eval` does for mcp-gateway's documentation: the
 calls an agent makes, the bytes they return, and whether they reach
-the right section. Run it again when the documentation changes.
+the right section. Run it again when the documentation changes, and
+with the other collections it is served with (see [collections that
+are served together](#collections-that-are-served-together)).
+
+### Sources in another format
+
+Documentation written in DocBook or another format and converted to
+Markdown (as SUSE's is, by `mcp-docs-convert`) is checked as converted:
+the outline above is of the Markdown. What the conversion cannot keep
+is better not written:
+
+- **Table cells that span rows or columns.** A Markdown table has
+  none: the cell is in its first place and the others it covers are
+  empty. A table that reads only with its spans is better two tables,
+  or a list.
+- **Images without a description.** An icon in a sentence ("click the
+  … icon") is its description in the Markdown, and nothing without
+  one. Give every image a text alternative that says what it shows.
+- **Ids that are not names.** A topic's id is its document's file name
+  and its section's anchor: letters, digits, `-`, `_` and `.`, stable
+  across versions, so that links and agents' memories of them hold.
 
 ## Checklist
 
@@ -401,4 +457,5 @@ the right section. Run it again when the documentation changes.
 - [ ] `rank: false` on legal notices, changelogs and navigation pages.
 - [ ] A compact index document that maps questions to sections.
 - [ ] Diagrams described in text.
-- [ ] Installed outside `%doc`, with a collection file.
+- [ ] Installed outside `%doc`, with a collection file and the index file, written last.
+- [ ] Topics shared between collections the same to the byte; the questions tested with the collections together.

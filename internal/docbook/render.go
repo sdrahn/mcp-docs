@@ -37,7 +37,7 @@ var (
 		"trademark", "firstterm", "glossterm", "guilabel", "guimenu", "guisubmenu", "guimenuitem",
 		"guibutton", "foreignphrase", "wordasword", "orgname", "personname", "firstname", "surname")
 	inlineElements = set("replaceable", "emphasis", "keycap", "keycombo", "xref", "link", "footnote",
-		"quote", "menuchoice", "sup", "superscript", "sub", "subscript")
+		"quote", "menuchoice", "sup", "superscript", "sub", "subscript", "inlinemediaobject")
 	// Elements that are metadata, not content.
 	skipElements = set("info", "title", "titleabbrev", "subtitle", "abstract", "meta", "revhistory",
 		"indexterm", "remark", "docmanager", "annotation", "alt")
@@ -54,6 +54,11 @@ func set(names ...string) map[string]bool {
 func isInline(n *Node) bool {
 	return n.Name == "" || codeElements[n.Name] || textElements[n.Name] || inlineElements[n.Name]
 }
+
+// inlineSkipped are the elements without content of their own that
+// occur in a paragraph's text: left out there, they do not end the
+// paragraph.
+var inlineSkipped = set("indexterm", "remark", "annotation", "alt")
 
 var spaces = regexp.MustCompile(`\s+`)
 
@@ -74,8 +79,16 @@ func (r *renderer) inlineNode(n *Node) string {
 		return codeSpan(plain(n))
 	case textElements[n.Name]:
 		return r.inline(n.Children)
+	case skipElements[n.Name]:
+		return "" // metadata, in a title or a paragraph as between blocks
 	}
 	switch n.Name {
+	case "inlinemediaobject":
+		// An image in the text (an icon): its description, in the text.
+		if alt := altText(n); alt != "" {
+			return "*" + escapeText(alt) + "*"
+		}
+		return ""
 	case "replaceable":
 		return "*" + plain(n) + "*"
 	case "emphasis":
@@ -193,6 +206,25 @@ func escapeText(s string) string {
 	return r.Replace(s)
 }
 
+// lineStart is what makes a line a heading, a quote or a list item.
+var lineStart = regexp.MustCompile(`^(#{1,6}[ \t]|#{1,6}$|>|[-+][ \t]|\d{1,9}[.)][ \t])`)
+
+// escapeStart keeps a paragraph's text from being read as a heading, a
+// quote or a list item where it starts like one ("# of CPUs", "1. is
+// the default"): its first character, or the number's delimiter, is
+// escaped. mcp-docs would take such a heading for a section.
+func escapeStart(text string) string {
+	m := lineStart.FindString(text)
+	switch {
+	case m == "":
+		return text
+	case text[0] >= '0' && text[0] <= '9':
+		i := strings.IndexAny(text, ".)")
+		return text[:i] + "\\" + text[i:]
+	}
+	return "\\" + text
+}
+
 // block is a run of Markdown lines; blocks are separated by blank lines.
 type block []string
 
@@ -203,13 +235,16 @@ func (r *renderer) blocks(nodes []*Node, level int) []block {
 	var run []*Node
 	flush := func() {
 		if text := r.inline(run); text != "" {
-			out = append(out, block{text})
+			out = append(out, block{escapeStart(text)})
 		}
 		run = nil
 	}
 	for _, n := range nodes {
 		if isInline(n) {
 			run = append(run, n)
+			continue
+		}
+		if inlineSkipped[n.Name] {
 			continue
 		}
 		flush()
@@ -354,13 +389,8 @@ func (r *renderer) block(n *Node, level int) []block {
 			out = append(out, block{"**Example: " + t + "**"})
 		}
 		return append(out, r.blocks(n.Children, level)...)
-	case "figure", "informalfigure", "mediaobject", "inlinemediaobject":
-		var alt string
-		n.Walk(func(c *Node) {
-			if alt == "" && (c.Name == "textobject" || c.Name == "alt") {
-				alt = strings.TrimSpace(spaces.ReplaceAllString(plain(c), " "))
-			}
-		})
+	case "figure", "informalfigure", "mediaobject":
+		alt := altText(n)
 		t := r.title(n)
 		switch {
 		case t != "" && alt != "":
@@ -511,27 +541,98 @@ func fenced(text, lang string) block {
 
 // table renders a table as a pipe table, a cell's blocks joined.
 func (r *renderer) table(n *Node) []block {
-	var rows [][]string
+	// The rows of this table, not those of a table in one of its cells
+	// (which is rendered in the cell), in order: the head's first.
+	var rowNodes []*Node
 	head := 0
-	n.Walk(func(c *Node) {
-		if c.Name != "row" && c.Name != "tr" {
-			return
+	var collect func(n *Node, inHead bool)
+	collect = func(n *Node, inHead bool) {
+		for _, c := range n.Children {
+			switch c.Name {
+			case "row", "tr":
+				rowNodes = append(rowNodes, c)
+				if inHead {
+					head++
+				}
+			case "thead":
+				collect(c, true)
+			case "entry", "td", "th", "":
+			default:
+				collect(c, inHead)
+			}
 		}
+	}
+	collect(n, false)
+	// Columns by name, for the cells that span from one to another.
+	cols := map[string]int{}
+	if tg := findFirst(n, "tgroup"); tg != nil {
+		for i, cs := range tg.Elements("colspec") {
+			if name := cs.Attr["colname"]; name != "" {
+				cols[name] = i
+			}
+		}
+	}
+	number := func(e *Node, attr string) int {
+		v, err := strconv.Atoi(strings.TrimSpace(e.Attr[attr]))
+		if err != nil || v < 0 || v > 1000 {
+			return 0
+		}
+		return v
+	}
+	// A cell that spans columns or rows is in its first place; the
+	// others it covers are empty cells, so that every later cell stays
+	// in its column.
+	var rows [][]string
+	down := map[int]int{} // column → rows a cell from above still covers
+	for _, rn := range rowNodes {
 		var cells []string
-		for _, e := range c.Children {
-			if e.Name == "entry" || e.Name == "td" || e.Name == "th" {
-				cell := strings.Join(r.paragraphText(e.Children), " ")
-				cells = append(cells, strings.ReplaceAll(cell, "|", "\\|"))
+		col := 0
+		place := func(text string, width, more int) {
+			for down[col] > 0 { // covered from above
+				down[col]--
+				cells = append(cells, "")
+				col++
+			}
+			for i := range width {
+				if i == 0 {
+					cells = append(cells, text)
+				} else {
+					cells = append(cells, "")
+				}
+				if more > 0 {
+					down[col] = more
+				}
+				col++
+			}
+		}
+		for _, e := range rn.Children {
+			if e.Name != "entry" && e.Name != "td" && e.Name != "th" {
+				continue
+			}
+			cell := strings.ReplaceAll(strings.Join(r.paragraphText(e.Children), " "), "|", "\\|")
+			width := 1
+			if from, ok := cols[e.Attr["namest"]]; ok {
+				if to, ok := cols[e.Attr["nameend"]]; ok && to >= from {
+					width = to - from + 1
+				}
+			} else if span := number(e, "colspan"); span > 1 {
+				width = span
+			}
+			more := number(e, "morerows")
+			if span := number(e, "rowspan"); span > 1 {
+				more = span - 1
+			}
+			place(cell, width, more)
+		}
+		for c := range down { // covered from above, after the row's last cell
+			if c >= col && down[c] > 0 {
+				for len(cells) <= c {
+					cells = append(cells, "")
+				}
+				down[c]--
 			}
 		}
 		rows = append(rows, cells)
-	})
-	if thead := findFirst(n, "thead"); thead != nil {
-		thead.Walk(func(c *Node) {
-			if c.Name == "row" || c.Name == "tr" {
-				head++
-			}
-		})
 	}
 	if len(rows) == 0 {
 		return nil
@@ -565,6 +666,17 @@ func (r *renderer) table(n *Node) []block {
 		out = append(out, line(row))
 	}
 	return []block{out}
+}
+
+// altText is the description of an image: its textobject or alt.
+func altText(n *Node) string {
+	var alt string
+	n.Walk(func(c *Node) {
+		if alt == "" && (c.Name == "textobject" || c.Name == "alt") {
+			alt = strings.TrimSpace(spaces.ReplaceAllString(plain(c), " "))
+		}
+	})
+	return alt
 }
 
 func findFirst(n *Node, name string) *Node {

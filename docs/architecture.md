@@ -1333,7 +1333,7 @@ and the plan from them; the steps are recorded as they are built.
 | 1 | The collections in scope ranked as one; copies folded; `search` shared among collections | done |
 | 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | done |
 | 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | done (§16.3) |
-| 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | |
+| 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | done |
 
 **Step 1, as built.** `rank.Search` ranks the parts of several indexes
 with shared statistics: the number of units, their average length and
@@ -1407,6 +1407,46 @@ their collection files (`build/` after `tools/suse-docs/convert`):
 ```sh
 MCP_DOCS_BENCH=$PWD/build go test ./internal/server -run '^$' -bench . -benchmem
 ```
+
+**Step 4, as built.**
+
+- *The sources are not trusted to stay where the converter was
+  pointed.* Every file a source names (an include, a resource, a file
+  of entities) is read through an `os.Root` of `--src`: a path with
+  `../` and a symbolic link that leads out are errors. A topic's
+  `xml:id` names its document only if it is letters, digits, `.`, `_`
+  and `-`. `--site-url` and `--source-url` have their `%s` replaced,
+  and are no formats: a `%20` in one is its own. Entities are not
+  expanded in CDATA sections and comments, and a document whose
+  entities expand to more than 64 MiB is reported, not built.
+- *Rendering.* An `indexterm`, `remark`, `annotation` or `alt` in a
+  paragraph or a title is left out without ending the paragraph; an
+  `inlinemediaobject` is its description in the text ("click the *Eye
+  icon* icon", where it was three paragraphs). A paragraph that starts
+  like a heading, a quote or a list item has that start escaped
+  (`\# of CPUs`). A link in an article's abstract, or in a topic's
+  description, is relative to the document it is in: SLES 16.1's and
+  SLE HA 16.1's upgrade articles linked `topics/…` from `articles/`.
+  A table cell that spans columns (`namest`/`nameend`, `colspan`) or
+  rows (`morerows`, `rowspan`) is in its first place and leaves the
+  others it covers empty, so that later cells stay in their columns; a
+  table in a cell stays in the cell.
+- *Tests.* `render_test.go` renders fragments, a case an element or
+  rule (paragraphs, lists, procedures, notes, questions, footnotes,
+  tables with spans); `TestSourcesAreConfined` converts sources that
+  name what is outside them.
+- *`Convert`* is its steps: `articles` (read), `resolve` (name and
+  render until the documents agree), `write`, `readme`. The 16.1
+  collections convert to the same bytes before and after that change.
+- Converting SLES 16.1 and SLE HA 16.1 again changed five documents:
+  the four upgrade and maintenance articles' links, and the icon in
+  `rmt-mirroring-obtaining-credentials`.
+- *Left:* an include's `xpointer` is ignored (the whole file is
+  included; the sources use none); a `DOCTYPE` with a public or system
+  identifier loads no entities (they are reported as unresolved); two
+  topics of one article with the same `xml:id` are one document,
+  reported as a conflict; a table's second and later head rows are
+  body rows.
 
 ### 16.3 The index file
 
