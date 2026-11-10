@@ -66,6 +66,9 @@ type found struct {
 	MatchLine int      `json:"matchLine,omitempty"`
 	MatchText string   `json:"matchText,omitempty"`
 	Version   string   `json:"version"`
+	// AlsoIn are the other documents that hold the same section, with
+	// the same text.
+	AlsoIn []string `json:"alsoIn,omitempty"`
 }
 
 func findSectionsTool() tool {
@@ -84,7 +87,8 @@ func findSectionsTool() tool {
 			"sections": map[string]any{"type": "array", "items": obj(map[string]any{
 				"doc": strType, "section": strType, "path": map[string]any{"type": "array", "items": strType},
 				"line": intType, "lines": intType, "bytes": intType, "score": map[string]any{"type": "number"},
-				"matchLine": intType, "matchText": strType, "version": strType},
+				"matchLine": intType, "matchText": strType, "version": strType,
+				"alsoIn": map[string]any{"type": "array", "items": strType}},
 				"doc", "path", "line", "lines", "bytes", "score", "version")},
 			"read": obj(map[string]any{"doc": strType, "section": strType, "text": strType}, "doc", "section", "text"),
 		}, "sections"),
@@ -142,25 +146,23 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 			scopes = append(scopes, catalog.Doc{Coll: k, Rel: "."})
 		}
 	}
-	var hits []rank.Hit
+	var parts []rank.Part
 	for _, d := range scopes {
 		ix, err := s.index(ctx, d.Coll)
 		if err != nil {
 			return nil, err
 		}
-		h, err := ix.Under(a.Query, d, n)
-		if err != nil {
-			return nil, err
-		}
-		hits = append(hits, h...)
+		parts = append(parts, rank.Part{Index: ix, Under: d})
 	}
-	// Scores of different collections are of different indexes; within
-	// one, they are comparable. Merged by score all the same: the best of
-	// each tends to the top.
-	sortHits(hits)
-	if len(hits) > n {
-		hits = hits[:n]
+	// The collections are ranked as one (rank.Search), and a section that
+	// several documents hold (a topic two products' collections share) is
+	// one result that names the others: more candidates than results, for
+	// the copies among them.
+	all, err := rank.Search(a.Query, min(n*(len(parts)+3), 4*maxFindResults), parts)
+	if err != nil {
+		return nil, err
 	}
+	hits, copies := foldCopies(all, n)
 
 	terms := map[string]bool{}
 	for _, t := range rank.Tokens(a.Query) {
@@ -171,7 +173,7 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	var addrs []string   // one per hit: doc#id
 	for i, h := range hits {
 		o := h.Entry.Outline
-		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version}
+		f := found{Doc: h.Doc.Address(), Score: round(h.Score), Version: h.Entry.Version, AlsoIn: copies[i]}
 		if h.Heading >= 0 {
 			hd := o.Headings[h.Heading]
 			f.Section, f.Path, f.Line, f.Lines, f.Bytes = hd.ID, shortPath(o, h.Heading), hd.Line, hd.Lines, hd.Bytes
@@ -200,7 +202,8 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 			addr += "#" + f.Section
 		}
 		addrs = append(addrs, addr)
-		entry := fmt.Sprintf("%d. %s  %s  (%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes))
+		entry := fmt.Sprintf("%d. %s  %s  (%s%s)\n", i+1, addr, strings.Join(f.Path, " > "), size(f.Bytes),
+			alsoIn(h.Doc, f.AlsoIn))
 		if f.MatchLine > 0 {
 			entry += fmt.Sprintf("   %d: %s\n", f.MatchLine, excerpt(strings.TrimSpace(f.MatchText), terms))
 		}
@@ -492,12 +495,57 @@ func bestLine(lines []string, first int, terms map[string]bool) (int, string) {
 	return first + best, strings.TrimRight(lines[best], "\r\n")
 }
 
-func sortHits(h []rank.Hit) {
-	for i := 1; i < len(h); i++ {
-		for j := i; j > 0 && h[j].Score > h[j-1].Score; j-- {
-			h[j], h[j-1] = h[j-1], h[j]
-		}
+// foldCopies returns the first n of the hits, best first, without the
+// copies among them: a hit whose section has the id and the text of an
+// earlier one's is not a result of its own, but named with that one
+// (copies[i]: the documents of hit i's copies).
+func foldCopies(all []rank.Hit, n int) (hits []rank.Hit, copies [][]string) {
+	type key struct {
+		id  string
+		sum uint64
 	}
+	first := map[key]int{}
+	for _, h := range all {
+		k := key{sum: h.Sum}
+		if h.Heading >= 0 {
+			k.id = h.Entry.Outline.Headings[h.Heading].ID
+		}
+		if i, ok := first[k]; ok {
+			copies[i] = append(copies[i], h.Doc.Address())
+			continue
+		}
+		if len(hits) == n {
+			continue // its copies may still follow
+		}
+		first[k] = len(hits)
+		hits = append(hits, h)
+		copies = append(copies, nil)
+	}
+	return hits, copies
+}
+
+// maxAlsoIn bounds the copies a result's line names.
+const maxAlsoIn = 3
+
+// alsoIn names a result's copies in its line: a copy at the same path
+// in another collection by the collection's name, any other by its
+// address.
+func alsoIn(d catalog.Doc, copies []string) string {
+	if len(copies) == 0 {
+		return ""
+	}
+	var names []string
+	for i, c := range copies {
+		if i == maxAlsoIn {
+			names = append(names, fmt.Sprintf("%d more", len(copies)-i))
+			break
+		}
+		if coll, rel, ok := strings.Cut(c, "/"); ok && rel == d.Rel {
+			c = coll
+		}
+		names = append(names, c)
+	}
+	return "; also in " + strings.Join(names, ", ")
 }
 
 func round(f float64) float64 { return float64(int(f*100+0.5)) / 100 }

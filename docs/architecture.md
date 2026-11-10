@@ -262,6 +262,10 @@ RE2, caps, `truncated`, binary files skipped), over documents rather
 than paths, and with **each match placed in its section**: the
 section's id, its heading path, and its size. Matches are grouped by
 section, so ten hits in one section read as one place.
+Several collections share what one call returns (`maxResults` lines
+and the read limit): a line to each in turn while it has more, so that
+the first collection's matches do not keep the others' out; the result
+names the collections that have more ("more in sles-16.1").
 No-break spaces in a line match spaces in the query (and `\s` in an
 expression): SUSE's documents write names such as "SLES for SAP" with
 them, and an agent types spaces.
@@ -336,7 +340,15 @@ agent chooses what to read.
 - **Index:** per collection, built when first asked and again when a
   document changes, is added or goes (checked with the cache's versions
   on each call); documents larger than `--max-file` are left out.
-  Across collections, results are merged by score.
+- **Across collections:** the collections in scope are ranked as one: a
+  word weighs by how rare it is in all of them together, and a
+  section's length counts against their common average (§16.2). Scored
+  each by its own index, a word rare in one collection and common in
+  another put the first's passing mention above the second's section
+  on it. A section that several documents hold, with the same id and
+  the same text (a topic two products' collections share), is one
+  result that names the others ("also in sles-sap-16.1"; `alsoIn` with
+  `--structured`).
 - **Limits:** it matches words, not meanings: "how long does an
   approval last" does not find a section about approval scopes that
   never says "last". Headings in the readers' words are what makes it
@@ -560,6 +572,10 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    in one call; shorter tool descriptions and `--tools`; the eval
    measuring both ways clients forward results; `rank: false`, the
    converter's compact index and its report of large sections.
+10. **Review** (§16; steps 0 and 1 done): benchmarks, the collections
+    ranked as one, copies folded, `search` shared among collections;
+    next, bounded reads and cheaper file access, an index file in the
+    packages, the converter's trust in its sources.
 
 ## 12. Decisions
 
@@ -1259,3 +1275,88 @@ says; `find_sections` and `list_docs` changed their layout, which
 agents read, not parse. `find_sections` returns text by default; an
 agent that wants the list alone passes `read: false`.
 
+## 16. Review
+
+A review of the code at 0.1.3 (November 2026) with measurements on four
+converted collections (SLES 16.1, SLES for SAP 16.1, SLE HA 16.0 and
+16.1: 1,652 documents, 9.3 MB; 4 cores). This section is its findings
+and the plan from them; the steps are recorded as they are built.
+
+### 16.1 Findings
+
+- **Ranking across collections.** Each collection's index scored its
+  own hits and the results were merged by score: with the four
+  collections, "put a node into maintenance mode" found SLES's
+  "`node.js` update strategy" first and SLE HA's section of that title
+  fourth ("node" is rare in SLES, common in SLE HA). The same topic came
+  back once per collection: 534 of SLES for SAP 16.1's 640 documents
+  are at a path SLES 16.1 has too. The collection tests ask one
+  collection each and did not see it.
+- **`search` across collections** stopped at the first collection that
+  filled `maxResults`; the later ones were not searched.
+- **Reads without a bound.** `catalog.Lines` reads every line asked for
+  before its caller cuts to the read limit: `read_lines` without a
+  range on a 64 MiB document allocates 155 MB to return 16 KiB (also
+  `read_section` of a document's title section, and a `docs://`
+  resource). `--max-file` bounds search only.
+- **Where the time goes** (before step 1):
+
+  | | time | of it |
+  |---|---|---|
+  | `find_sections`, warm, four collections | 12.7 ms | ranking 0.2 ms a collection; the rest checks that each index is current (every document opened; twice when the best section is over 4 KiB) |
+  | the first `find_sections` (builds the indexes) | 271 ms, 118 MB allocated | tokenizing, garbage collection; every stdio session pays it |
+  | `search`, a text, all collections | 118 ms | each document opened twice, read into a growing buffer, split into lines before anything is matched; the check for no-break spaces, added after 0.1.3, alone 40 ms |
+  | `list_docs`, a page of 725 | 9.1 ms | every document of the collection opened |
+
+  The lock of the indexes is one for all collections and held while an
+  index is built or checked: over HTTP, every `find_sections` waits for
+  the slowest.
+- **The converter trusts its sources:** a topic's `xml:id` is its file
+  name unchecked (`../../x` writes outside `--out`), an include reads
+  outside `--src`, `--site-url` and `--source-url` are `printf`
+  formats. Not reported by `--strict`, and not hit by the pinned
+  sources: an `indexterm`, `remark` or `inlinemediaobject` in a
+  paragraph splits it; a paragraph starting with `#`, `-`, `>` or `1.`
+  becomes structure; table spans are ignored; links in an article's
+  abstract are relative to the wrong directory; entities are expanded
+  in CDATA.
+- Smaller: the fs-compat tools' results are not bound by `--max-read`;
+  `resources/list` walks all collections for every page; Landlock's
+  base rules (mcp-gateway's) allow writing `/tmp` and executing below
+  `/usr`, which mcp-docs needs neither of.
+
+### 16.2 Plan
+
+| Step | What | State |
+|---|---|---|
+| 0 | Benchmarks on real collections (`MCP_DOCS_BENCH`, below); a test of collections that share topics and differ in vocabulary | done |
+| 1 | The collections in scope ranked as one; copies folded; `search` shared among collections | done |
+| 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | |
+| 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | |
+| 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | |
+
+**Step 1, as built.** `rank.Search` ranks the parts of several indexes
+with shared statistics: the number of units, their average length and
+each query word's document frequency are summed over the collections
+in scope (the whole collections, also when `doc` narrows what is
+returned), so the scores compare. One collection alone ranks as before.
+Each unit has a sum of its own text (FNV-1a over its lines; the front
+matter, which names the product, is not part of it): hits with the same
+section id and sum are copies, the first of them the result and the
+others its `alsoIn`. `find_sections` asks for more candidates than
+results (a few times as many), so that the copies among them do not
+shorten the list. `search` runs each collection on its own and divides
+`maxResults` and the read limit among them: a line to each in turn
+while it has more, then a line less of the collection with the most
+output until the whole fits.
+
+With the four collections, "put a node into maintenance mode" now finds
+SLE HA's section first ("also in sle-ha-16.1"), and no topic twice.
+
+**Benchmarks.** `internal/server/bench_test.go`, skipped without
+`MCP_DOCS_BENCH`, a directory whose subdirectories are collections with
+their collection files (`build/` after `tools/suse-docs/convert`):
+
+```sh
+MCP_DOCS_BENCH=$PWD/build go test ./internal/server -run '^$' -bench . -benchmem
+```

@@ -261,7 +261,9 @@ the right place first:
   words either way.
 - **Keep one copy of each text.** Two copies of a text, such as a
   glossary in every guide or a shared topic included in several, are
-  two matches of the same weight: the agent reads both or guesses.
+  two matches of the same weight: the agent reads both or guesses
+  (`find_sections` folds sections whose text is the same to the byte;
+  `search`, and copies that differ in a word, show each).
   Keep one copy and link to it. Where versions differ, keep each
   version in its own collection or directory, and let the agent choose
   it (`doc` scopes `search` and `find_sections` to a directory) rather

@@ -106,10 +106,11 @@ func TestFindSections(t *testing.T) {
 	mustFail(t, call(t, s, "find_sections", map[string]any{"query": "x", "doc": "other/v3"}), "")
 	mustFail(t, call(t, s, "find_sections", map[string]any{"query": "x", "doc": "other/v2", "collection": "other"}), "not both")
 
-	// Across collections, the section titled with the words first.
+	// Across collections, the sections titled with the word first: the
+	// collections are ranked as one, so the one that says it most.
 	r = call(t, s, "find_sections", map[string]any{"query": "timeouts", "maxResults": 3})
 	ss := r.Structured["sections"].([]any)
-	if len(ss) < 2 || ss[0].(map[string]any)["section"] != "timeouts" {
+	if len(ss) < 2 || ss[0].(map[string]any)["section"] != "timeouts-elsewhere" || ss[1].(map[string]any)["section"] != "timeouts" {
 		t.Errorf("across collections: %s", mustOK(t, r))
 	}
 
@@ -163,5 +164,57 @@ func bumpTime(t *testing.T, p string) {
 	later := time.Now().Add(time.Minute)
 	if err := os.Chtimes(p, later, later); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestFindAcrossCollections: collections that share topics and differ
+// in vocabulary are ranked as one, and a shared topic is one result.
+func TestFindAcrossCollections(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "base", "cluster", "sap")
+	// "node" is rare in base and sap (a passing mention), and common in
+	// cluster, where one section is on the question.
+	shared := "# Node.js update strategy\n\nUpdates for a node come with maintenance updates.\n"
+	for _, c := range []string{"base", "sap"} {
+		write(t, filepath.Join(dirs[c], "topics/nodejs.md"), shared)
+		for i := range 30 {
+			write(t, filepath.Join(dirs[c], fmt.Sprintf("topics/t%d.md", i)),
+				fmt.Sprintf("# Package %d\n\nInstall the package and restart the service.\n", i))
+		}
+	}
+	write(t, filepath.Join(dirs["sap"], "topics/only-sap.md"), "# Tuning\n\nApply the solution.\n")
+	write(t, filepath.Join(dirs["cluster"], "topics/maintenance.md"),
+		"# Putting a node into maintenance mode\n\nNode maintenance mode puts all resources of the node into maintenance mode.\n")
+	for i := range 30 {
+		write(t, filepath.Join(dirs["cluster"], fmt.Sprintf("topics/c%d.md", i)),
+			fmt.Sprintf("# Resource %d\n\nThe node runs the resource; put the cluster into maintenance mode first.\n", i))
+	}
+	r := call(t, s, "find_sections", map[string]any{"query": "put a node into maintenance mode"})
+	text := mustOK(t, r)
+	ss := r.Structured["sections"].([]any)
+	if got := ss[0].(map[string]any)["doc"]; got != "cluster/topics/maintenance.md" {
+		t.Errorf("first: %v, want the cluster's section on it\n%s", got, text)
+	}
+	seen := map[string]int{}
+	for _, x := range ss {
+		m := x.(map[string]any)
+		seen[m["section"].(string)]++
+		if m["section"] == "nodejs-update-strategy" {
+			if also, _ := m["alsoIn"].([]any); m["doc"] != "base/topics/nodejs.md" || len(also) != 1 || also[0] != "sap/topics/nodejs.md" {
+				t.Errorf("the shared topic: %v, also in %v", m["doc"], m["alsoIn"])
+			}
+		}
+	}
+	if seen["nodejs-update-strategy"] > 1 {
+		t.Errorf("the shared topic is %d results:\n%s", seen["nodejs-update-strategy"], text)
+	}
+	// One collection alone ranks as before, and names no copies.
+	r = call(t, s, "find_sections", map[string]any{"query": "node maintenance updates", "collection": "sap", "read": false})
+	if text := mustOK(t, r); !strings.HasPrefix(strings.SplitN(text, "\n", 3)[1], "1. sap/topics/nodejs.md#nodejs-update-strategy") || strings.Contains(text, "also in") {
+		t.Errorf("one collection: %s", text)
+	}
+	// The text names the copy by its collection.
+	r = call(t, s, "find_sections", map[string]any{"query": "node.js update strategy", "read": false})
+	if text := mustOK(t, r); !strings.Contains(text, "1. base/topics/nodejs.md#nodejs-update-strategy") || !strings.Contains(text, "; also in sap)") {
+		t.Errorf("copy named: %s", text)
 	}
 }

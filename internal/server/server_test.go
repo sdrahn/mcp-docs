@@ -664,3 +664,39 @@ func TestSearchNoBreakSpaces(t *testing.T) {
 		t.Errorf("no match: %q", got)
 	}
 }
+
+// TestSearchSharesAcrossCollections: the first collection's matches do
+// not keep the others' out, and the result names where more are.
+func TestSearchSharesAcrossCollections(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "big", "small", "none")
+	write(t, filepath.Join(dirs["big"], "a.md"), "# A\n\n"+strings.Repeat("the token is here\n\n\n\n\n\n", 80))
+	write(t, filepath.Join(dirs["small"], "b.md"), "# B\n\nthe token is here too\n")
+	write(t, filepath.Join(dirs["none"], "c.md"), "# C\n\nnothing\n")
+	r := call(t, s, "search", map[string]any{"query": "token", "context": 0})
+	text := mustOK(t, r)
+	if !strings.Contains(text, "small/b.md") || !strings.Contains(text, "the token is here too") {
+		t.Errorf("the second collection's match is missing:\n%s", text)
+	}
+	if n := len(r.Structured["matches"].([]any)); n != 50 {
+		t.Errorf("%d matches, want the limit of 50", n)
+	}
+	if !strings.Contains(text, "(stopped after 50 matching lines; more in big:") || r.Structured["truncated"] != true {
+		t.Errorf("where more are:\n%s", text[len(text)-200:])
+	}
+	// A small limit: a line of each first.
+	r = call(t, s, "search", map[string]any{"query": "token", "context": 0, "maxResults": 2})
+	if text := mustOK(t, r); !strings.Contains(text, "big/a.md") || !strings.Contains(text, "small/b.md") {
+		t.Errorf("maxResults 2:\n%s", text)
+	}
+	// Nothing left out: no note.
+	r = call(t, s, "search", map[string]any{"query": "too"})
+	if text := mustOK(t, r); strings.Contains(text, "more in") || r.Structured["truncated"] != false {
+		t.Errorf("all shown:\n%s", text)
+	}
+	// What one call returns holds for the collections together.
+	write(t, filepath.Join(dirs["small"], "long.md"), "# L\n\n"+strings.Repeat(strings.Repeat("token ", 60)+"\n\n", 80))
+	r = call(t, s, "search", map[string]any{"query": "token", "context": 0, "maxResults": 500})
+	if text := mustOK(t, r); len(text) > 16<<10 || !strings.Contains(text, "more in small:") || !strings.Contains(text, "big/a.md") {
+		t.Errorf("%d bytes:\n%s", len(text), text[len(text)-200:])
+	}
+}
