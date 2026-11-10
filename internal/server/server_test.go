@@ -637,3 +637,30 @@ func TestCost(t *testing.T) {
 		t.Errorf("section or search missed:\n%s\n%s", sec, sr)
 	}
 }
+
+// A query typed with spaces finds text written with no-break spaces
+// (SUSE's "SLES&nbsp;for&nbsp;SAP"), in every way search matches; the
+// line is shown as it is written.
+func TestSearchNoBreakSpaces(t *testing.T) {
+	s, dirs := newServer(t, 32<<10, "sap")
+	write(t, filepath.Join(dirs["sap"], "convert.md"), "# Converting a SLES system to SLES for SAP\n"+
+		"Run the script.\nIt registers SLES for SAP.\n")
+	for _, args := range []map[string]any{
+		{"query": "SLES for SAP"},
+		{"query": "sles for sap"},
+		{"query": "SLES for SAP", "caseSensitive": true},
+		{"query": `SLES for\s?SAP`, "regexp": true},
+	} {
+		r := call(t, s, "search", args)
+		got := mustOK(t, r)
+		if ms := r.Structured["matches"].([]any); len(ms) != 2 {
+			t.Errorf("%v: %d matches:\n%s", args, len(ms), got)
+		}
+		if !strings.Contains(got, "SLES for SAP") {
+			t.Errorf("%v: the line not as written:\n%s", args, got)
+		}
+	}
+	if got := mustOK(t, call(t, s, "search", map[string]any{"query": "SLES for HANA"})); !strings.HasPrefix(got, "no matches") {
+		t.Errorf("no match: %q", got)
+	}
+}

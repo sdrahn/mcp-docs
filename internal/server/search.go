@@ -324,13 +324,27 @@ func matcher(query string, isRegexp, caseSensitive bool) (func(string) bool, err
 		if err != nil {
 			return nil, fmt.Errorf("query: not a valid regular expression: %v", err)
 		}
-		return re.MatchString, nil
+		return func(l string) bool { return re.MatchString(spaced(l)) }, nil
 	}
+	query = spaced(query)
 	if caseSensitive {
-		return func(l string) bool { return strings.Contains(l, query) }, nil
+		return func(l string) bool { return strings.Contains(spaced(l), query) }, nil
 	}
 	q := strings.ToLower(query)
-	return func(l string) bool { return strings.Contains(strings.ToLower(l), q) }, nil
+	return func(l string) bool { return strings.Contains(strings.ToLower(spaced(l)), q) }, nil
+}
+
+// noBreak turns the no-break spaces into spaces: a query typed with
+// spaces finds "SLES for SAP" where the documents write it with
+// no-break spaces, as SUSE's do (SLES&nbsp;for&nbsp;SAP).
+var noBreak = strings.NewReplacer("\u00a0", " ", "\u2007", " ", "\u202f", " ")
+
+// spaced is a line as search matches it: no-break spaces as spaces.
+func spaced(l string) string {
+	if !strings.ContainsAny(l, "\u00a0\u2007\u202f") {
+		return l
+	}
+	return noBreak.Replace(l)
 }
 
 // cut shortens a long line for the output.
