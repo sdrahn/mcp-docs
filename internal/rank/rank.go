@@ -209,6 +209,14 @@ func (ix *Index) Current(ctx context.Context, cat *catalog.Catalog, k *catalog.C
 	return current && !stale && seen == len(ix.versions) && ctx.Err() == nil
 }
 
+// Stale reports whether the index found itself to be of another
+// reading of a document than the server's (see locate).
+func (ix *Index) Stale() bool {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return ix.stale
+}
+
 // Hit is a section and its score.
 type Hit struct {
 	Doc     catalog.Doc

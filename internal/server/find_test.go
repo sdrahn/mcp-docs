@@ -366,3 +366,30 @@ func TestVariantsFolded(t *testing.T) {
 		t.Errorf("%s", text)
 	}
 }
+
+// A server that watches its collections answers from the index it has
+// while nothing changes, and from a new one when a document does.
+func TestWatchedIndex(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "app")
+	s.Watch = catalog.NewWatcher()
+	if s.Watch == nil {
+		t.Skip("no inotify here")
+	}
+	write(t, filepath.Join(dirs["app"], "guide.md"), "# Guide\n\n## Timeouts\n\nSet the timeout.\n")
+	for range 3 {
+		if got := mustOK(t, call(t, s, "find_sections", map[string]any{"query": "timeouts"})); !strings.Contains(got, "app/guide.md#timeouts") {
+			t.Fatalf("%s", got)
+		}
+	}
+	if s.Watch.Changed(s.Cat.Collections[0]) {
+		t.Error("the collection changed by being asked")
+	}
+	write(t, filepath.Join(dirs["app"], "guide.md"), "# Guide\n\n## Deadlines\n\nSet the deadline.\n")
+	if got := mustOK(t, call(t, s, "find_sections", map[string]any{"query": "deadlines"})); !strings.Contains(got, "app/guide.md#deadlines") {
+		t.Errorf("after a change: %s", got)
+	}
+	write(t, filepath.Join(dirs["app"], "new/more.md"), "# More\n\n## Budgets\n\nSet the budget.\n")
+	if got := mustOK(t, call(t, s, "find_sections", map[string]any{"query": "budgets"})); !strings.Contains(got, "app/new/more.md#budgets") {
+		t.Errorf("after a document in a new directory: %s", got)
+	}
+}

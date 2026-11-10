@@ -8,14 +8,20 @@
 # @DATADIR@/mcp-docs/collections.d and /etc/mcp-docs/collections.d:
 # SUSE's documentation (packages suse-docs-mcp-sles-16.0 and the other
 # suse-docs-mcp-*), and what other packages install, such as mcp-gateway's
-# and custos-docs's. The tools only read: list_docs, outline, search,
-# find_sections, read_section, read_lines. The gateway's policy decides
-# who may call them (an agent: its permissions, e.g.
+# and custos-docs's. It offers four tools, which only read:
+# find_sections (a question in words: the best section's text),
+# search (a precise term), outline and read_section: those Custos's
+# agent templates are allowed. list_docs and read_lines are left out:
+# every session pays for a tool's definition, and no answer needs
+# them (docs/architecture.md §17.6 of mcp-docs). To offer them too,
+# override the command without --tools. The gateway's policy decides who may call them (an agent:
+# its permissions, e.g.
 #   - {server: suse-docs, tool: find_sections, read_only: true}).
 version: 1
 name: suse-docs
 command: ["@BINDIR@/mcp-docs",
-  "--instructions", "The product documentation installed on this system: SUSE's documentation of the product and version installed (each article's index and its topics, linked to documentation.suse.com) and that of the software installed with its own documentation. list_docs names the collections. For a question in words use find_sections; for an exact setting, command or error message search, then read_section of the match. Cite the document and section you used. The configuration and state of this machine are not here."]
+  "--tools", "find_sections,search,outline,read_section",
+  "--instructions", "The product documentation installed on this system: SUSE's documentation of the product and version installed (each article's index and its topics, linked to documentation.suse.com) and that of the software installed with its own documentation. For a question in words use find_sections; for an exact setting, command or error message search, then read_section of the match. Cite the document and section you used. The configuration and state of this machine are not here."]
 # mcp-gateway's domain for mcp-docs (package mcp-gateway-selinux labels
 # @BINDIR@/mcp-docs as its entry point); a user of its own, no network.
 selinux_type: mcpsrv_docs_t

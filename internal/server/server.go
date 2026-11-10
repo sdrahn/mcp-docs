@@ -56,6 +56,9 @@ type Server struct {
 		once  sync.Once
 		names map[string]bool
 	}
+	// Watch, if set, is asked whether a collection changed where the
+	// server would walk it to see (a server that runs long: --listen).
+	Watch *catalog.Watcher
 	// Logf, if set, takes a line for the server's log (stderr): what an
 	// operator wants to know and no client is told.
 	Logf func(format string, args ...any)

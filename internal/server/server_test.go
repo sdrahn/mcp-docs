@@ -722,3 +722,45 @@ func TestSearchSkipsFrontMatter(t *testing.T) {
 		t.Errorf("search_text: %s", got)
 	}
 }
+
+// What every session is sent before it asks anything, the instructions
+// and the tool definitions, is the same to the byte for the same
+// collections, from one start of the server to the next: a client that
+// caches its prompt keeps it (docs/architecture.md §17.6).
+func TestFixedTextIsStable(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "app", "other", "third")
+	for n, d := range dirs {
+		write(t, filepath.Join(d, "README.md"), "# "+n+"\n\nIndex.\n")
+	}
+	fixed := func(s *Server) string {
+		var out strings.Builder
+		for _, m := range []string{"initialize", "tools/list", "prompts/list", "resources/templates/list"} {
+			res, err := s.Handle(context.Background(), m, json.RawMessage(`{"protocolVersion":"2025-06-18"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := json.Marshal(res)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out.Write(b)
+		}
+		return out.String()
+	}
+	s.FSCompat = false // its instructions name the first collection's directory
+	want := fixed(s)
+	for range 20 {
+		again := &Server{Cat: catalog.New(s.Cat.Collections, s.Cat.Exts, s.Cat.MaxEntries), MaxRead: s.MaxRead, MaxFile: s.MaxFile,
+			Structured: s.Structured, Version: s.Version}
+		if got := fixed(again); got != want {
+			t.Fatalf("the fixed text differs between two servers of the same collections:\n%s\n%s", want, got)
+		}
+	}
+	// Nothing of the moment or the place in it: no time, no process,
+	// no temporary path.
+	for _, d := range dirs {
+		if strings.Contains(want, d) {
+			t.Errorf("the fixed text holds a path: %s", d)
+		}
+	}
+}

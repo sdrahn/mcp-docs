@@ -194,6 +194,9 @@ func main() {
 		}
 		return
 	}
+	// A server that runs long is told of changes to its collections,
+	// where one of a session looks for them at each call.
+	s.Watch = catalog.NewWatcher()
 	if err := serveHTTP(*listen, s.Handle, mcphttp.Options{AllowedOrigins: origins, MaxConcurrent: *maxConcurrent}); err != nil {
 		fail(1, err.Error())
 	}

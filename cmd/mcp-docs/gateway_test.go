@@ -120,4 +120,15 @@ func TestGatewayDefinition(t *testing.T) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}
 	}
+	// The four tools Custos's agent templates are allowed, and the
+	// instructions name no other.
+	if n := strings.Count(out.String(), `"inputSchema"`); n != 4 || !strings.Contains(out.String(), `"name":"search"`) ||
+		!strings.Contains(out.String(), `"name":"outline"`) {
+		t.Errorf("%d tools, want find_sections, search, outline and read_section:\n%s", n, out.String())
+	}
+	for _, no := range []string{"list_docs", "read_lines"} {
+		if strings.Contains(out.String(), no) {
+			t.Errorf("%s is named, and not offered:\n%s", no, out.String())
+		}
+	}
 }

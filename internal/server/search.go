@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
@@ -247,15 +249,79 @@ func (sr *textSearch) below(ctx context.Context, d catalog.Doc, exclude func(cat
 		return err
 	}
 	if !fi.IsDir() {
-		sr.doc(ctx, d)
+		sr.emit(sr.scan(ctx, d))
 		return nil
 	}
-	return sr.s.Cat.Walk(ctx, d, exclude, func(doc catalog.Doc, e fs.DirEntry) bool {
+	// Documents are read and matched several at a time, a batch after
+	// another, and their matches written in the documents' order: the
+	// result is that of one document after another. A batch is bounded
+	// by the documents' sizes, which are in memory while it is matched.
+	var batch []catalog.Doc
+	var size int64
+	more := true
+	flush := func() {
+		scanned := make([]scanned, len(batch))
+		var wg sync.WaitGroup
+		next := make(chan int)
+		for range min(searchWorkers(), len(batch)) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range next {
+					scanned[i] = sr.scan(ctx, batch[i])
+				}
+			}()
+		}
+		for i := range batch {
+			next <- i
+		}
+		close(next)
+		wg.Wait()
+		for _, f := range scanned {
+			if more = sr.emit(f); !more {
+				break
+			}
+		}
+		batch, size = batch[:0], 0
+	}
+	err = sr.s.Cat.Walk(ctx, d, exclude, func(doc catalog.Doc, e fs.DirEntry) bool {
 		if e.IsDir() {
 			return true
 		}
-		return sr.doc(ctx, doc)
+		batch = append(batch, doc)
+		if fi, err := e.Info(); err == nil {
+			size += fi.Size()
+		}
+		if len(batch) >= searchBatch || size >= searchBatchBytes {
+			flush()
+		}
+		return more
 	})
+	if err == nil && more && len(batch) > 0 {
+		flush()
+	}
+	return err
+}
+
+// A batch of a search: at most this many documents, or these bytes of
+// them (one document may be more).
+const (
+	searchBatch      = 64
+	searchBatchBytes = 8 << 20
+)
+
+// searchWorkers are the documents matched at a time.
+func searchWorkers() int { return min(runtime.GOMAXPROCS(0), 8) }
+
+// scanned is a document read and matched: its matching lines, if any.
+type scanned struct {
+	d        catalog.Doc
+	e        *catalog.Entry
+	lines    []string
+	hits     []int // indexes into lines
+	skip     int   // lines of front matter left out
+	tooLarge bool
+	stop     bool // the search was cancelled
 }
 
 func (sr *textSearch) result() *result {
@@ -277,24 +343,27 @@ func (sr *textSearch) result() *result {
 	return &result{text: body, structured: map[string]any{"matches": sr.matches, "truncated": sr.truncated}}
 }
 
-// doc searches one document; it returns false when the search is to
-// stop.
-func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
+// scan reads a document and finds its matching lines. It changes
+// nothing of the search: several run at a time.
+func (sr *textSearch) scan(ctx context.Context, d catalog.Doc) scanned {
+	f := scanned{d: d}
 	if ctx.Err() != nil {
-		return false
+		f.stop = true
+		return f
 	}
 	e, text, err := sr.s.Cat.LoadText(ctx, d, sr.s.MaxFile)
 	if errors.Is(err, catalog.ErrTooLarge) {
-		sr.skipped = append(sr.skipped, d.Address())
-		return true
+		f.tooLarge = true
+		return f
 	}
 	if err != nil {
-		return ctx.Err() == nil // unreadable, or not text: skipped
+		f.stop = ctx.Err() != nil // else unreadable, or not text: skipped
+		return f
 	}
 	// A text is in a line only if it is in the document: most documents
 	// are done with one look, without their lines.
 	if sr.inText != nil && !sr.inText(text) {
-		return true
+		return f
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	// The front matter is not searched: it is the document's metadata,
@@ -312,9 +381,25 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 			hits = append(hits, i)
 		}
 	}
-	if len(hits) == 0 {
+	if len(hits) > 0 {
+		f.e, f.lines, f.hits, f.skip = e, lines, hits, skip
+	}
+	return f
+}
+
+// emit writes a scanned document's matches; it returns false when the
+// search is to stop.
+func (sr *textSearch) emit(f scanned) bool {
+	switch {
+	case f.stop:
+		return false
+	case f.tooLarge:
+		sr.skipped = append(sr.skipped, f.d.Address())
+		return true
+	case len(f.hits) == 0:
 		return true
 	}
+	d, e, lines, hits, skip := f.d, f.e, f.lines, f.hits, f.skip
 	if len(sr.matches) >= sr.limit || int64(sr.out.Len()) > sr.s.MaxRead-512 {
 		sr.truncated = true
 		return false

@@ -180,7 +180,10 @@ zypper in mcp-docs-gateway suse-docs-mcp-sles-16.0
 The gateway's policy decides who may call its tools. An agent needs
 permissions for them, e.g. `{server: suse-docs, tool: find_sections,
 read_only: true}`; Custos's agent templates have them for
-`find_sections`, `search`, `outline` and `read_section`. A replacement
+`find_sections`, `search`, `outline` and `read_section`, and those four
+are the tools the server offers there (`--tools`): every session pays
+for a tool's definition, and `list_docs` and `read_lines` are 1.8 KB of
+the 6.4 KB that six tools and their instructions are. A replacement
 goes in `/etc/mcp-gateway/servers.d/suse-docs.yaml`.
 
 ## Development

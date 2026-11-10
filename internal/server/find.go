@@ -59,6 +59,14 @@ func (s *Server) index(ctx context.Context, k *catalog.Collection) (*rank.Index,
 	s.ranked.mu.Unlock()
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
+	// A server that watches its collections (one that runs long) does
+	// not walk one that has not changed (§17.7).
+	if slot.ix != nil && !slot.ix.Stale() && !s.Watch.Changed(k) {
+		return slot.ix, nil
+	}
+	// Watched from before it is looked at: a change while the index is
+	// checked or built is seen at the next call.
+	s.Watch.Watch(ctx, s.Cat, k)
 	if slot.ix != nil && slot.ix.Current(ctx, s.Cat, k) {
 		return slot.ix, nil
 	}
