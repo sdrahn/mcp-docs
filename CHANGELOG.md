@@ -8,6 +8,19 @@ OBS changelog entry (packaging/suse/README.md).
 - `search` matches no-break spaces as spaces: a query "SLES for SAP"
   finds the lines that write it with no-break spaces, as SUSE's
   documents do.
+- `find_sections` ranks the collections it searches as one: a word
+  weighs by how rare it is in all of them together. Ranked each by its
+  own index, a collection where a word is rare put its passing mention
+  above another collection's section on it. Results of one collection
+  are as before.
+- `find_sections` returns a section that several documents hold with
+  the same text (a topic two products' collections share) once, naming
+  the others: "also in sles-sap-16.1" (`alsoIn` with `--structured`).
+- `search` across collections divides `maxResults` among them and
+  names those that have more matches, where it searched the first
+  until the limit.
+- Benchmarks on real collections (`MCP_DOCS_BENCH`,
+  docs/architecture.md §16).
 
 ## v0.1.3 — 2026-11-09
 

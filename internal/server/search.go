@@ -88,6 +88,11 @@ type textSearch struct {
 	out       strings.Builder
 	truncated bool
 	skipped   []string // documents too large to search
+	// marks[k] is the length of out after match k's lines.
+	marks []int
+	// more are the collections with matches the result leaves out, when
+	// several were searched.
+	more []string
 }
 
 func (s *Server) newSearch(q queryOpts, compat bool) (*textSearch, error) {
@@ -149,15 +154,80 @@ func search(s *Server, ctx context.Context, args json.RawMessage) (*result, erro
 			starts = append(starts, catalog.Doc{Coll: k, Rel: "."})
 		}
 	}
-	for _, d := range starts {
-		if err := sr.below(ctx, d, nil); err != nil {
+	if len(starts) == 1 {
+		if err := sr.below(ctx, starts[0], nil); err != nil {
 			return nil, err
 		}
-		if sr.truncated {
-			break
+		return sr.result(), nil
+	}
+	// Several collections: each is searched on its own, and they share
+	// what one call returns, so that the first one's matches do not
+	// keep the others' out.
+	subs := make([]*textSearch, len(starts))
+	for i, d := range starts {
+		if subs[i], err = s.newSearch(a.queryOpts, false); err != nil {
+			return nil, err
+		}
+		if err := subs[i].below(ctx, d, nil); err != nil {
+			return nil, err
 		}
 	}
+	for i, n := range shares(subs, sr.limit, s.MaxRead-512) {
+		sub := subs[i]
+		if n > 0 {
+			sr.out.WriteString(strings.TrimRight(sub.out.String()[:sub.marks[n-1]], "\n") + "\n\n")
+			sr.matches = append(sr.matches, sub.matches[:n]...)
+		}
+		if n < len(sub.matches) || sub.truncated {
+			sr.truncated = true
+			sr.more = append(sr.more, starts[i].Coll.Name)
+		}
+		sr.skipped = append(sr.skipped, sub.skipped...)
+	}
 	return sr.result(), nil
+}
+
+// shares divides limit matching lines and budget bytes of output among
+// searches: a line to each in turn while it has more, then, while the
+// output is too large, a line less of the one with the most output.
+func shares(subs []*textSearch, limit int, budget int64) []int {
+	n := make([]int, len(subs))
+	for given := true; given && limit > 0; {
+		given = false
+		for i, sub := range subs {
+			if limit > 0 && n[i] < len(sub.matches) {
+				n[i]++
+				limit--
+				given = true
+			}
+		}
+	}
+	size := func(i int) int64 {
+		if n[i] == 0 {
+			return 0
+		}
+		return int64(subs[i].marks[n[i]-1])
+	}
+	for {
+		var total int64
+		most := 0
+		for i := range subs {
+			total += size(i)
+			if size(i) > size(most) {
+				most = i
+			}
+		}
+		shown := 0
+		for i := range subs {
+			if n[i] > 0 {
+				shown++
+			}
+		}
+		if total <= budget || (n[most] <= 1 && shown <= 1) {
+			return n
+		}
+		n[most]--
+	}
 }
 
 // below searches d, a document or the documents below a directory,
@@ -184,6 +254,9 @@ func (sr *textSearch) result() *result {
 	switch {
 	case len(sr.matches) == 0 && !sr.truncated:
 		body = "no matches"
+	case sr.truncated && len(sr.more) > 0:
+		body += fmt.Sprintf("\n(stopped after %d matching lines; more in %s: narrow the query, or search one collection or document)",
+			len(sr.matches), strings.Join(sr.more, ", "))
 	case sr.truncated:
 		body += fmt.Sprintf("\n(stopped after %d matching lines: narrow the query, or search one collection or document)", len(sr.matches))
 	case !sr.compat:
@@ -293,6 +366,7 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 		}
 		shownTo = max(shownTo, to)
 		sr.matches = append(sr.matches, m)
+		sr.marks = append(sr.marks, sr.out.Len())
 	}
 	sr.out.WriteString("\n")
 	return true

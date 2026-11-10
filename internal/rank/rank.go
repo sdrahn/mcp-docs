@@ -10,8 +10,12 @@ package rank
 import (
 	"context"
 	"errors"
+	"hash"
+	"hash/fnv"
+	"io"
 	"io/fs"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -41,6 +45,7 @@ type unit struct {
 	entry   *catalog.Entry
 	length  float64
 	title   map[string]bool // the words of its own title
+	sum     uint64          // of its own text, to tell copies
 }
 
 type posting struct {
@@ -54,6 +59,7 @@ type Index struct {
 	units    []unit
 	postings map[string][]posting
 	avgLen   float64
+	total    float64 // the units' lengths together
 }
 
 // Build indexes the documents of a collection; one larger than maxFile
@@ -83,6 +89,7 @@ func Build(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection, max
 	if err != nil {
 		return nil, err
 	}
+	ix.total = total
 	if len(ix.units) > 0 {
 		ix.avgLen = total / float64(len(ix.units))
 	}
@@ -97,14 +104,18 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 	// before the first heading.
 	tf := make([]map[string]float64, len(o.Headings)+1)
 	lengths := make([]float64, len(o.Headings)+1)
+	sums := make([]hash.Hash64, len(o.Headings)+1)
 	for i := range tf {
 		tf[i] = map[string]float64{}
+		sums[i] = fnv.New64a()
 	}
 	for n, l := range lines {
 		if n < o.FrontMatter {
 			continue // metadata (its title and description are in list_docs), not text
 		}
 		u := o.At(n+1) + 1
+		_, _ = io.WriteString(sums[u], l)
+		_, _ = sums[u].Write([]byte{'\n'})
 		for _, t := range Tokens(l) {
 			tf[u][t]++
 			lengths[u]++
@@ -137,7 +148,8 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 			continue
 		}
 		id := len(ix.units)
-		ix.units = append(ix.units, unit{doc: d, heading: u - 1, entry: en, length: lengths[u], title: titles[u]})
+		ix.units = append(ix.units, unit{doc: d, heading: u - 1, entry: en, length: lengths[u], title: titles[u],
+			sum: sums[u].Sum64()})
 		for t, n := range tf[u] {
 			ix.postings[t] = append(ix.postings[t], posting{unit: id, tf: n})
 		}
@@ -172,6 +184,9 @@ type Hit struct {
 	Entry   *catalog.Entry
 	Heading int // -1: the text before the first heading
 	Score   float64
+	// Sum is of the section's own text: the same in two documents that
+	// hold the same section (a topic two collections share).
+	Sum uint64
 }
 
 // ErrNoTerms is a query of stopwords and punctuation only.
@@ -185,12 +200,18 @@ func (ix *Index) Search(query string, n int) ([]Hit, error) {
 // Under returns the n sections of a document, or of the documents below
 // a directory ("." for all), that best match the query, best first.
 func (ix *Index) Under(query string, d catalog.Doc, n int) ([]Hit, error) {
+	return ix.search(query, n, under(d))
+}
+
+// under keeps the units of a document, or of the documents below a
+// directory; nil for a collection's root: all.
+func under(d catalog.Doc) func(*unit) bool {
 	if d.Rel == "." || d.Rel == "" {
-		return ix.search(query, n, nil)
+		return nil
 	}
-	return ix.search(query, n, func(u *unit) bool {
+	return func(u *unit) bool {
 		return u.doc.Rel == d.Rel || strings.HasPrefix(u.doc.Rel, d.Rel+"/")
-	})
+	}
 }
 
 // Within returns the n subsections of a document's section (heading
@@ -217,20 +238,89 @@ func (ix *Index) search(query string, n int, keep func(*unit) bool) ([]Hit, erro
 	if len(terms) == 0 {
 		return nil, ErrNoTerms
 	}
+	hits := ix.score(terms, statsOf(terms, ix), keep)
+	sortHits(hits)
+	if len(hits) > n {
+		hits = hits[:n]
+	}
+	return hits, nil
+}
+
+// Part is an index and the document or directory of its collection to
+// rank below ("." for all of it).
+type Part struct {
+	Index *Index
+	Under catalog.Doc
+}
+
+// Search returns the n sections of the parts that best match the query,
+// best first; of equal ones, those of the earlier part. The parts are
+// ranked as one: a word weighs by how rare it is in all their
+// collections together, so that the scores of two collections compare
+// (a word rare in one and common in the other would else rank the
+// first's passing mention above the second's section on it).
+func Search(query string, n int, parts []Part) ([]Hit, error) {
+	terms := unique(Tokens(query))
+	if len(terms) == 0 {
+		return nil, ErrNoTerms
+	}
+	var ixs []*Index
+	for _, p := range parts {
+		if !slices.Contains(ixs, p.Index) {
+			ixs = append(ixs, p.Index)
+		}
+	}
+	st := statsOf(terms, ixs...)
+	var hits []Hit
+	for _, p := range parts {
+		hits = append(hits, p.Index.score(terms, st, under(p.Under))...)
+	}
+	sortHits(hits)
+	if len(hits) > n {
+		hits = hits[:n]
+	}
+	return hits, nil
+}
+
+// stats are what BM25 knows of the texts it ranks: how many units, how
+// long on average, and in how many of them each word of the query is.
+type stats struct {
+	n, avgLen float64
+	df        map[string]float64
+}
+
+func statsOf(terms []string, ixs ...*Index) stats {
+	st := stats{df: map[string]float64{}}
+	var total float64
+	for _, ix := range ixs {
+		st.n += float64(len(ix.units))
+		total += ix.total
+		for _, t := range terms {
+			st.df[t] += float64(len(ix.postings[t]))
+		}
+	}
+	if st.n > 0 {
+		st.avgLen = total / st.n
+	}
+	return st
+}
+
+// score returns the units of the index that have a word of the query
+// and that keep keeps (nil: all), each with its score, in no order.
+func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []Hit {
 	scores := map[int]float64{}
-	N := float64(len(ix.units))
 	for _, t := range terms {
 		ps := ix.postings[t]
 		if len(ps) == 0 {
 			continue
 		}
-		idf := math.Log(1 + (N-float64(len(ps))+0.5)/(float64(len(ps))+0.5))
+		idf := math.Log(1 + (st.n-st.df[t]+0.5)/(st.df[t]+0.5))
 		for _, p := range ps {
-			u := ix.units[p.unit]
-			if keep != nil && !keep(&u) {
+			u := &ix.units[p.unit]
+			if keep != nil && !keep(u) {
 				continue
 			}
-			norm := k1 * (1 - b + b*u.length/ix.avgLen)
+			norm := k1 * (1 - b + b*u.length/st.avgLen)
 			scores[p.unit] += idf * p.tf * (k1 + 1) / (p.tf + norm)
 			if u.title[t] {
 				scores[p.unit] += titleBonus * idf
@@ -241,21 +331,18 @@ func (ix *Index) search(query string, n int, keep func(*unit) bool) ([]Hit, erro
 	for id := range scores {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		if scores[ids[i]] != scores[ids[j]] {
-			return scores[ids[i]] > scores[ids[j]]
-		}
-		return ids[i] < ids[j] // document order
-	})
-	if len(ids) > n {
-		ids = ids[:n]
-	}
+	sort.Ints(ids) // document order
 	hits := make([]Hit, 0, len(ids))
 	for _, id := range ids {
-		u := ix.units[id]
-		hits = append(hits, Hit{Doc: u.doc, Entry: u.entry, Heading: u.heading, Score: scores[id]})
+		u := &ix.units[id]
+		hits = append(hits, Hit{Doc: u.doc, Entry: u.entry, Heading: u.heading, Score: scores[id], Sum: u.sum})
 	}
-	return hits, nil
+	return hits
+}
+
+// sortHits sorts by score, keeping the order of equal ones.
+func sortHits(hits []Hit) {
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 }
 
 // OwnLines returns the first and last line of a hit's own text: from
