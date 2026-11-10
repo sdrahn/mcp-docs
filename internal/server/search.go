@@ -79,8 +79,11 @@ type queryOpts struct {
 // textSearch collects matches and their context, up to limit matching
 // lines and the read limit of output.
 type textSearch struct {
-	s         *Server
-	match     func(string) bool
+	s     *Server
+	match func(string) bool
+	// inText, if set, is false for a document none of whose lines
+	// match.
+	inText    func(string) bool
 	around    int
 	limit     int
 	compat    bool // mcp-server-fs's output: file paths, no sections
@@ -117,7 +120,13 @@ func (s *Server) newSearch(q queryOpts, compat bool) (*textSearch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &textSearch{s: s, match: m, around: around, limit: limit, compat: compat, matches: []match{}}, nil
+	// A text matches a line as it matches the document; an expression
+	// is matched a line at a time (^ and $ are a line's).
+	var inText func(string) bool
+	if !q.Regexp {
+		inText = m
+	}
+	return &textSearch{s: s, match: m, inText: inText, around: around, limit: limit, compat: compat, matches: []match{}}, nil
 }
 
 func search(s *Server, ctx context.Context, args json.RawMessage) (*result, error) {
@@ -274,19 +283,19 @@ func (sr *textSearch) doc(ctx context.Context, d catalog.Doc) bool {
 	if ctx.Err() != nil {
 		return false
 	}
-	e, err := sr.s.Cat.Load(ctx, d)
-	if err != nil {
-		return ctx.Err() == nil // unreadable, or not text: skipped
-	}
-	b, err := sr.s.Cat.ReadAll(d, sr.s.MaxFile)
+	e, text, err := sr.s.Cat.LoadText(ctx, d, sr.s.MaxFile)
 	if errors.Is(err, catalog.ErrTooLarge) {
 		sr.skipped = append(sr.skipped, d.Address())
 		return true
 	}
 	if err != nil {
+		return ctx.Err() == nil // unreadable, or not text: skipped
+	}
+	// A text is in a line only if it is in the document: most documents
+	// are done with one look, without their lines.
+	if sr.inText != nil && !sr.inText(text) {
 		return true
 	}
-	text := string(b)
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	var hits []int
 	for i, l := range lines {
@@ -405,7 +414,73 @@ func matcher(query string, isRegexp, caseSensitive bool) (func(string) bool, err
 		return func(l string) bool { return strings.Contains(spaced(l), query) }, nil
 	}
 	q := strings.ToLower(query)
+	if isASCII(q) {
+		return func(l string) bool { return containsFold(spaced(l), q) }, nil
+	}
 	return func(l string) bool { return strings.Contains(strings.ToLower(spaced(l)), q) }, nil
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// containsFold reports whether s holds q, which is lowercase ASCII and
+// not empty, in any case: strings.Contains(strings.ToLower(s), q),
+// without making the lowercase text (of every document searched).
+func containsFold(s, q string) bool {
+	// The two letters outside ASCII whose lowercase is in it: the long
+	// way, for the same answer.
+	if strings.Contains(s, "\u212a") || strings.Contains(s, "\u0130") {
+		return strings.Contains(strings.ToLower(s), q)
+	}
+	lo, up := q[0], q[0]
+	if 'a' <= lo && lo <= 'z' {
+		up = lo - 'a' + 'A'
+	}
+	// The next place of the first letter, in either case; -1: none.
+	next := func(from int, c byte) int {
+		if k := strings.IndexByte(s[from:], c); k >= 0 {
+			return from + k
+		}
+		return -1
+	}
+	a, b := next(0, lo), -1
+	if up != lo {
+		b = next(0, up)
+	}
+	for a >= 0 || b >= 0 {
+		i := a
+		if a < 0 || (b >= 0 && b < a) {
+			i = b
+		}
+		if len(s)-i < len(q) {
+			return false
+		}
+		k := 1
+		for ; k < len(q); k++ {
+			c := s[i+k]
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != q[k] {
+				break
+			}
+		}
+		if k == len(q) {
+			return true
+		}
+		if i == a {
+			a = next(i+1, lo)
+		} else {
+			b = next(i+1, up)
+		}
+	}
+	return false
 }
 
 // noBreak turns the no-break spaces into spaces: a query typed with
@@ -415,7 +490,9 @@ var noBreak = strings.NewReplacer("\u00a0", " ", "\u2007", " ", "\u202f", " ")
 
 // spaced is a line as search matches it: no-break spaces as spaces.
 func spaced(l string) string {
-	if !strings.ContainsAny(l, "\u00a0\u2007\u202f") {
+	// Three searches for a string, not one for any of three characters:
+	// that one looks at every character (a third of search's time).
+	if !strings.Contains(l, "\u00a0") && !strings.Contains(l, "\u2007") && !strings.Contains(l, "\u202f") {
 		return l
 	}
 	return noBreak.Replace(l)

@@ -62,6 +62,7 @@ done
 
 %check
 d=%{buildroot}%{_datadir}/mcp-docs/docs/suse/%{coll}
+test -s "$d/mcp-docs.index"
 test "$(find "$d" -name '*.md' | wc -l)" -ge 380
 grep -qx 'root: %{_datadir}/mcp-docs/docs/suse/%{coll}' %{buildroot}%{_datadir}/mcp-docs/collections.d/%{coll}.yaml
 grep -q '^source: "https://documentation.suse.com/sles-sap/16.0/html/SAP-sles-to-sap/index.html#task-convert-sles-to-sap"' \

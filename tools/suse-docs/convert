@@ -111,4 +111,7 @@ instructions: >
   in order; a topic named ID--ARTICLE.md is that article's variant (an
   architecture's, for example).
 YAML
+# The index file, last: of the documents as they are now, read by the
+# server where it would build the index from every document.
+"$convert" --index "$out"
 echo "$out/$name.yaml"

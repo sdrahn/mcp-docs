@@ -40,8 +40,17 @@ type Server struct {
 	// only these.
 	Tools   []string
 	Version string
+	// Logf, if set, takes a line for the server's log (stderr): what an
+	// operator wants to know and no client is told.
+	Logf func(format string, args ...any)
 
 	ranked indexes
+}
+
+func (s *Server) logf(format string, args ...any) {
+	if s.Logf != nil {
+		s.Logf(format, args...)
+	}
 }
 
 // tool is one tool's definition and handler. Handlers return the result

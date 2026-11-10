@@ -1331,8 +1331,8 @@ and the plan from them; the steps are recorded as they are built.
 |---|---|---|
 | 0 | Benchmarks on real collections (`MCP_DOCS_BENCH`, below); a test of collections that share topics and differ in vocabulary | done |
 | 1 | The collections in scope ranked as one; copies folded; `search` shared among collections | done |
-| 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | |
-| 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | |
+| 2 | `catalog.Lines` with a byte budget; `search` reading each document once and matching its text before its lines; the index's currency from the walk's file information, once a call, a lock per collection; fs-compat results within `--max-read` | done |
+| 3 | An index file in the packages, written by the converter and loaded when it is of the documents' versions, so that a session does not build the index | done (§16.3) |
 | 4 | The converter: ids and includes checked, skipped elements as empty inline content, paragraph starts escaped, unit tests of the renderer, `Convert` in steps | |
 
 **Step 1, as built.** `rank.Search` ranks the parts of several indexes
@@ -1353,6 +1353,53 @@ output until the whole fits.
 With the four collections, "put a node into maintenance mode" now finds
 SLE HA's section first ("also in sle-ha-16.1"), and no topic twice.
 
+**Step 2, as built.**
+
+- *Reads.* `catalog.EachLine` hands the lines of a range to its caller
+  one at a time, which stops it: `read_lines` (and a `docs://` resource)
+  at what one call returns; `read_section` reads its section through
+  once and packs it into parts as it goes, keeping only the part asked
+  for (the packer cuts the parts the packing of all lines cut: a test
+  compares them on random sections). A document of 64 MiB read without
+  a range: 0.07 ms and 0.1 MB, from 113 ms and 155 MB. A single line
+  larger than memory is still read whole, as the scan reads it.
+  The scan itself held such a document several times over when it had
+  no blank line: all of it was the first paragraph, kept for a summary
+  of 200 bytes. It now keeps a paragraph's first 16 KiB. The server's
+  peak memory after an outline, `read_lines` and `read_section` of that
+  document: 14 MB, from 321 MB.
+- *`search`.* A document is opened once and read with its known size
+  (`catalog.LoadText`), its bytes the text without a copy. A text is in
+  a line only if it is in the document, so most documents are done
+  with one look, without their lines; an expression is still matched a
+  line at a time (`^` and `$` are a line's; matching the document first
+  was tried and gained nothing where case is ignored, the default).
+  Case is ignored without making the lowercase text (`containsFold`,
+  for a query in ASCII), and no-break spaces are looked for as three
+  strings, not as any of three characters.
+- *The index's currency.* A document's version is of what the
+  directory tells of the file (`rank.Index.Current` opens none), the
+  check runs once a call, and each collection has its own lock.
+  A document that is no text is recorded with its version: a
+  collection with one had its index rebuilt on every call.
+- *`list_docs`* does not open a document it has listed before while
+  the directory tells the same of it.
+- *fs-compat:* `search_files`, `list_directory` and `outline_file` stop
+  at what one call returns and say so.
+
+| four collections, 1,652 documents | before | after step 2 |
+|---|---|---|
+| `find_sections`, warm, all collections | 12.1 ms | 5.4 ms |
+| `find_sections`, warm, one collection (SLE HA 16.0) | 1.0 ms | 0.7 ms |
+| `search`, a text | 133 ms | 31 ms |
+| `search`, an expression | 203 ms | 139 ms |
+| `list_docs`, a page | 2.8 ms | 1.9 ms |
+| `read_lines` of 64 MiB without a range | 113 ms, 155 MB | 0.07 ms, 0.1 MB |
+
+What is left of a warm `find_sections` is the walk of the collections
+(a `stat` for each document); of `search`, opening and reading each
+document.
+
 **Benchmarks.** `internal/server/bench_test.go`, skipped without
 `MCP_DOCS_BENCH`, a directory whose subdirectories are collections with
 their collection files (`build/` after `tools/suse-docs/convert`):
@@ -1360,3 +1407,103 @@ their collection files (`build/` after `tools/suse-docs/convert`):
 ```sh
 MCP_DOCS_BENCH=$PWD/build go test ./internal/server -run '^$' -bench . -benchmem
 ```
+
+### 16.3 The index file
+
+A stdio server lives for a session, and the first `find_sections` of
+each built the index of every collection in scope: all documents read
+and tokenized, 289 ms for the four collections. A collection that is
+made once and served often has its index written once instead: the file
+`mcp-docs.index` in its directory (`internal/rank/file.go`).
+
+- **Who writes it.** `mcp-docs --write-index`, for the collections the
+  server is configured with (their patterns, `list_items` and
+  extensions as it serves them), and `mcp-docs-convert --index DIR`,
+  for a converted collection; `tools/suse-docs/convert` and
+  `convert-sle-micro` end with it, so a package's build needs nothing
+  new and the spec files only check that the file is there. The same
+  documents give the same file, byte for byte.
+- **When it is used.** The first time a collection's index is needed,
+  the server reads the file and checks it against the documents as a
+  walk finds them: the same paths, each of the same size and CRC-32.
+  Every document is read for that (several at a time), which costs a
+  tenth of building; what the directory tells of a file (its time) is
+  not enough to go by, as a package's installation sets it. Any
+  difference, a damaged file, or one made with another `list_items`
+  or another version of the index's words, and the file is not used:
+  the index is built as before, and the server's log says why
+  ("sles-16.1: mcp-docs.index not used, the index is built: …"). When
+  it is used, the log says "index read from mcp-docs.index". From then
+  on the index is one like any other: current while the documents stay
+  as they are, built anew when one changes.
+- **What it holds.** The documents (path, size, checksum), the words,
+  the units (document, heading id, length, the sum of its text, its
+  title's words) and each word's postings; no text, and no outline.
+  A unit names its heading by id: the outline is of the server's own
+  reading of the document, loaded when a hit needs it (only the best
+  hits' documents are opened), so a server that reads headings
+  otherwise than the writer did finds an id missing, takes the index as
+  stale and builds its own.
+- **The words' version.** The file's words are `rank.Tokens`' of the
+  writer, the query's the reader's: `rank.TokensVersion` is in the
+  file, and a file of another version is not used. `TestTokensVersion`
+  holds a sum of what `Tokens` makes of a fixed text, and fails when
+  that changes without the version.
+- **Not trusted.** The file is read with bounds on every count and
+  index and a checksum over all of it; a test changes each byte and
+  cuts each length, a fuzz test feeds the reader files with a right
+  checksum. A file that names other documents than the collection has
+  is not used; documents are opened through the collection's
+  `os.Root` in any case.
+- **Size and time.** SLES 16.1: 458 KB beside 3.0 MB of documents
+  (15%). The four collections: read and checked in 31 ms, built in
+  289 ms; the answers are the same (`TestIndexFilesAnswerAsBuilt`
+  compares sections, scores and sums on the collections of
+  `MCP_DOCS_BENCH`).
+
+### 16.4 Before and after
+
+The server before the review (main at d3b7e9b, 0.1.3 and the no-break
+spaces of `search`) and after steps 0 to 3, as programs: a stdio
+session each, the time from a request to its answer (medians), with the
+four collections of §16.1 (1,652 documents, 9.3 MB; 4 cores).
+
+| | before | after |
+|---|---|---|
+| the first `find_sections` of a session | 394 ms | 36 ms with the collections' index files; 451 ms without (the index's sums of the units' text) |
+| peak memory after it | 39 MB | 21 MB with index files; 38 MB without |
+| `find_sections`, later ones, all collections | 12.8 ms | 5.0 ms |
+| `find_sections`, later ones, one collection (SLES 16.1) | 5.4 ms | 2.7 ms |
+| `search`, a text, all collections | 107 ms | 27 ms |
+| `search`, an expression | 199 ms | 140 ms |
+| `list_docs`, a page of SLES 16.1 | 6.8 ms | 3.8 ms |
+| `read_section`, a section of 1 KiB | 0.1 ms | 0.1 ms |
+| `read_lines` of a 64 MiB document without a range | 114 ms | 0.3 ms |
+| peak memory after `outline`, `read_lines` and `read_section` of that document | 321 MB | 14 MB |
+
+What a client pays in tokens, and what it gets for them: the 48
+questions of the collection tests (SLES, SLE HA, SLES for SAP) asked of
+the four collections together, without naming one, as an agent does
+that does not know where the answer is.
+
+| | before | after |
+|---|---|---|
+| questions whose answering section is the first result (its text is in the answer) | 35 of 48 | 38 of 48 |
+| results that repeat a topic of the same answer (the same path and section in another collection) | 35 | 15 (those whose text differs between the collections) |
+| the answers together | 114.5 KB, ~28.6k tokens | 112.5 KB, ~28.1k tokens |
+| per question | 2,386 B | 2,345 B |
+| `tools/list` and `initialize` | 5,122 B and 1,410 B | the same |
+| the eval's 20 questions on mcp-gateway's documentation (one collection) | 67.2 KiB | 67.2 KiB |
+
+The tokens of an answer are as before: the review did not change what
+a result says, but which sections it is of. A question whose section
+is not first costs the agent a second call (a section of about 2 KB,
+or a search): three questions fewer need one, and a result's other
+places are no longer spent on copies. Of the ten questions still not
+answered first, seven are not answered first by any of the collections
+asked alone either (§14). Two are answered by SLE HA alone and not by
+the four together, before as after ("install a three-node cluster",
+"put the whole cluster into maintenance mode"). One was answered first
+before and is second now: "tune the system for SAP HANA with saptune",
+by SLES 16.1's copy of the topic, which SLES for SAP's verification of
+the tuning now precedes, as it does in SLES for SAP alone.

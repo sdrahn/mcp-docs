@@ -290,3 +290,21 @@ func TestListItems(t *testing.T) {
 		t.Errorf("an item without a heading: %+v", o.Headings)
 	}
 }
+
+// A first paragraph that does not end is not kept whole for its
+// summary: a document of a million lines without a blank one was held
+// in memory several times over while it was scanned.
+func TestSummaryOfEndlessParagraph(t *testing.T) {
+	line := "a line of text that is about sixty bytes long, more or less.\n"
+	o, err := Scan(context.Background(), strings.NewReader("# Large\n\n"+strings.Repeat(line, 20000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(o.Summary, "a line of text") || len(o.Summary) > SummaryLength+4 {
+		t.Errorf("summary: %q", o.Summary)
+	}
+	short, _ := Scan(context.Background(), strings.NewReader("# Large\n\n"+strings.Repeat(line, 20)))
+	if short.Summary != o.Summary {
+		t.Errorf("the summary of the long paragraph is not that of its start:\n%q\n%q", o.Summary, short.Summary)
+	}
+}

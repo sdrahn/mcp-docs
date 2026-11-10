@@ -26,6 +26,7 @@ import (
 	"sync"
 	"syscall"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/sdrahn/mcp-docs/internal/glob"
 	"github.com/sdrahn/mcp-docs/internal/markdown"
@@ -316,30 +317,106 @@ type Entry struct {
 // Load returns the document's outline, scanning it unless the cached
 // one is of the same version.
 func (c *Catalog) Load(ctx context.Context, d Doc) (*Entry, error) {
-	f, err := c.open(d)
+	f, fi, err := c.openDoc(d)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, Explain(d, err)
-	}
-	if fi.IsDir() {
-		return nil, fmt.Errorf("%s: is a directory (list_docs lists its documents)", d.Address())
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s: not a regular file", d.Address())
-	}
 	version := versionOf(fi)
-	key := d.Coll.Name + "\x00" + d.Rel
-	c.mu.Lock()
-	e := c.cache[key]
-	c.mu.Unlock()
-	if e != nil && e.Version == version {
+	if e := c.cached(d, version); e != nil {
 		return e, nil
 	}
-	br := bufio.NewReader(f)
+	return c.scan(ctx, d, bufio.NewReader(f), fi, version)
+}
+
+// LoadText is Load and the document's text, read with one opening of
+// the file; a document of more than max bytes is ErrTooLarge.
+func (c *Catalog) LoadText(ctx context.Context, d Doc, max int64) (*Entry, string, error) {
+	f, fi, err := c.openDoc(d)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = f.Close() }()
+	if fi.Size() > max {
+		return nil, "", ErrTooLarge
+	}
+	// The size is known: one read, and one more that finds the end.
+	b := make([]byte, 0, fi.Size()+1)
+	for {
+		n, err := f.Read(b[len(b):cap(b)])
+		b = b[:len(b)+n]
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, "", Explain(d, err)
+		}
+		if int64(len(b)) > max {
+			return nil, "", ErrTooLarge // grown since
+		}
+		if len(b) == cap(b) {
+			b = append(b, 0)[:len(b)]
+		}
+	}
+	// b is not written again: its bytes are the string's, not a copy
+	// (of every document a search reads).
+	text := unsafe.String(unsafe.SliceData(b), len(b))
+	version := versionOf(fi)
+	if e := c.cached(d, version); e != nil {
+		return e, text, nil
+	}
+	e, err := c.scan(ctx, d, bufio.NewReader(strings.NewReader(text)), fi, version)
+	return e, text, err
+}
+
+// openDoc opens a document and says what it is; a directory or another
+// file that is not a regular one is an error.
+func (c *Catalog) openDoc(d Doc) (*os.File, fs.FileInfo, error) {
+	f, err := c.open(d)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	switch {
+	case err != nil:
+		err = Explain(d, err)
+	case fi.IsDir():
+		err = fmt.Errorf("%s: is a directory (list_docs lists its documents)", d.Address())
+	case !fi.Mode().IsRegular():
+		err = fmt.Errorf("%s: not a regular file", d.Address())
+	}
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
+}
+
+func cacheKey(d Doc) string { return d.Coll.Name + "\x00" + d.Rel }
+
+// cached returns the document's entry if it is of the version.
+func (c *Catalog) cached(d Doc, version string) *Entry {
+	c.mu.Lock()
+	e := c.cache[cacheKey(d)]
+	c.mu.Unlock()
+	if e != nil && e.Version == version {
+		return e
+	}
+	return nil
+}
+
+// Cached returns the document's entry without opening the document, if
+// there is one of the version that fi, of a walk, tells; else nil
+// (Load then scans it).
+func (c *Catalog) Cached(d Doc, fi fs.FileInfo) *Entry {
+	return c.cached(d, versionOf(fi))
+}
+
+// Version is the version of a document that fi is of, as an Entry has
+// it.
+func Version(fi fs.FileInfo) string { return versionOf(fi) }
+
+func (c *Catalog) scan(ctx context.Context, d Doc, br *bufio.Reader, fi fs.FileInfo, version string) (*Entry, error) {
 	if sample, _ := br.Peek(8192); IsBinary(sample) {
 		return nil, fmt.Errorf("%s: not a text file", d.Address())
 	}
@@ -347,9 +424,9 @@ func (c *Catalog) Load(ctx context.Context, d Doc) (*Entry, error) {
 	if err != nil {
 		return nil, Explain(d, err)
 	}
-	e = &Entry{Outline: o, Version: version, Size: fi.Size()}
+	e := &Entry{Outline: o, Version: version, Size: fi.Size()}
 	c.mu.Lock()
-	c.cache[key] = e
+	c.cache[cacheKey(d)] = e
 	c.mu.Unlock()
 	return e, nil
 }
@@ -367,41 +444,52 @@ func versionOf(fi fs.FileInfo) string {
 // end) of a document whose outline is e, seeking to the nearest stored
 // offset. It fails when the document is no longer of e's version.
 func (c *Catalog) Lines(d Doc, e *Entry, from, to int) ([]string, error) {
+	var out []string
+	err := c.EachLine(d, e, from, to, func(_ int, line string) bool {
+		out = append(out, line)
+		return true
+	})
+	return out, err
+}
+
+// EachLine calls fn with the lines from to to as Lines returns them,
+// each with its number, until fn returns false: for a reader that
+// keeps only part of them (what one call returns of a large section).
+func (c *Catalog) EachLine(d Doc, e *Entry, from, to int, fn func(n int, line string) bool) error {
 	if from < 1 || to < from {
-		return nil, nil
+		return nil
 	}
 	f, err := c.open(d)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = f.Close() }()
 	if fi, err := f.Stat(); err != nil {
-		return nil, Explain(d, err)
+		return Explain(d, err)
 	} else if versionOf(fi) != e.Version {
-		return nil, fmt.Errorf("%s: changed while it was read: try again", d.Address())
+		return fmt.Errorf("%s: changed while it was read: try again", d.Address())
 	}
 	k := (from - 1) / markdown.OffsetEvery
 	if k >= len(e.Outline.Offsets) {
-		return nil, nil
+		return nil
 	}
 	if _, err := f.Seek(e.Outline.Offsets[k], io.SeekStart); err != nil {
-		return nil, Explain(d, err)
+		return Explain(d, err)
 	}
 	br := bufio.NewReader(f)
-	var out []string
 	for n := k*markdown.OffsetEvery + 1; n <= to; n++ {
 		line, err := br.ReadString('\n')
-		if n >= from && len(line) > 0 {
-			out = append(out, line)
+		if n >= from && len(line) > 0 && !fn(n, line) {
+			return nil
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, Explain(d, err)
+			return Explain(d, err)
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // ReadAll reads a whole document of at most max bytes; a larger one is
@@ -415,6 +503,32 @@ func (c *Catalog) ReadAll(d Doc, max int64) ([]byte, error) {
 	b, err := io.ReadAll(io.LimitReader(f, max+1))
 	if err != nil {
 		return nil, Explain(d, err)
+	}
+	if int64(len(b)) > max {
+		return nil, ErrTooLarge
+	}
+	return b, nil
+}
+
+// Open opens a document for reading it whole.
+func (c *Catalog) Open(d Doc) (io.ReadCloser, error) { return c.open(d) }
+
+// ReadFile reads a file of at most max bytes in a collection's
+// directory that is not a document: what mcp-docs keeps beside them
+// (the index file).
+func (c *Catalog) ReadFile(k *Collection, name string, max int64) ([]byte, error) {
+	root, err := k.open()
+	if err != nil {
+		return nil, err
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
 	}
 	if int64(len(b)) > max {
 		return nil, ErrTooLarge

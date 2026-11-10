@@ -32,26 +32,57 @@ const (
 )
 
 // indexes are the rank indexes of the collections, by name, built when
-// first asked and again when a document changes.
+// first asked and again when a document changes. Each collection has
+// its own lock: building or checking one does not hold the others up.
 type indexes struct {
 	mu sync.Mutex
-	m  map[string]*rank.Index
+	m  map[string]*indexSlot
+}
+
+type indexSlot struct {
+	mu    sync.Mutex
+	ix    *rank.Index
+	tried bool // the index file was looked at
 }
 
 func (s *Server) index(ctx context.Context, k *catalog.Collection) (*rank.Index, error) {
 	s.ranked.mu.Lock()
-	defer s.ranked.mu.Unlock()
 	if s.ranked.m == nil {
-		s.ranked.m = map[string]*rank.Index{}
+		s.ranked.m = map[string]*indexSlot{}
 	}
-	if ix := s.ranked.m[k.Name]; ix != nil && ix.Current(ctx, s.Cat, k) {
-		return ix, nil
+	slot := s.ranked.m[k.Name]
+	if slot == nil {
+		slot = &indexSlot{}
+		s.ranked.m[k.Name] = slot
+	}
+	s.ranked.mu.Unlock()
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if slot.ix != nil && slot.ix.Current(ctx, s.Cat, k) {
+		return slot.ix, nil
+	}
+	// The first time, the collection's index file, if it has one that is
+	// of its documents (§16.3): read where the index would be built.
+	if !slot.tried {
+		slot.tried = true
+		ix, err := rank.LoadFile(ctx, s.Cat, k)
+		switch {
+		case err == nil:
+			s.logf("%s: index read from %s", k.Name, rank.FileName)
+			slot.ix = ix
+			return ix, nil
+		case ctx.Err() != nil:
+			slot.tried = false
+			return nil, ctx.Err()
+		case !errors.Is(err, rank.ErrNoFile):
+			s.logf("%s: %s not used, the index is built: %v", k.Name, rank.FileName, err)
+		}
 	}
 	ix, err := rank.Build(ctx, s.Cat, k, s.MaxFile)
 	if err != nil {
 		return nil, err
 	}
-	s.ranked.m[k.Name] = ix
+	slot.ix = ix
 	return ix, nil
 }
 
@@ -222,7 +253,14 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 	listed := map[string]bool{} // what the text already shows, doc#id
 	if best := out[0]; read && best.Section != "" {
 		budget := min(int64(findReadBudget), max(s.MaxRead-1024, 1024))
-		sec, t, err := s.bestPart(ctx, hits[0], a.Query, terms, budget)
+		// Of the index that ranked it: checked once a call.
+		var ix *rank.Index
+		for _, p := range parts {
+			if p.Under.Coll == hits[0].Doc.Coll {
+				ix = p.Index
+			}
+		}
+		sec, t, err := s.bestPart(ctx, ix, hits[0], a.Query, terms, budget)
 		if err == nil {
 			readText = t
 			listed[best.Doc+"#"+sec] = true
@@ -290,14 +328,10 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 // does), whole if it fits, else its own text and the outline of its
 // subsections, else the passage of its own text that matches best. It
 // returns the id of the section the text is of.
-func (s *Server) bestPart(ctx context.Context, h rank.Hit, query string, terms map[string]bool, budget int64) (string, string, error) {
+func (s *Server) bestPart(ctx context.Context, ix *rank.Index, h rank.Hit, query string, terms map[string]bool, budget int64) (string, string, error) {
 	o := h.Entry.Outline
 	u := h.Heading
 	if o.Headings[u].Bytes > budget {
-		ix, err := s.index(ctx, h.Doc.Coll)
-		if err != nil {
-			return "", "", err
-		}
 		if sub, err := ix.Within(query, h.Doc, u, 1); err == nil && len(sub) > 0 {
 			u = sub[0].Heading
 		}

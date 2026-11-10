@@ -18,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
@@ -40,12 +41,26 @@ const (
 // unit is a section's own text, or the text before a document's first
 // heading (Heading -1).
 type unit struct {
-	doc     catalog.Doc
+	doc *idoc
+	// heading is the index of the unit's heading in the document's
+	// outline, or unresolved in an index read from a file, which knows
+	// the heading by its id (locate finds it in the outline).
 	heading int
-	entry   *catalog.Entry
-	length  float64
-	title   map[string]bool // the words of its own title
-	sum     uint64          // of its own text, to tell copies
+	id      string   // the heading's id; "" before the first heading
+	length  float64  // in words; a whole number
+	title   []string // the words of its own title
+	sum     uint64   // of its own text, to tell copies
+}
+
+const unresolved = -2
+
+// idoc is a document of the index; its outline is loaded when a hit
+// needs it, in an index read from a file.
+type idoc struct {
+	doc   catalog.Doc
+	entry *catalog.Entry
+	heads map[string]int // heading id → index
+	bad   bool           // it cannot be loaded
 }
 
 type posting struct {
@@ -60,22 +75,34 @@ type Index struct {
 	postings map[string][]posting
 	avgLen   float64
 	total    float64 // the units' lengths together
+
+	cat *catalog.Catalog
+	// mu guards the documents' outlines, loaded as hits need them, and
+	// stale.
+	mu    sync.Mutex
+	stale bool
 }
 
 // Build indexes the documents of a collection; one larger than maxFile
 // is left out.
 func Build(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection, maxFile int64) (*Index, error) {
-	ix := &Index{versions: map[string]string{}, postings: map[string][]posting{}}
+	ix := &Index{versions: map[string]string{}, postings: map[string][]posting{}, cat: cat}
 	var total float64
 	err := cat.Walk(ctx, catalog.Doc{Coll: k, Rel: "."}, nil, func(d catalog.Doc, e fs.DirEntry) bool {
 		if e.IsDir() {
 			return true
 		}
+		// Every document's version, also of one that cannot be read or
+		// is no text: the index is current while it stays as it is.
+		fi, err := e.Info()
+		if err != nil {
+			return true
+		}
+		ix.versions[d.Address()] = catalog.Version(fi)
 		en, err := cat.Load(ctx, d)
 		if err != nil {
 			return ctx.Err() == nil
 		}
-		ix.versions[d.Address()] = en.Version
 		if en.Outline.Meta.Unranked {
 			return true
 		}
@@ -121,13 +148,9 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 			lengths[u]++
 		}
 	}
-	titles := make([]map[string]bool, len(o.Headings)+1)
-	titles[0] = map[string]bool{}
+	titles := make([][]string, len(o.Headings)+1)
 	for i, h := range o.Headings {
-		titles[i+1] = map[string]bool{}
-		for _, t := range Tokens(h.Title) {
-			titles[i+1][t] = true
-		}
+		titles[i+1] = unique(Tokens(h.Title))
 		for p := h.Parent; p >= 0; p = o.Headings[p].Parent {
 			for _, t := range Tokens(o.Headings[p].Title) {
 				tf[i+1][t] += pathWeight
@@ -138,18 +161,20 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 	// The text before the first heading has the document's title, when
 	// it has any text.
 	if lengths[0] > 0 {
-		for _, t := range Tokens(o.Title()) {
-			titles[0][t] = true
-		}
+		titles[0] = unique(Tokens(o.Title()))
 	}
+	doc := &idoc{doc: d, entry: en}
 	var total float64
 	for u := range tf {
 		if lengths[u] == 0 {
 			continue
 		}
 		id := len(ix.units)
-		ix.units = append(ix.units, unit{doc: d, heading: u - 1, entry: en, length: lengths[u], title: titles[u],
-			sum: sums[u].Sum64()})
+		nu := unit{doc: doc, heading: u - 1, length: lengths[u], title: titles[u], sum: sums[u].Sum64()}
+		if u > 0 {
+			nu.id = o.Headings[u-1].ID
+		}
+		ix.units = append(ix.units, nu)
 		for t, n := range tf[u] {
 			ix.postings[t] = append(ix.postings[t], posting{unit: id, tf: n})
 		}
@@ -159,7 +184,9 @@ func (ix *Index) add(d catalog.Doc, en *catalog.Entry, text string) float64 {
 }
 
 // Current reports whether the index was built from the documents as
-// they are: the same documents, of the same versions.
+// they are: the same documents, of the same versions. It walks the
+// collection and opens no document: a version is of what the directory
+// tells of a file.
 func (ix *Index) Current(ctx context.Context, cat *catalog.Catalog, k *catalog.Collection) bool {
 	seen := 0
 	current := true
@@ -168,14 +195,17 @@ func (ix *Index) Current(ctx context.Context, cat *catalog.Catalog, k *catalog.C
 			return true
 		}
 		seen++
-		en, err := cat.Load(ctx, d)
-		if err != nil || ix.versions[d.Address()] != en.Version {
+		fi, err := e.Info()
+		if err != nil || ix.versions[d.Address()] != catalog.Version(fi) {
 			current = false
 			return false
 		}
 		return true
 	})
-	return current && seen == len(ix.versions) && ctx.Err() == nil
+	ix.mu.Lock()
+	stale := ix.stale
+	ix.mu.Unlock()
+	return current && !stale && seen == len(ix.versions) && ctx.Err() == nil
 }
 
 // Hit is a section and its score.
@@ -210,7 +240,7 @@ func under(d catalog.Doc) func(*unit) bool {
 		return nil
 	}
 	return func(u *unit) bool {
-		return u.doc.Rel == d.Rel || strings.HasPrefix(u.doc.Rel, d.Rel+"/")
+		return u.doc.doc.Rel == d.Rel || strings.HasPrefix(u.doc.doc.Rel, d.Rel+"/")
 	}
 }
 
@@ -218,13 +248,16 @@ func under(d catalog.Doc) func(*unit) bool {
 // index; at any depth, not the section itself) that best match the
 // query, best first: where in a large section the answer is.
 func (ix *Index) Within(query string, d catalog.Doc, heading, n int) ([]Hit, error) {
-	addr := d.Address()
 	return ix.search(query, n, func(u *unit) bool {
-		if u.heading <= heading || u.doc.Address() != addr {
+		if u.doc.doc.Rel != d.Rel {
 			return false
 		}
-		hs := u.entry.Outline.Headings
-		for p := hs[u.heading].Parent; p >= 0; p = hs[p].Parent {
+		e, h, ok := ix.locate(u)
+		if !ok || h <= heading {
+			return false
+		}
+		hs := e.Outline.Headings
+		for p := hs[h].Parent; p >= 0; p = hs[p].Parent {
 			if p == heading {
 				return true
 			}
@@ -238,12 +271,72 @@ func (ix *Index) search(query string, n int, keep func(*unit) bool) ([]Hit, erro
 	if len(terms) == 0 {
 		return nil, ErrNoTerms
 	}
-	hits := ix.score(terms, statsOf(terms, ix), keep)
-	sortHits(hits)
-	if len(hits) > n {
-		hits = hits[:n]
+	return hits(ix.score(terms, statsOf(terms, ix), keep), n), nil
+}
+
+// scored is a unit of an index and its score.
+type scored struct {
+	ix    *Index
+	unit  int
+	score float64
+}
+
+// hits are the n best of the scored units, best first, keeping the
+// order of equal ones, as Hits: only their documents' outlines are
+// needed.
+func hits(sc []scored, n int) []Hit {
+	sort.SliceStable(sc, func(i, j int) bool { return sc[i].score > sc[j].score })
+	out := make([]Hit, 0, min(n, len(sc)))
+	for _, c := range sc {
+		if len(out) == n {
+			break
+		}
+		u := &c.ix.units[c.unit]
+		e, h, ok := c.ix.locate(u)
+		if !ok {
+			continue
+		}
+		out = append(out, Hit{Doc: u.doc.doc, Entry: e, Heading: h, Score: c.score, Sum: u.sum})
 	}
-	return hits, nil
+	return out
+}
+
+// locate returns the outline of a unit's document and the unit's
+// heading in it. In an index read from a file, the document is loaded
+// when first asked for; a unit whose heading the outline does not have
+// (the index is of another reading of the document) marks the index
+// stale, to be built anew, and is not located.
+func (ix *Index) locate(u *unit) (*catalog.Entry, int, bool) {
+	if u.heading != unresolved {
+		return u.doc.entry, u.heading, true
+	}
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	d := u.doc
+	if d.entry == nil && !d.bad {
+		e, err := ix.cat.Load(context.Background(), d.doc)
+		if err != nil {
+			d.bad = true
+		} else {
+			d.entry = e
+			d.heads = make(map[string]int, len(e.Outline.Headings))
+			for i, h := range e.Outline.Headings {
+				d.heads[h.ID] = i
+			}
+		}
+	}
+	if d.bad {
+		ix.stale = true
+		return nil, 0, false
+	}
+	if u.id == "" {
+		return d.entry, -1, true
+	}
+	h, ok := d.heads[u.id]
+	if !ok {
+		ix.stale = true
+	}
+	return d.entry, h, ok
 }
 
 // Part is an index and the document or directory of its collection to
@@ -271,15 +364,11 @@ func Search(query string, n int, parts []Part) ([]Hit, error) {
 		}
 	}
 	st := statsOf(terms, ixs...)
-	var hits []Hit
+	var sc []scored
 	for _, p := range parts {
-		hits = append(hits, p.Index.score(terms, st, under(p.Under))...)
+		sc = append(sc, p.Index.score(terms, st, under(p.Under))...)
 	}
-	sortHits(hits)
-	if len(hits) > n {
-		hits = hits[:n]
-	}
-	return hits, nil
+	return hits(sc, n), nil
 }
 
 // stats are what BM25 knows of the texts it ranks: how many units, how
@@ -307,7 +396,7 @@ func statsOf(terms []string, ixs ...*Index) stats {
 
 // score returns the units of the index that have a word of the query
 // and that keep keeps (nil: all), each with its score, in no order.
-func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []Hit {
+func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []scored {
 	scores := map[int]float64{}
 	for _, t := range terms {
 		ps := ix.postings[t]
@@ -322,7 +411,7 @@ func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []Hit {
 			}
 			norm := k1 * (1 - b + b*u.length/st.avgLen)
 			scores[p.unit] += idf * p.tf * (k1 + 1) / (p.tf + norm)
-			if u.title[t] {
+			if slices.Contains(u.title, t) {
 				scores[p.unit] += titleBonus * idf
 			}
 		}
@@ -332,17 +421,11 @@ func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []Hit {
 		ids = append(ids, id)
 	}
 	sort.Ints(ids) // document order
-	hits := make([]Hit, 0, len(ids))
+	out := make([]scored, 0, len(ids))
 	for _, id := range ids {
-		u := &ix.units[id]
-		hits = append(hits, Hit{Doc: u.doc, Entry: u.entry, Heading: u.heading, Score: scores[id], Sum: u.sum})
+		out = append(out, scored{ix: ix, unit: id, score: scores[id]})
 	}
-	return hits
-}
-
-// sortHits sorts by score, keeping the order of equal ones.
-func sortHits(hits []Hit) {
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	return out
 }
 
 // OwnLines returns the first and last line of a hit's own text: from

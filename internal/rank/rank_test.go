@@ -144,3 +144,30 @@ func hits0(t *testing.T, ix *Index, q string) Hit {
 	}
 	return h[0]
 }
+
+// A document that is no text is not ranked, and does not make the index
+// stale: it was rebuilt on every call while the collection had one.
+func TestCurrentWithUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("# A\n\ntext here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "binary.md"), []byte("\x00\x01\x02"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	k := &catalog.Collection{Name: "k", Path: dir}
+	cat := catalog.New([]*catalog.Collection{k}, []string{".md"}, 100)
+	ix, err := Build(context.Background(), cat, k, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ix.Current(context.Background(), cat, k) {
+		t.Error("not current right after it was built")
+	}
+	if err := os.Remove(filepath.Join(dir, "binary.md")); err != nil {
+		t.Fatal(err)
+	}
+	if ix.Current(context.Background(), cat, k) {
+		t.Error("current after a document went")
+	}
+}

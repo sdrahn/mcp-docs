@@ -96,6 +96,10 @@ expect() {
 	grep -q -- "$1" /tmp/smoke.out || fail "no $1 in the answers: $(cat /tmp/smoke.out)"
 }
 grep -q "serving .*$coll=$docs" /tmp/smoke.err || fail "not served: $(cat /tmp/smoke.err)"
+# The package's index file is of its documents as installed: the server
+# reads it, and builds no index.
+rpm -qf "$docs/mcp-docs.index" | grep -q "^$pkg-" || fail "$docs/mcp-docs.index is not owned by $pkg"
+grep -q "$coll: index read from mcp-docs.index" /tmp/smoke.err || fail "the index file was not used: $(cat /tmp/smoke.err)"
 expect "$title"
 echo "$answers" | while read -r a; do
 	expect "$a"

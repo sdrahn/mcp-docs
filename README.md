@@ -79,6 +79,7 @@ Options:
 | `--max-concurrent N` | 32 | with `--listen`, requests handled at once |
 | `--fs-compat` | off | also offer mcp-server-fs's `outline_file`, `search_text`, `read_text_file`, `search_files`, `list_directory` |
 | `--tools LIST` | all | offer only these tools, comma-separated; the instructions name only them |
+| `--write-index` | | write each collection's index file (`mcp-docs.index`, in its directory) and exit: a server then reads the index of `find_sections` where it would build it from every document. For collections that are made once and served often, such as a package's ([§16.3](docs/architecture.md#163-the-index-file)) |
 
 ### Keeping token cost down
 

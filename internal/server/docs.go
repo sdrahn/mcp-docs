@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -192,7 +193,17 @@ func (s *Server) listDocuments(ctx context.Context, dir catalog.Doc, opt listOpt
 		}
 		all++
 		di := docInfo{Doc: d.Address()}
-		if en, err := s.Cat.Load(ctx, d); err == nil {
+		// A document listed before is not opened again while the
+		// directory tells the same of it.
+		var en *catalog.Entry
+		if fi, err := e.Info(); err == nil {
+			en = s.Cat.Cached(d, fi)
+		}
+		var err error
+		if en == nil {
+			en, err = s.Cat.Load(ctx, d)
+		}
+		if err == nil {
 			o := en.Outline
 			di.Title, di.Description, di.Tags, di.Lines, di.Bytes = o.Title(), o.Description(), o.Meta.Tags, o.Lines, o.Bytes
 		} else if ctx.Err() != nil {
@@ -543,35 +554,39 @@ func (s *Server) sectionText(ctx context.Context, args json.RawMessage, budget i
 		return nil, err
 	}
 	h := o.Headings[i]
-	lines, err := s.Cat.Lines(d, e, h.Line, h.End())
-	if err != nil {
-		return nil, err
-	}
 	starts := map[int]int{} // line → heading
 	for j := i; j < len(o.Headings) && o.Headings[j].Line <= h.End(); j++ {
 		starts[o.Headings[j].Line] = j
 	}
-	var units []unit
-	for n := h.Line; n <= h.End() && n-h.Line < len(lines); n++ {
+	// The section is read through once and packed into parts as it
+	// goes; only the part asked for is kept.
+	p := packer{budget: budget, want: a.Part}
+	skipTo := 0 // the last line of a subsection left out
+	err = s.Cat.EachLine(d, e, h.Line, h.End(), func(n int, line string) bool {
+		if n <= skipTo {
+			return true
+		}
 		j, isHead := starts[n]
 		if isHead && a.Depth != nil && o.Headings[j].Level > h.Level+*a.Depth {
 			sub := o.Headings[j]
-			units = append(units, unit{text: fmt.Sprintf("… %s %s  #%s  [%d lines, %s: read_section with its id]\n",
+			p.add(unit{text: fmt.Sprintf("… %s %s  #%s  [%d lines, %s: read_section with its id]\n",
 				strings.Repeat("#", sub.Level), sub.Title, sub.ID, sub.Lines, size(sub.Bytes)), head: true})
-			n = sub.End()
-			continue
+			skipTo = sub.End()
+			return true
 		}
-		units = append(units, unit{line: n, text: lines[n-h.Line], head: isHead})
+		p.add(unit{line: n, text: line, head: isHead})
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	parts := pack(units, budget)
-	if a.Part > len(parts) {
-		return nil, fmt.Errorf("%s#%s: has %d part(s)", d.Address(), h.ID, len(parts))
+	p.end()
+	if a.Part > p.parts {
+		return nil, fmt.Errorf("%s#%s: has %d part(s)", d.Address(), h.ID, p.parts)
 	}
-	p := parts[a.Part-1]
 	var out strings.Builder
 	first, last := 0, 0
-	for _, u := range units[p[0]:p[1]] {
+	for _, u := range p.part {
 		out.WriteString(u.text)
 		if u.line > 0 {
 			if first == 0 {
@@ -585,12 +600,12 @@ func (s *Server) sectionText(ctx context.Context, args json.RawMessage, budget i
 		out.WriteString("\n")
 	}
 	fmt.Fprintf(&out, "[§ #%s, lines %d-%d of %d", h.ID, first, last, o.Lines)
-	if len(parts) > 1 {
-		fmt.Fprintf(&out, ", part %d of %d", a.Part, len(parts))
+	if p.parts > 1 {
+		fmt.Fprintf(&out, ", part %d of %d", a.Part, p.parts)
 	}
 	out.WriteString("]")
-	if a.Part < len(parts) {
-		next := units[parts[a.Part][0]].line
+	if a.Part < p.parts {
+		next := p.next
 		fmt.Fprintf(&out, "\n(continued in part %d", a.Part+1)
 		if next > 0 {
 			fmt.Fprintf(&out, ", from line %d", next)
@@ -618,46 +633,77 @@ func (s *Server) sectionText(ctx context.Context, args json.RawMessage, budget i
 	return &result{text: out.String()}, nil
 }
 
-// pack splits units into parts of at most budget bytes: [from, to)
-// each. A part that must be cut is cut before a heading in its second
-// half if there is one; a single line longer than the budget is cut.
-func pack(units []unit, budget int64) [][2]int {
-	var parts [][2]int
-	start := 0
-	for start < len(units) {
-		var n int64
-		end := start
-		for end < len(units) && n+int64(len(units[end].text)) <= budget {
-			n += int64(len(units[end].text))
-			end++
-		}
-		if end == len(units) {
-			parts = append(parts, [2]int{start, end})
+// packer splits the units it is given, in order, into parts of at most
+// budget bytes, and keeps part want (from 1). A part that must be cut
+// is cut before a heading in its second half if there is one; a single
+// line longer than the budget is cut. It holds one part at a time: a
+// section of any size is packed in the memory of one part.
+type packer struct {
+	budget int64
+	want   int
+
+	cur   []unit // the part being filled
+	bytes int64  // of cur
+	parts int    // parts closed
+	part  []unit // part want
+	next  int    // the first line of the part after want (0: none, or not a line)
+}
+
+func (p *packer) add(u unit) {
+	cut := false
+	for p.bytes+int64(len(u.text)) > p.budget {
+		if len(p.cur) == 0 { // one line longer than a part
+			u.text, cut = cutText(u.text, p.budget), true
 			break
 		}
-		if end == start { // one line longer than a part
-			units[start].text = cutText(units[start].text, budget)
-			end = start + 1
-		} else {
-			var m int64
-			best := -1
-			for k := start; k < end; k++ {
-				if k > start && units[k].head && m >= budget/2 {
-					best = k
-				}
-				m += int64(len(units[k].text))
+		var m int64
+		best := -1
+		for k, c := range p.cur {
+			if k > 0 && c.head && m >= p.budget/2 {
+				best = k
 			}
-			if best > start {
-				end = best
-			}
+			m += int64(len(c.text))
 		}
-		parts = append(parts, [2]int{start, end})
-		start = end
+		if best < 0 {
+			best = len(p.cur)
+		}
+		rest := slices.Clone(p.cur[best:])
+		p.cur = p.cur[:best]
+		p.close()
+		for _, c := range rest {
+			p.push(c)
+		}
 	}
-	if len(parts) == 0 {
-		parts = append(parts, [2]int{0, 0})
+	p.push(u)
+	if cut { // a part of its own
+		p.close()
 	}
-	return parts
+}
+
+func (p *packer) push(u unit) {
+	if len(p.cur) == 0 && p.parts == p.want && p.next == 0 {
+		p.next = u.line
+	}
+	p.cur = append(p.cur, u)
+	p.bytes += int64(len(u.text))
+}
+
+func (p *packer) close() {
+	p.parts++
+	if p.parts == p.want {
+		p.part = p.cur
+		p.cur = nil
+	} else {
+		p.cur = p.cur[:0]
+	}
+	p.bytes = 0
+}
+
+// end closes the last part; a section without lines has one empty part.
+func (p *packer) end() {
+	if len(p.cur) > 0 || p.parts == 0 {
+		p.close()
+	}
 }
 
 func cutText(t string, budget int64) string {
@@ -735,23 +781,24 @@ func (s *Server) lines(d catalog.Doc, e *catalog.Entry, offset, limit, head, tai
 	if from > n {
 		return nil, fmt.Errorf("%s: has %d lines, offset %d is past its end", name, n, from)
 	}
-	ls, err := s.Cat.Lines(d, e, from, to)
-	if err != nil {
-		return nil, err
-	}
+	// Read as far as one call returns, not as far as was asked.
 	var out strings.Builder
 	last := from - 1
 	budget := s.MaxRead - 256
-	for _, l := range ls {
+	err := s.Cat.EachLine(d, e, from, to, func(_ int, l string) bool {
 		if int64(out.Len()+len(l)) > budget {
 			if last < from {
 				out.WriteString(cutText(l, budget))
 				last = from
 			}
-			break
+			return false
 		}
 		out.WriteString(l)
 		last++
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
 	if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") {
 		out.WriteString("\n")

@@ -238,8 +238,9 @@ type scanner struct {
 	// blank: the line before was blank, a heading or the start.
 	blank bool
 	// The first paragraph: its lines so far, and whether it ended.
-	para     []string
-	paraDone bool
+	para      []string
+	paraBytes int
+	paraDone  bool
 }
 
 // paragraph takes a line of text outside code and headings towards the
@@ -258,8 +259,18 @@ func (sc *scanner) paragraph(l string) {
 		strings.HasPrefix(t, "![") || strings.HasPrefix(t, "[![") || strings.Trim(t, "-=*_ ") == ""):
 	default:
 		sc.para = append(sc.para, t)
+		// A summary is the paragraph's start: of one that does not end
+		// (a document without a blank line), no more is kept than a
+		// summary can need, links and all.
+		if sc.paraBytes += len(t); sc.paraBytes > maxSummarySource {
+			sc.endParagraph()
+		}
 	}
 }
+
+// maxSummarySource bounds the text of a first paragraph the summary is
+// made of.
+const maxSummarySource = 16 << 10
 
 func (sc *scanner) endParagraph() {
 	if sc.paraDone || len(sc.para) == 0 {
@@ -268,6 +279,7 @@ func (sc *scanner) endParagraph() {
 	sc.paraDone = true
 	t := link.ReplaceAllString(strings.Join(sc.para, " "), "$1")
 	sc.out.Summary = cutWords(t, SummaryLength)
+	sc.para = nil
 }
 
 // cutWords cuts a text to at most n bytes, at a space when there is one.
