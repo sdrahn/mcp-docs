@@ -3,8 +3,19 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.2.0 — 2026-11-10
 
+The result of a review of the code (docs/architecture.md §16, with what
+it measured before and after in §16.4): answers ranked across
+collections, reads and search that cost what they return, an index
+file in the documentation packages, a converter that keeps to its
+sources.
+
+- `mcp-docs-gateway`, a new package: the server `suse-docs` for
+  mcp-gateway (`/usr/share/mcp-gateway/servers.d/suse-docs.yaml`),
+  mcp-docs over all the documentation collections installed, in
+  mcp-gateway's domain for mcp-docs, without network. It supplements
+  mcp-docs where mcp-gateway is installed.
 - `search` matches no-break spaces as spaces: a query "SLES for SAP"
   finds the lines that write it with no-break spaces, as SUSE's
   documents do.
@@ -57,7 +68,10 @@ OBS changelog entry (packaging/suse/README.md).
   `tools/suse-docs/convert` and `convert-sle-micro` do, so the
   `suse-docs-mcp-*` packages built with this release ship theirs. A file
   that is not of the documents as they are (their paths, sizes and
-  checksums) is not used, and the server's log says why.
+  checksums) is not used, and the server's log says why. A collection
+  without the file has its index built as before, somewhat slower
+  than in 0.1.3 (451 ms, from 394 ms): rebuild the documentation
+  packages with this release's `mcp-docs-convert`.
 
 ## v0.1.3 — 2026-11-09
 
