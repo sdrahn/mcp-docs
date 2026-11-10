@@ -3,6 +3,13 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- An eval of collections served together (`make eval-together`,
+  docs/architecture.md §17.3): the questions of SUSE's documentation
+  asked of all its collections at once; CI runs it on the installed
+  packages. 53 of 64 questions are answered first.
+
 ## v0.2.0 — 2026-11-10
 
 The result of a review of the code (docs/architecture.md §16, with what

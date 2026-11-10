@@ -572,10 +572,10 @@ Tools stay the main way in: a resource read cannot carry `depth`,
    in one call; shorter tool descriptions and `--tools`; the eval
    measuring both ways clients forward results; `rank: false`, the
    converter's compact index and its report of large sections.
-10. **Review** (§16; steps 0 and 1 done): benchmarks, the collections
-    ranked as one, copies folded, `search` shared among collections;
-    next, bounded reads and cheaper file access, an index file in the
-    packages, the converter's trust in its sources.
+10. **Review** (§16; done, released as 0.2.0): benchmarks, the
+    collections ranked as one, copies folded, `search` shared among
+    collections, bounded reads and cheaper file access, an index file
+    in the packages, a converter that keeps to its sources.
 11. **Fewer calls, fewer tokens** (§17): what is left to gain without a
     RAG pipeline, measured by an eval of collections served together.
 
@@ -1617,8 +1617,43 @@ Not worth it: shorter link targets in the documents (1.7% of the text).
 
 | Step | What | State |
 |---|---|---|
-| A | The eval (11) | |
+| A | The eval (11) | done (§17.3) |
 | B | The system's product first (1); `search` without front matter (5) | |
 | C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | |
 | D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
 | E | `search` for expressions in parallel (9), no walk on every call (10) | |
+
+### 17.3 The eval of collections served together
+
+`internal/eval/together_test.go` (`make eval-together`) asks the
+questions of the collection tests (`internal/eval/suse.go`: 16 each of
+SLES, SLE HA, SLES for SAP and SLE Micro, with the ids of the sections
+that answer) of all collections at once, with `find_sections` as an
+agent calls it that names nothing. For each product's questions and for
+all, it reports:
+
+- the questions **answered first**: the first result is an answering
+  section, or the part of it whose text the answer holds;
+- the **results repeating a topic**: a result of the document and
+  section an earlier result of the same answer has, in another
+  collection or version;
+- the **bytes** of the answers, and of one.
+
+The collections are not in the repository: `MCP_DOCS_TOGETHER` names a
+directory whose subdirectories they are, and without it the test is
+skipped. CI runs it at the end of the package job, where all seven
+`suse-docs-mcp-*` packages are installed
+(`/usr/share/mcp-docs/docs/suse`), and writes the table into the job's
+summary. With those seven, at their pinned revisions, a run must not
+answer fewer questions first nor repeat more than the floors in the
+test, which are raised when a change does better.
+
+The floors, as first measured (0.2.0):
+
+| Questions of | Answered first | Results repeating a topic | A question |
+|---|---|---|---|
+| SLE HA | 13 of 16 | 7 | 2,786 B |
+| SLE Micro | 15 of 16 | 12 | 2,579 B |
+| SLES | 13 of 16 | 11 | 2,143 B |
+| SLES for SAP | 12 of 16 | 8 | 2,381 B |
+| **all** | **53 of 64** | **38** | **2,472 B** |
