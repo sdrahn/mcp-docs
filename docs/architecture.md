@@ -1620,8 +1620,8 @@ Not worth it: shorter link targets in the documents (1.7% of the text).
 | A | The eval (11) | done (§17.3) |
 | B | The system's product first (1); `search` without front matter (5) | done (§17.4) |
 | C | Overviews for tasks of many steps (2), spelling variants (3), near-copies (4), each against the eval | 3 and 4 done; 2 tried and not kept (§17.5) |
-| D | Fewer tools behind the gateway (6), the fixed text pinned (7) | |
-| E | `search` for expressions in parallel (9), no walk on every call (10) | |
+| D | Fewer tools behind the gateway (6), the fixed text pinned (7) | done (§17.6) |
+| E | `search` for expressions in parallel (9), no walk on every call (10) | done (§17.7) |
 
 ### 17.3 The eval of collections served together
 
@@ -1817,3 +1817,49 @@ server.
 The first kind is the sources' to fix where it is anyone's (a title in
 the reader's words, docs/writing-docs.md); synonyms are meanings, which
 this server has none of.
+
+### 17.6 What a session is sent before it asks
+
+**Four tools behind the gateway.** `mcp-docs-gateway`'s definition of
+the server `suse-docs` passes `--tools
+find_sections,search,outline,read_section`: the tools Custos's agent
+templates are allowed. `list_docs` and `read_lines`, which those agents
+could not call, were defined for every session all the same. With SLES
+16.1's collection, the tool definitions and the instructions are
+4.6 KB, from 6.4 KB: 1.8 KB (~450 tokens) less in every session. Three
+tools, without `outline`, would be 3.8 KB, and take from those agents a
+tool they have; an operator who wants all six overrides the command.
+
+**The fixed text is the same to the byte.** `initialize`, `tools/list`,
+`prompts/list` and `resources/templates/list` of two servers with the
+same collections are the same bytes (`TestFixedTextIsStable`, twenty
+servers): the tools are a list in one order, their schemas are written
+with sorted keys, the collections are in the order of their files'
+names, and nothing of the moment or the place is in any of it (with
+`--fs-compat`, the first collection's directory is). It was so; it is
+now a test, for the clients that cache what they send first.
+
+### 17.7 `search` several documents at a time; a server told of changes
+
+**`search`** reads and matches its documents in batches (64 documents,
+or 8 MiB of them), several at a time, and writes their matches in the
+documents' order: the result is that of one document after another.
+For an expression, where the matching is the work: 66 ms for the four
+collections of §16.1, from 139 ms (113, 92 and 67 ms on one, two and
+four cores). For a text, 31 ms as before: that is opening and reading
+1,652 files, which did not go faster on four cores than on one where
+it was measured (a virtual machine; on other storage it may).
+
+**A server that runs long is told of changes** (`--listen`): it
+watches its collections' directories (inotify, `catalog.Watcher`) and
+walks a collection only after something in it was written, added,
+removed or renamed, where it walked it on every `find_sections` to see
+that the index is current. A warm `find_sections` across the four
+collections: 0.56 ms, from 5.0 ms. The watch is set before the
+collection is looked at, so a change while the index is checked or
+built is seen at the next call; a directory added is watched from then
+on; events lost (the kernel's queue), and the server walks as before.
+One inotify instance for all collections. Not for a server of one
+session (stdin/stdout): a user has few instances (128 by default), a
+session is over after a few calls, and many run at once. A collection
+with documents elsewhere (`also`) is walked, not watched.

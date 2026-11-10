@@ -35,6 +35,15 @@ OBS changelog entry (packaging/suse/README.md).
   systems" finds "filesystem", by the collections' own words (two of
   the query's as one where the documents have it; one as two where
   they have both more often).
+- `mcp-docs-gateway`: the server `suse-docs` offers four tools
+  (`find_sections`, `search`, `outline`, `read_section`: those Custos's
+  agent templates are allowed), which is 1.8 KB less for every session
+  than six. Override the command without `--tools` for all.
+- `search` matches several documents at a time: an expression over
+  1,652 documents in 66 ms, from 139 ms.
+- With `--listen`, the server watches its collections' directories
+  and no longer walks them on every `find_sections`: 0.6 ms for a
+  later call across four collections, from 5 ms.
 - The systems of SUSE's collections are told by their products' files
   (`/etc/products.d/SL-Micro.prod`, `SLES.prod`, …): SUSE Linux Micro
   6.2 is `ID=sles`, `VERSION_ID=16.0` in its os-release, which made

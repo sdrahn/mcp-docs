@@ -134,6 +134,20 @@ func BenchmarkFindSections(b *testing.B) {
 	}
 }
 
+// BenchmarkFindSectionsWatched: as a server that runs long does
+// (--listen), told of changes where the others look for them.
+func BenchmarkFindSectionsWatched(b *testing.B) {
+	s := benchServer(b)
+	if s.Watch = catalog.NewWatcher(); s.Watch == nil {
+		b.Skip("no inotify here")
+	}
+	args := map[string]any{"query": benchQuery()}
+	benchCall(b, s, "find_sections", args)
+	for b.Loop() {
+		benchCall(b, s, "find_sections", args)
+	}
+}
+
 // BenchmarkFindSectionsOne: in the first collection alone.
 func BenchmarkFindSectionsOne(b *testing.B) {
 	s := benchServer(b)
