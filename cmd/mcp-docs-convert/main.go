@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sdrahn/mcp-docs/internal/asciidoc"
 	"github.com/sdrahn/mcp-docs/internal/catalog"
 
 	"github.com/sdrahn/mcp-docs/internal/docbook"
@@ -58,6 +59,17 @@ func main() {
 		"(ID=sles; more than one for more fields): a server on such a system ranks the collection first")
 	flag.StringVar(&o.SystemFile, "system-file", "", "a file the system the collection documents has (an installed product's: "+
 		"/etc/products.d/sle-ha.prod), with or without --system-os-release")
+	antora := flag.String("antora", "", "convert an Antora component's AsciiDoc pages instead of DocBook: the directory of the "+
+		"component version, relative to --src (versions/v2.15); --dc and --dcs are not used")
+	var ad asciidoc.Options
+	var shared, attrFiles, attrs list
+	flag.StringVar(&ad.Descriptor, "antora-descriptor", "", "with --antora, the component's descriptor, relative to it (default antora.yml)")
+	flag.Var(&shared, "antora-shared", "with --antora, the directory of another component its pages include from, relative to --src (repeatable)")
+	flag.StringVar(&ad.Module, "antora-module", "en", "with --antora, the module whose pages are converted")
+	flag.Var(&attrFiles, "attributes", "with --antora, a YAML file of attributes, relative to --src (a site's global attributes; repeatable)")
+	flag.Var(&attrs, "attribute", "with --antora, an attribute set over all others, NAME=VALUE (build-type=product; repeatable)")
+	flag.BoolVar(&ad.NavOnly, "nav-only", false, "with --antora, convert only the pages the navigation lists")
+	flag.StringVar(&ad.License, "license", "", "with --antora, the sentence on the documents' license, in the collection's index")
 	index := flag.String("index", "", "write the index file of the collection in this directory ("+rank.FileName+
 		") and exit: the last step of making a collection, after its last document is written")
 	strict := flag.Bool("strict", false, "fail when an element, entity or link could not be converted")
@@ -84,6 +96,30 @@ func main() {
 			o.SystemOSRelease = map[string]string{}
 		}
 		o.SystemOSRelease[k] = v
+	}
+	if *antora != "" {
+		ad.Src, ad.Start, ad.Out, ad.Shared, ad.AttributeFiles = o.Src, *antora, o.Out, shared, attrFiles
+		ad.Title, ad.Description, ad.SiteURL, ad.SourceURL, ad.Revision = o.Title, o.Description, o.SiteURL, o.SourceURL, o.Revision
+		ad.Product, ad.Version, ad.MaxSection = o.Product, o.Version, o.MaxSection
+		ad.Attributes = map[string]string{}
+		for _, a := range attrs {
+			k, v, _ := strings.Cut(a, "=")
+			ad.Attributes[k] = v
+		}
+		if ad.Src == "" || ad.Out == "" || flag.NArg() > 0 {
+			fmt.Fprintln(os.Stderr, "usage: mcp-docs-convert --src DIR --antora COMPONENT-DIR --out DIR [options]")
+			os.Exit(2)
+		}
+		rep, err := asciidoc.Convert(ad)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mcp-docs-convert:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "mcp-docs-convert:", rep)
+		if *strict && !rep.OK() {
+			os.Exit(1)
+		}
+		return
 	}
 	o.DCs = dcs
 	if *dcFile != "" {

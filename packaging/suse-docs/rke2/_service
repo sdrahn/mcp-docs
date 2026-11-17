@@ -1,0 +1,34 @@
+<!--
+  The source tarball of suse-docs-mcp-rke2: rancher/rke2-product-docs at
+  the spec's revision with its submodule product-docs-common (the site's
+  attributes), without images, translations and other versions, as
+  rke2-product-docs-SHORTREV.tar.xz. tools/suse-docs/source-tarball-antora
+  makes the tree the conversion reads, which is what CI builds from;
+  this service is written to make the same and has not been run. To
+  update: change the revision here and rev, shortrev and revdate in the
+  spec, then osc service manualrun.
+-->
+<services>
+  <service name="tar_scm" mode="manual">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/rancher/rke2-product-docs.git</param>
+    <param name="revision">a946abbc3d6893170420b8720973d1a2619d2dd0</param>
+    <param name="filename">rke2-product-docs</param>
+    <param name="version">a946abb</param>
+    <param name="submodules">enable</param>
+    <param name="exclude">dsc-style-bundle</param>
+    <param name="exclude">bin</param>
+    <param name="exclude">*/modules/de</param>
+    <param name="exclude">*/modules/es</param>
+    <param name="exclude">*/modules/fr</param>
+    <param name="exclude">*/modules/ja</param>
+    <param name="exclude">*/modules/pt</param>
+    <param name="exclude">*/modules/zh</param>
+    <param name="exclude">*/modules/en/images</param>
+    <param name="exclude">*/modules/en/attachments</param>
+  </service>
+  <service name="recompress" mode="manual">
+    <param name="file">*.tar</param>
+    <param name="compression">xz</param>
+  </service>
+</services>

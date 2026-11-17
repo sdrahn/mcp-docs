@@ -14,10 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/sdrahn/mcp-docs/internal/catalog"
 	"github.com/sdrahn/mcp-docs/internal/markdown"
 	"github.com/sdrahn/mcp-docs/internal/mcpserver"
+	"github.com/sdrahn/mcp-docs/internal/rank"
 )
 
 // Name is the server's name in serverInfo.
@@ -56,6 +58,11 @@ type Server struct {
 		once  sync.Once
 		names map[string]bool
 	}
+	// names are the words that name each collection and no other.
+	names struct {
+		once sync.Once
+		own  map[string]map[string]bool
+	}
 	// Watch, if set, is asked whether a collection changed where the
 	// server would walk it to see (a server that runs long: --listen).
 	Watch *catalog.Watcher
@@ -72,6 +79,53 @@ type Server struct {
 // put a passing mention before another collection's section on the
 // question (the eval of collections served together, §17.4).
 const preferBoost = 1.25
+
+// namedBoost multiplies the scores of a collection's sections when the
+// question names the collection: by a word of its name or title that no
+// other collection has.
+const namedBoost = 1.25
+
+// named reports whether a query has a word that names the collection
+// and no other.
+func (s *Server) named(k *catalog.Collection, query string) bool {
+	s.names.once.Do(func() {
+		words := func(c *catalog.Collection) []string {
+			return rank.Tokens(strings.NewReplacer("-", " ", "_", " ").Replace(c.Name) + " " + c.Title)
+		}
+		count := map[string]int{}
+		for _, c := range s.Cat.Collections {
+			seen := map[string]bool{}
+			for _, w := range words(c) {
+				if !seen[w] {
+					seen[w] = true
+					count[w]++
+				}
+			}
+		}
+		s.names.own = map[string]map[string]bool{}
+		for _, c := range s.Cat.Collections {
+			own := map[string]bool{}
+			for _, w := range words(c) {
+				// A number is a version, which other collections' texts
+				// have too.
+				if count[w] == 1 && strings.IndexFunc(w, unicode.IsLetter) >= 0 {
+					own[w] = true
+				}
+			}
+			s.names.own[c.Name] = own
+		}
+	})
+	own := s.names.own[k.Name]
+	if len(own) == 0 {
+		return false
+	}
+	for _, w := range rank.Tokens(query) {
+		if own[w] {
+			return true
+		}
+	}
+	return false
+}
 
 // prefers reports whether a collection is one of the system the server
 // runs on.

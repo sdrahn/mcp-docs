@@ -48,7 +48,7 @@ install:
 	install -d -m 0755 $(DESTDIR)$(SYSCONFDIR)/mcp-docs/collections.d
 	install -D -m 0755 bin/mcp-docs-convert $(DESTDIR)$(BINDIR)/mcp-docs-convert
 	install -D -m 0755 tools/suse-docs/convert $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/convert
-	install -m 0755 tools/suse-docs/convert-sle-micro $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/
+	install -m 0755 tools/suse-docs/convert-sle-micro tools/suse-docs/convert-antora $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/
 	install -m 0644 tools/suse-docs/sles-16.0 tools/suse-docs/sle-ha-16.0 tools/suse-docs/sles-sap-16.0 \
 		tools/suse-docs/sles-16.1 tools/suse-docs/sle-ha-16.1 tools/suse-docs/sles-sap-16.1 tools/suse-docs/sle-micro-6.0 tools/suse-docs/sle-micro-6.1 \
 		tools/suse-docs/sle-micro-6.2 tools/suse-docs/README.md $(DESTDIR)$(DATADIR)/mcp-docs-convert/suse-docs/

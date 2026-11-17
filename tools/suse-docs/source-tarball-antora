@@ -1,0 +1,20 @@
+#!/bin/sh
+# Makes the source tarball that a package build of one of SUSE's
+# cloud-native products' documentation converts (packaging/suse-docs):
+# REPO-SHORTREV.tar.xz, the tree tools/suse-docs/convert-antora reads
+# (the product's English pages and what they include, and the site's
+# attributes), under REPO-SHORTREV/.
+#
+#   PRODUCT=... tools/suse-docs/source-tarball-antora [DIR]
+#
+# DIR (default build) receives the tarball, whose path is printed.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+dir=${1:-build}
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+tree=$("$here/convert-antora" --sources "$tmp")
+mkdir -p "$dir"
+tar -C "$tmp" -cf - "$(basename "$tree")" | xz -9 >"$dir/$(basename "$tree").tar.xz"
+echo "$dir/$(basename "$tree").tar.xz"

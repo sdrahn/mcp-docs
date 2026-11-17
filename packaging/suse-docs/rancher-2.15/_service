@@ -1,0 +1,43 @@
+<!--
+  The source tarball of suse-docs-mcp-rancher-2.15: rancher/rancher-product-docs at
+  the spec's revision with its submodule product-docs-common (the site's
+  attributes), without images, translations and other versions, as
+  rancher-product-docs-SHORTREV.tar.xz. tools/suse-docs/source-tarball-antora
+  makes the tree the conversion reads, which is what CI builds from;
+  this service is written to make the same and has not been run. To
+  update: change the revision here and rev, shortrev and revdate in the
+  spec, then osc service manualrun.
+-->
+<services>
+  <service name="tar_scm" mode="manual">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/rancher/rancher-product-docs.git</param>
+    <param name="revision">0f98c528e8735f7c5dff8e70e8fd44e274e3dcd7</param>
+    <param name="filename">rancher-product-docs</param>
+    <param name="version">0f98c52</param>
+    <param name="submodules">enable</param>
+    <param name="exclude">archived-docs</param>
+    <param name="exclude">community-docs</param>
+    <param name="exclude">community-supplemental-files</param>
+    <param name="exclude">dsc-style-bundle</param>
+    <param name="exclude">scripts</param>
+    <param name="exclude">versions/srfa</param>
+    <param name="exclude">versions/v2.11</param>
+    <param name="exclude">versions/v2.12</param>
+    <param name="exclude">versions/v2.13</param>
+    <param name="exclude">versions/v2.14</param>
+    <param name="exclude">versions/v2.16</param>
+    <param name="exclude">*/modules/de</param>
+    <param name="exclude">*/modules/es</param>
+    <param name="exclude">*/modules/fr</param>
+    <param name="exclude">*/modules/ja</param>
+    <param name="exclude">*/modules/pt</param>
+    <param name="exclude">*/modules/zh</param>
+    <param name="exclude">*/modules/en/images</param>
+    <param name="exclude">*/modules/en/attachments</param>
+  </service>
+  <service name="recompress" mode="manual">
+    <param name="file">*.tar</param>
+    <param name="compression">xz</param>
+  </service>
+</services>

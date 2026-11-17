@@ -1,0 +1,167 @@
+#!/bin/sh
+# Converts the documentation of one of SUSE's cloud-native products into
+# a collection for mcp-docs: the pages documentation.suse.com/cloudnative
+# publishes for it, from the product's documentation repository
+# (github.com/rancher/*-product-docs: AsciiDoc, built with Antora) at a
+# pinned revision. PRODUCT is one of
+#
+#   rancher-2.15             SUSE Rancher Prime 2.15
+#   rke2                     SUSE Rancher Prime: RKE2 (its sources have one version)
+#   k3s                      SUSE Rancher Prime: K3s (the same)
+#   suse-virtualization-1.8  SUSE Virtualization 1.8 (Harvester)
+#   rancher-ai-1.1           Rancher AI 1.1
+#
+#   PRODUCT=... tools/suse-docs/convert-antora [OUT [ROOT]]
+#   PRODUCT=... tools/suse-docs/convert-antora --sources DIR
+#
+# OUT (default build/PRODUCT) receives the documents and PRODUCT.yaml,
+# the collection file; ROOT (default OUT's absolute path) is where the
+# collection file says the documents are.
+#
+# The sources are fetched into build/ (the repository, and the site's
+# attributes from rancher/product-docs-common at the revision the
+# repository has it as a submodule), or, with SRC set, read from that
+# tree as it is (an unpacked tarball, as in a package build, which has
+# no network; tools/suse-docs/source-tarball-antora makes it). --sources
+# only writes that tree, the English pages and what they include, below
+# DIR, and prints its path. REV names the revision of SRC (default: the
+# pinned one).
+set -eu
+
+name=${PRODUCT:?convert-antora: set PRODUCT (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1)}
+shared=
+navonly=
+case $name in
+rancher-2.15)
+	repo=rancher-product-docs rev=0f98c528e8735f7c5dff8e70e8fd44e274e3dcd7 common=0d33aa3ecfa691c85beb4bcc04438f1023708968
+	start=versions/v2.15 shared=shared component=rancher-manager site=v2.15
+	# The site does not publish the pages its navigation does not list.
+	navonly=--nav-only
+	product='SUSE Rancher Prime' version=2.15 title='SUSE Rancher Prime 2.15'
+	about='installing and upgrading Rancher, provisioning and managing Kubernetes clusters, users and authentication, security, observability, integrations, the API, troubleshooting'
+	;;
+rke2)
+	repo=rke2-product-docs rev=a946abbc3d6893170420b8720973d1a2619d2dd0 common=0d33aa3ecfa691c85beb4bcc04438f1023708968
+	start=versions/latest component=rke2 site=latest
+	product='SUSE Rancher Prime: RKE2' version= title='SUSE Rancher Prime: RKE2'
+	about='installing and upgrading RKE2, its configuration and command-line reference, networking, security and CIS hardening, backup and restore, release notes'
+	;;
+k3s)
+	repo=k3s-product-docs rev=4c4c95618d6c5a25254235377b8f6ba6ba42da1d common=a703771967f0ea1155d2f3ead98ab92d1520ccce
+	start=docs/latest component=k3s site=latest
+	product='SUSE Rancher Prime: K3s' version= title='SUSE Rancher Prime: K3s'
+	about='installing and upgrading K3s, its configuration and command-line reference, datastores, networking, storage, security and CIS hardening, release notes'
+	;;
+suse-virtualization-1.8)
+	repo=harvester-product-docs rev=5ddaf302dccb4b0634face899ee09ae5f3484289 common=0d33aa3ecfa691c85beb4bcc04438f1023708968
+	start=versions/v1.8 component=virtualization site=v1.8
+	product='SUSE Virtualization' version=1.8 title='SUSE Virtualization 1.8'
+	about='installing and upgrading SUSE Virtualization (Harvester), hosts, virtual machines and images, networking, storage, the integration with Rancher, add-ons, troubleshooting'
+	;;
+rancher-ai-1.1)
+	repo=rancher-ai-product-docs rev=6c872577a6db7b3da64af6d15809f4c1b4651231 common=a703771967f0ea1155d2f3ead98ab92d1520ccce
+	start=docs/version-1.1.0 shared=shared component=rancher-ai site=1.1.0
+	product='Rancher AI' version=1.1 title='Rancher AI 1.1'
+	about='Liz, the Rancher AI assistant: installing and configuring it, models, how-tos for administrators and users'
+	;;
+*)
+	echo "convert-antora: unknown PRODUCT $name (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1)" >&2
+	exit 2
+	;;
+esac
+here=$(cd "$(dirname "$0")" && pwd)
+short=$(echo "$rev" | cut -c1-7)
+
+# sources DIR: the tree a conversion reads, below DIR.
+sources() {
+	tree=$1/$repo-$short
+	clone=build/$repo
+	if [ ! -d "$clone/.git" ]; then
+		mkdir -p build
+		git clone -q --filter=blob:none --no-checkout "https://github.com/rancher/$repo" "$clone"
+	fi
+	git -C "$clone" cat-file -e "$rev^{commit}" 2>/dev/null || git -C "$clone" fetch -q origin "$rev"
+	rm -rf "$tree"
+	mkdir -p "$tree"
+	# The component version's English module and what it includes from;
+	# no images, no other languages, no other versions.
+	paths="$start/antora.yml $start/modules/en"
+	for p in "$start/antora-yml" $shared LICENSE; do
+		if git -C "$clone" cat-file -e "$rev:$p" 2>/dev/null; then
+			paths="$paths $p"
+		fi
+	done
+	# shellcheck disable=SC2086
+	git -C "$clone" archive --format=tar "$rev" -- $paths ":!$start/modules/en/images" ":!$start/modules/en/attachments" |
+		tar -x -C "$tree"
+	cclone=build/product-docs-common
+	if [ ! -d "$cclone/.git" ]; then
+		git clone -q --filter=blob:none --no-checkout https://github.com/rancher/product-docs-common "$cclone"
+	fi
+	git -C "$cclone" cat-file -e "$common^{commit}" 2>/dev/null || git -C "$cclone" fetch -q origin "$common"
+	mkdir -p "$tree/product-docs-common"
+	git -C "$cclone" archive --format=tar "$common" -- global-attributes.yml | tar -x -C "$tree/product-docs-common"
+	echo "$tree"
+}
+
+if [ "${1:-}" = --sources ]; then
+	sources "${2:?convert-antora: --sources DIR}"
+	exit
+fi
+out=${1:-build/$name}
+
+if [ -n "${SRC:-}" ]; then
+	src=$SRC
+	rev=${REV:-$rev}
+	short=$(echo "$rev" | cut -c1-7)
+else
+	src=$(sources build)
+fi
+
+convert=mcp-docs-convert
+repodir=$(cd "$here/../.." && pwd)
+if [ -d "$repodir/cmd/mcp-docs-convert" ]; then
+	(cd "$repodir" && go build -o bin/mcp-docs-convert ./cmd/mcp-docs-convert)
+	convert=$repodir/bin/mcp-docs-convert
+fi
+
+license='Copyright SUSE LLC and contributors; licensed under the Apache License 2.0.'
+if [ ! -f "$src/LICENSE" ]; then
+	license="The sources' repository states no license."
+fi
+sharedopt=
+if [ -n "$shared" ]; then
+	sharedopt="--antora-shared $shared"
+fi
+rm -rf "$out"
+mkdir -p "$out"
+# shellcheck disable=SC2086
+"$convert" --strict --src "$src" --antora "$start" $sharedopt $navonly \
+	--attributes product-docs-common/global-attributes.yml --attribute build-type=product --out "$out" \
+	--title "$title" --product "$product" --product-version "$version" \
+	--description "The documentation of $title from documentation.suse.com, converted from its AsciiDoc sources." \
+	--site-url "https://documentation.suse.com/cloudnative/$component/$site/en/%s.html" \
+	--source-url "https://github.com/rancher/$repo/blob/$rev/%s" \
+	--revision "$short" --license "$license"
+if [ -f "$src/LICENSE" ]; then
+	cp "$src/LICENSE" "$out/LICENSE"
+fi
+
+root=${2:-$(cd "$out" && pwd)}
+cat >"$out/$name.yaml" <<YAML
+title: "$title"
+root: $root
+description: >
+  SUSE's documentation of $title, the pages of
+  documentation.suse.com/cloudnative: $about. One document per page,
+  under the ids of the site's sections.
+index: README.md
+instructions: >
+  Each document's source front matter is its page on
+  documentation.suse.com: cite it. The index lists the upper pages by
+  topic; find_sections finds the others.
+YAML
+# The index file, last: of the documents as they are now, read by the
+# server where it would build the index from every document.
+"$convert" --index "$out"
+echo "$out/$name.yaml"

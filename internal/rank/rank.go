@@ -294,6 +294,10 @@ func QueryTerms(query string, ixs ...*Index) []string {
 // of the query's own.
 const spellingWeight = 0.6
 
+// spellingTitle is what such a word counts in a title, of its weight
+// in the text.
+const spellingTitle = 0.75
+
 // particles end a word that is also written as two ("login", "setup",
 // "timeout"), and are too common to be looked for.
 var particles = map[string]bool{"in": true, "up": true, "on": true, "out": true, "off": true, "down": true}
@@ -507,8 +511,15 @@ func (ix *Index) score(terms []string, st stats, keep func(*unit) bool) []scored
 			}
 			norm := k1 * (1 - b + b*u.length/st.avgLen)
 			scores[p.unit] += idf * p.tf * (k1 + 1) / (p.tf + norm)
+			// A word of another spelling in the title counts less again
+			// (idf is the lesser already): "Helm chart" is not quite
+			// the title "HelmChart resources".
 			if slices.Contains(u.title, t) {
-				scores[p.unit] += titleBonus * idf
+				if st.also[t] {
+					scores[p.unit] += spellingTitle * titleBonus * idf
+				} else {
+					scores[p.unit] += titleBonus * idf
+				}
 			}
 		}
 	}

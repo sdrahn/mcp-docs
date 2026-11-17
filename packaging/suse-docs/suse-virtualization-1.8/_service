@@ -1,0 +1,39 @@
+<!--
+  The source tarball of suse-docs-mcp-suse-virtualization-1.8: rancher/harvester-product-docs at
+  the spec's revision with its submodule product-docs-common (the site's
+  attributes), without images, translations and other versions, as
+  harvester-product-docs-SHORTREV.tar.xz. tools/suse-docs/source-tarball-antora
+  makes the tree the conversion reads, which is what CI builds from;
+  this service is written to make the same and has not been run. To
+  update: change the revision here and rev, shortrev and revdate in the
+  spec, then osc service manualrun.
+-->
+<services>
+  <service name="tar_scm" mode="manual">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/rancher/harvester-product-docs.git</param>
+    <param name="revision">5ddaf302dccb4b0634face899ee09ae5f3484289</param>
+    <param name="filename">harvester-product-docs</param>
+    <param name="version">5ddaf30</param>
+    <param name="submodules">enable</param>
+    <param name="exclude">archived-versions</param>
+    <param name="exclude">dsc-style-bundle</param>
+    <param name="exclude">scripts</param>
+    <param name="exclude">versions/v1.5</param>
+    <param name="exclude">versions/v1.6</param>
+    <param name="exclude">versions/v1.7</param>
+    <param name="exclude">versions/v1.9</param>
+    <param name="exclude">*/modules/de</param>
+    <param name="exclude">*/modules/es</param>
+    <param name="exclude">*/modules/fr</param>
+    <param name="exclude">*/modules/ja</param>
+    <param name="exclude">*/modules/pt</param>
+    <param name="exclude">*/modules/zh</param>
+    <param name="exclude">*/modules/en/images</param>
+    <param name="exclude">*/modules/en/attachments</param>
+  </service>
+  <service name="recompress" mode="manual">
+    <param name="file">*.tar</param>
+    <param name="compression">xz</param>
+  </service>
+</services>

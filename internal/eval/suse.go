@@ -13,86 +13,149 @@ type Question struct {
 	// Doc, if set, is the document or directory the question is asked
 	// of (a version of a collection that holds several).
 	Doc string
+	// Collection, if set, is the collection the answer is to come from,
+	// where another has sections of the same ids.
+	Collection string
 }
 
 // SLES name the sections that answer them; an article's
 // index is no answer.
 var SLES = []Question{
-	{"open a port in a firewalld zone", []string{"firewalld-adding-zones-cli-add-port"}, ""},
-	{"resize the disk of a virtual machine image", []string{"sec-guestfs-tools-virt-resize", "pro-guestfs-tools-virt-resize"}, ""},
-	{"create a snapshot of a VM with virsh", []string{"sec-libvirt-managing-snapshots-virsh", "sec-libvirt-managing-snapshots-virsh-add"}, ""},
-	{"enable and configure Yama", []string{"enable-yama-lsm"}, ""},
-	{"configure GRUB 2 for PXE boot", []string{"sles-pxe-server-configure-grub2"}, ""},
-	{"create a software RAID in Cockpit", []string{"cockpit-creating-raids"}, ""},
-	{"build an RPM package from a live patch", []string{"ulp-pack-livepatch"}, ""},
-	{"systemd timer does not run, troubleshooting", []string{"systemd-timer-troubleshoot"}, ""},
-	{"set up multiple monitors in GNOME", []string{"task-GNOME-settings-configure-screen-multiple"}, ""},
-	{"change the memory of a running VM in the QEMU monitor", []string{"sec-qemu-monitor-memory"}, ""},
-	{"which file systems are supported by SLES 16", []string{"migration-guide-sle16-kernel-storage", "migration-filesystem-support"}, ""},
-	{"NetworkManager network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, ""},
-	{"make a SELinux domain permissive", []string{"setting-permissive-domain"}, ""},
-	{"configure the opensm InfiniBand subnet manager", []string{"task-example", "opensm-configuring"}, ""},
-	{"switch SELinux to permissive until the next boot", []string{"sec-getenforce-setenforce", "concept-SELinux"}, ""},
-	{"migrate from Redis to Valkey", []string{"valkey-migrate"}, ""},
+	{"open a port in a firewalld zone", []string{"firewalld-adding-zones-cli-add-port"}, "", ""},
+	{"resize the disk of a virtual machine image", []string{"sec-guestfs-tools-virt-resize", "pro-guestfs-tools-virt-resize"}, "", ""},
+	{"create a snapshot of a VM with virsh", []string{"sec-libvirt-managing-snapshots-virsh", "sec-libvirt-managing-snapshots-virsh-add"}, "", ""},
+	{"enable and configure Yama", []string{"enable-yama-lsm"}, "", ""},
+	{"configure GRUB 2 for PXE boot", []string{"sles-pxe-server-configure-grub2"}, "", ""},
+	{"create a software RAID in Cockpit", []string{"cockpit-creating-raids"}, "", ""},
+	{"build an RPM package from a live patch", []string{"ulp-pack-livepatch"}, "", ""},
+	{"systemd timer does not run, troubleshooting", []string{"systemd-timer-troubleshoot"}, "", ""},
+	{"set up multiple monitors in GNOME", []string{"task-GNOME-settings-configure-screen-multiple"}, "", ""},
+	{"change the memory of a running VM in the QEMU monitor", []string{"sec-qemu-monitor-memory"}, "", ""},
+	{"which file systems are supported by SLES 16", []string{"migration-guide-sle16-kernel-storage", "migration-filesystem-support"}, "", ""},
+	{"NetworkManager network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, "", ""},
+	{"make a SELinux domain permissive", []string{"setting-permissive-domain"}, "", ""},
+	{"configure the opensm InfiniBand subnet manager", []string{"task-example", "opensm-configuring"}, "", ""},
+	{"switch SELinux to permissive until the next boot", []string{"sec-getenforce-setenforce", "concept-SELinux"}, "", ""},
+	{"migrate from Redis to Valkey", []string{"valkey-migrate"}, "", ""},
 }
 
 // SLEMicro name the sections that answer them, in the version
 // asked about.
 var SLEMicro = []Question{
-	{"apply updates with transactional-update without rebooting", []string{"transactional-update-no-reboot", "transactional-update-apply"}, "sle-micro/6.2"},
-	{"perform a system rollback", []string{"tr-up-rollback", "task-performing-rollback"}, "sle-micro/6.2"},
-	{"running containers with podman", []string{"podman-running-containers"}, "sle-micro/6.2"},
-	{"change the SELinux mode permanently", []string{"selinux-permanent-mode-changes"}, "sle-micro/6.2"},
-	{"create a network connection with nmcli", []string{"networkmanager-nmcli-configure"}, "sle-micro/6.2"},
-	{"deploy a selfinstall ISO image", []string{"deployment-selfinstall-procedure"}, "sle-micro/6.2"},
-	{"set up keylime remote attestation", []string{"keylime-remote-attestation"}, "sle-micro/6.2"},
-	{"manage a software RAID", []string{"raid-management"}, "sle-micro/6.2"},
-	{"set up zram", []string{"zram-setup"}, "sle-micro/6.2"},
-	{"upgrade SLE Micro to 6.2", []string{"upgrading-micro-procedure"}, "sle-micro/6.2"},
-	{"collect system information with supportconfig", []string{"supportconfig-collecting-information"}, "sle-micro/6.2"},
-	{"filter logs with journalctl", []string{"logging-filtering-logs"}, "sle-micro/6.2"},
-	{"register the system with transactional-update", []string{"transactional-update-registering-product"}, "sle-micro/6.2"},
-	{"network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, "sle-micro/6.2"},
-	{"set up keylime remote attestation", []string{"keylime-remote-attestation"}, "sle-micro/6.0"},
-	{"manage a software RAID", []string{"raid-management"}, "sle-micro/6.1"},
+	{"apply updates with transactional-update without rebooting", []string{"transactional-update-no-reboot", "transactional-update-apply"}, "sle-micro/6.2", ""},
+	{"perform a system rollback", []string{"tr-up-rollback", "task-performing-rollback"}, "sle-micro/6.2", ""},
+	{"running containers with podman", []string{"podman-running-containers"}, "sle-micro/6.2", ""},
+	{"change the SELinux mode permanently", []string{"selinux-permanent-mode-changes"}, "sle-micro/6.2", ""},
+	{"create a network connection with nmcli", []string{"networkmanager-nmcli-configure"}, "sle-micro/6.2", ""},
+	{"deploy a selfinstall ISO image", []string{"deployment-selfinstall-procedure"}, "sle-micro/6.2", ""},
+	{"set up keylime remote attestation", []string{"keylime-remote-attestation"}, "sle-micro/6.2", ""},
+	{"manage a software RAID", []string{"raid-management"}, "sle-micro/6.2", ""},
+	{"set up zram", []string{"zram-setup"}, "sle-micro/6.2", ""},
+	{"upgrade SLE Micro to 6.2", []string{"upgrading-micro-procedure"}, "sle-micro/6.2", ""},
+	{"collect system information with supportconfig", []string{"supportconfig-collecting-information"}, "sle-micro/6.2", ""},
+	{"filter logs with journalctl", []string{"logging-filtering-logs"}, "sle-micro/6.2", ""},
+	{"register the system with transactional-update", []string{"transactional-update-registering-product"}, "sle-micro/6.2", ""},
+	{"network is not running", []string{"networkmanager-nmcli-troubleshoot-verify-status"}, "sle-micro/6.2", ""},
+	{"set up keylime remote attestation", []string{"keylime-remote-attestation"}, "sle-micro/6.0", ""},
+	{"manage a software RAID", []string{"raid-management"}, "sle-micro/6.1", ""},
 }
 
 // SLEHA name the sections that answer them.
 var SLEHA = []Question{
-	{"configure disk-based SBD", []string{"ha-sbd-setting-up-diskbased"}, ""},
-	{"set up diskless SBD", []string{"ha-sbd-setting-up-diskless"}, ""},
-	{"connect QDevice to the QNetd server", []string{"ha-qdevice-connecting-to-qnetd"}, ""},
-	{"install a three-node cluster", []string{"ha-installing-cluster-overview"}, ""},
-	{"add a location constraint for a resource", []string{"ha-resources-adding-location-constraints"}, ""},
-	{"move a resource to another node manually", []string{"ha-resources-adding-relocation-constraints", "ha-resources-relocation-constraints-what-is"}, ""},
-	{"put a node into maintenance mode", []string{"ha-maintenance-putting-node-into-maintenance-mode"}, ""},
-	{"configure a fencing device", []string{"ha-fencing-creating-resources-for-physical-device"}, ""},
-	{"log in to Hawk", []string{"ha-hawk-logging-in"}, ""},
-	{"start the cluster services for the whole cluster", []string{"ha-maintenance-starting-cluster-services-whole-cluster"}, ""},
-	{"clean up a failed resource", []string{"ha-resources-cleaning-up"}, ""},
-	{"change the SBD timeout", []string{"ha-sbd-changing-timeout-settings"}, ""},
-	{"what is a primitive resource", []string{"ha-resources-what-is-primitive"}, ""},
-	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode", "ha-maintenance-putting-cluster-into-maintenance-mode"}, ""},
-	{"resolve cluster issues after an upgrade", []string{"ha-upgrade-resolving-cluster-issues"}, ""},
-	{"remove an SBD device", []string{"ha-sbd-removing-device"}, ""},
+	{"configure disk-based SBD", []string{"ha-sbd-setting-up-diskbased"}, "", ""},
+	{"set up diskless SBD", []string{"ha-sbd-setting-up-diskless"}, "", ""},
+	{"connect QDevice to the QNetd server", []string{"ha-qdevice-connecting-to-qnetd"}, "", ""},
+	{"install a three-node cluster", []string{"ha-installing-cluster-overview"}, "", ""},
+	{"add a location constraint for a resource", []string{"ha-resources-adding-location-constraints"}, "", ""},
+	{"move a resource to another node manually", []string{"ha-resources-adding-relocation-constraints", "ha-resources-relocation-constraints-what-is"}, "", ""},
+	{"put a node into maintenance mode", []string{"ha-maintenance-putting-node-into-maintenance-mode"}, "", ""},
+	{"configure a fencing device", []string{"ha-fencing-creating-resources-for-physical-device"}, "", ""},
+	{"log in to Hawk", []string{"ha-hawk-logging-in"}, "", ""},
+	{"start the cluster services for the whole cluster", []string{"ha-maintenance-starting-cluster-services-whole-cluster"}, "", ""},
+	{"clean up a failed resource", []string{"ha-resources-cleaning-up"}, "", ""},
+	{"change the SBD timeout", []string{"ha-sbd-changing-timeout-settings"}, "", ""},
+	{"what is a primitive resource", []string{"ha-resources-what-is-primitive"}, "", ""},
+	{"put the whole cluster into maintenance mode", []string{"ha-maintenance-enabling-maintenance-mode", "ha-maintenance-putting-cluster-into-maintenance-mode"}, "", ""},
+	{"resolve cluster issues after an upgrade", []string{"ha-upgrade-resolving-cluster-issues"}, "", ""},
+	{"remove an SBD device", []string{"ha-sbd-removing-device"}, "", ""},
 }
 
 // SLESSAP name the sections that answer them.
 var SLESSAP = []Question{
-	{"tune the system for SAP HANA with saptune", []string{"task-saptune-tuning-perform"}, ""},
-	{"apply a saptune solution", []string{"task-saptune-manage-sap-sols-perform"}, ""},
-	{"revert a saptune solution", []string{"sec-saptune-revert-solution"}, ""},
-	{"edit a custom SAP Note", []string{"sec-saptune-sap-notes-edit"}, ""},
-	{"verify system tuning with saptune", []string{"sap-verify-saptune"}, ""},
-	{"convert a SLES system to SLES for SAP", []string{"task-convert-sles-to-sap"}, ""},
-	{"what is SUSE Linux Enterprise Server for SAP applications", []string{"sles-sap-what-is"}, ""},
-	{"deploy SAP S/4HANA on AWS with Ansible", []string{"deploy-sap-ansible-aws"}, ""},
-	{"deploy SAP BW/4HANA on Google Cloud", []string{"deploy-sap-ansible-gcp"}, ""},
-	{"deploy an SAP HANA high availability cluster with Ansible", []string{"deploy-sap-hana-ansible-hosts-ha"}, ""},
-	{"install SLES for SAP with Agama", []string{"deployment-pxe-agama", "agama-manual-installation"}, ""},
-	{"install SAP software patterns", []string{"sap-install-patterns"}, ""},
-	{"SELinux support with SAP software", []string{"selinux-sap-support"}, ""},
-	{"troubleshoot the SAP SELinux configuration", []string{"selinux-sap-troubleshooting"}, ""},
-	{"how is high availability achieved for SAP HANA", []string{"sles-sap-about-ha"}, ""},
-	{"what is the sles_sap_automation pattern", []string{"about-install-sap-pattern-ansible"}, ""},
+	{"tune the system for SAP HANA with saptune", []string{"task-saptune-tuning-perform"}, "", ""},
+	{"apply a saptune solution", []string{"task-saptune-manage-sap-sols-perform"}, "", ""},
+	{"revert a saptune solution", []string{"sec-saptune-revert-solution"}, "", ""},
+	{"edit a custom SAP Note", []string{"sec-saptune-sap-notes-edit"}, "", ""},
+	{"verify system tuning with saptune", []string{"sap-verify-saptune"}, "", ""},
+	{"convert a SLES system to SLES for SAP", []string{"task-convert-sles-to-sap"}, "", ""},
+	{"what is SUSE Linux Enterprise Server for SAP applications", []string{"sles-sap-what-is"}, "", ""},
+	{"deploy SAP S/4HANA on AWS with Ansible", []string{"deploy-sap-ansible-aws"}, "", ""},
+	{"deploy SAP BW/4HANA on Google Cloud", []string{"deploy-sap-ansible-gcp"}, "", ""},
+	{"deploy an SAP HANA high availability cluster with Ansible", []string{"deploy-sap-hana-ansible-hosts-ha"}, "", ""},
+	{"install SLES for SAP with Agama", []string{"deployment-pxe-agama", "agama-manual-installation"}, "", ""},
+	{"install SAP software patterns", []string{"sap-install-patterns"}, "", ""},
+	{"SELinux support with SAP software", []string{"selinux-sap-support"}, "", ""},
+	{"troubleshoot the SAP SELinux configuration", []string{"selinux-sap-troubleshooting"}, "", ""},
+	{"how is high availability achieved for SAP HANA", []string{"sles-sap-about-ha"}, "", ""},
+	{"what is the sles_sap_automation pattern", []string{"about-install-sap-pattern-ansible"}, "", ""},
+}
+
+// The cloud-native products (tools/suse-docs/convert-antora). RKE2's
+// and K3s's documentation share pages and section ids: their questions
+// name the collection the answer is to come from.
+
+// Rancher name the sections of SUSE Rancher Prime's documentation that
+// answer them.
+var Rancher = []Question{
+	{Ask: "install cert-manager before installing Rancher", Want: []string{"_4_install_cert_manager", "_install_cert_manager"}},
+	{Ask: "upgrade Rancher with Helm", Want: []string{"_4_upgrade_rancher", "_steps_to_upgrade_rancher"}},
+	{Ask: "roll back Rancher to a previous version", Want: []string{"_step_2_roll_back_to_a_previous_rancher_version", "rolling-back-suse-rancher-prime"}},
+	{Ask: "port requirements for Rancher server nodes", Want: []string{"_ports_for_rancher_server_nodes_on_k3s_product_name",
+		"_ports_for_rancher_server_nodes_on_rke2_product_name", "_port_requirements"}},
+	{Ask: "configure Active Directory authentication", Want: []string{"configure-active-directory-ad", "_open_active_directory_configuration",
+		"_configure_active_directory_server_settings"}},
+	{Ask: "create an API key", Want: []string{"_creating_an_api_key"}},
+	{Ask: "enable monitoring for a cluster", Want: []string{"enable-monitoring", "_enable_monitoring_for_use_without_ssl", "_enable_monitoring_for_use_with_ssl"}},
+	{Ask: "register an existing cluster in Rancher", Want: []string{"registering-existing-clusters", "_registering_existing_clusters"}},
+	{Ask: "back up Rancher with the backup operator", Want: []string{"backing-up-suse-rancher-prime", "_1_install_the_rancher_backup_operator"}},
+	{Ask: "rotate certificates of a cluster", Want: []string{"certificate-rotation", "_certificate_rotation_2"}},
+	{Ask: "rancher feature flags", Want: []string{"feature-flags"}},
+	{Ask: "add members to a project", Want: []string{"_adding_members_to_a_new_project", "_adding_members_to_an_existing_project"}},
+}
+
+// RKE2 name the sections of RKE2's documentation that answer them.
+var RKE2 = []Question{
+	{Ask: "restore an RKE2 cluster from a snapshot", Want: []string{"_snapshot_restore_steps", "_restoring_snapshots"}, Collection: "rke2"},
+	{Ask: "install RKE2 on a server node", Want: []string{"_server_node_installation"}, Collection: "rke2"},
+	{Ask: "air-gapped installation of RKE2", Want: []string{"air-gap-install"}, Collection: "rke2"},
+	{Ask: "enable FIPS mode in RKE2", Want: []string{"fips-140-3-enablement"}, Collection: "rke2"},
+	{Ask: "configure a private registry for RKE2", Want: []string{"private-registry-configuration"}, Collection: "rke2"},
+	{Ask: "uninstall RKE2", Want: []string{"uninstall", "_linux_uninstall", "_windows_uninstall"}, Collection: "rke2"},
+	{Ask: "RKE2 high availability with three server nodes", Want: []string{"high-availability"}, Collection: "rke2"},
+	{Ask: "harden RKE2 for the CIS benchmark", Want: []string{"cis-hardening-guide"}, Collection: "rke2"},
+}
+
+// K3s name the sections of K3s's documentation that answer them.
+var K3s = []Question{
+	{Ask: "install K3s with the install script", Want: []string{"_install_script"}, Collection: "k3s"},
+	{Ask: "use an external database as K3s datastore", Want: []string{"_external_datastore_configuration_parameters", "cluster-datastore"}, Collection: "k3s"},
+	{Ask: "K3s embedded etcd high availability", Want: []string{"high-availability-embedded-etcd"}, Collection: "k3s"},
+	{Ask: "uninstall K3s", Want: []string{"uninstalling-k3s", "_uninstalling_servers", "_uninstalling_agents"}, Collection: "k3s"},
+	{Ask: "configure a private registry in K3s", Want: []string{"private-registry-configuration"}, Collection: "k3s"},
+	{Ask: "upgrade K3s automatically with the system upgrade controller", Want: []string{"_using_the_system_upgrade_controller"}, Collection: "k3s"},
+	{Ask: "back up and restore the K3s SQLite datastore", Want: []string{"_backup_and_restore_with_sqlite"}, Collection: "k3s"},
+	{Ask: "encrypt K3s secrets at rest", Want: []string{"k3s-secrets-encrypt", "secrets-encryption-config"}, Collection: "k3s"},
+}
+
+// Virtualization name the sections of SUSE Virtualization's (Harvester's)
+// documentation that answer them.
+var Virtualization = []Question{
+	{Ask: "start a live migration of a virtual machine", Want: []string{"_starting_migration"}},
+	{Ask: "take a backup of a virtual machine", Want: []string{"_create_a_virtual_machine_backup", "_vm_backup_restore"}},
+	{Ask: "create a virtual machine", Want: []string{"_how_to_create_a_virtual_machine"}},
+	{Ask: "upload a VM image", Want: []string{"_upload_images_via_local_file", "_upload_images_via_url"}},
+	{Ask: "hot-plug a volume", Want: []string{"_adding_hot_plug_volumes_to_a_running_virtual_machine", "volume-hotplug"}},
+	{Ask: "configure the storage network", Want: []string{"storage-network", "_storage_network_setting", "_enable_the_storage_network"}},
+	{Ask: "generate a support bundle", Want: []string{"_generate_a_support_bundle"}},
+	{Ask: "hardware requirements of SUSE Virtualization", Want: []string{"hardware-and-network-requirements"}},
 }

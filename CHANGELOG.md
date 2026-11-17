@@ -3,6 +3,29 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+SUSE's cloud-native products
+
+- `mcp-docs-convert --antora` converts the pages of an Antora
+  component, written in AsciiDoc, into a collection: conditionals,
+  includes and attributes as the site's build has them, sections under
+  the ids Asciidoctor gives them, cross-references as links between
+  documents, tables, lists, tabs and admonitions. New flags:
+  `--antora`, `--antora-descriptor`, `--antora-shared`,
+  `--antora-module`, `--attributes`, `--attribute`, `--nav-only`,
+  `--license`.
+- New packages: `suse-docs-mcp-rancher-2.15`, `suse-docs-mcp-rke2`,
+  `suse-docs-mcp-k3s` and `suse-docs-mcp-suse-virtualization-1.8`,
+  converted from github.com/rancher's `*-product-docs`
+  (`tools/suse-docs/convert-antora`, which also converts Rancher AI
+  1.1).
+- `find_sections`: a question that names a product ("… in RKE2") is
+  answered from that product's collection first, where several are
+  served.
+- `find_sections`: a word that a title has only in another spelling
+  ("HelmChart" for "Helm chart") counts less than the word itself.
+
 ## v0.3.0 — 2026-11-10
 
 Fewer calls for an answer and fewer tokens for a call
