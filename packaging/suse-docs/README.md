@@ -20,8 +20,9 @@ air-gapped, updated with the package.
 | `suse-docs-mcp-k3s` ([k3s](k3s)) | SUSE Rancher Prime: K3s, latest, 70 pages | rancher/k3s-product-docs |
 | `suse-docs-mcp-suse-virtualization-1.8` ([suse-virtualization-1.8](suse-virtualization-1.8)) | SUSE Virtualization (Harvester) 1.8, 129 pages | rancher/harvester-product-docs |
 | `suse-docs-mcp-rancher-ai-1.1` ([rancher-ai-1.1](rancher-ai-1.1)) | Rancher AI 1.1, 12 pages | rancher/rancher-ai-product-docs |
+| `suse-docs-mcp-rancher-ai-1.2` ([rancher-ai-1.2](rancher-ai-1.2)) | Rancher AI 1.2, 12 pages; not released yet, the sources' prerelease (the package's version is `1.2.0~dev+git…`) | rancher/rancher-ai-product-docs |
 
-The last five are converted from AsciiDoc
+The last six are converted from AsciiDoc
 (`tools/suse-docs/convert-antora`), a document per page; their license
 is the Apache License 2.0 (Rancher AI's repository has no LICENSE file
 yet at the package's revision, so that package does not install one;

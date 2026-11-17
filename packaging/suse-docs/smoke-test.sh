@@ -8,7 +8,7 @@
 # PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0,
 # suse-docs-mcp-sles-sap-16.0, the same for 16.1, suse-docs-mcp-sle-micro,
 # or one of the cloud-native products': suse-docs-mcp-rancher-2.15,
-# -rke2, -k3s, -suse-virtualization-1.8, -rancher-ai-1.1.
+# -rke2, -k3s, -suse-virtualization-1.8, -rancher-ai-1.1, -rancher-ai-1.2.
 set -eu
 
 pkg=${1:-suse-docs-mcp-sles-16.0}
@@ -125,6 +125,19 @@ suse-docs-mcp-rancher-ai-1.1)
 	}
 	answers='rancher-ai-1.1/quick-start.md
 rancher-ai-1.1/reference/troubleshooting.md
+Install the UI extension'
+	;;
+suse-docs-mcp-rancher-ai-1.2)
+	coll=rancher-ai-1.2
+	title='Rancher AI 1.2 (prerelease)'
+	owned=quick-start.md
+	calls() {
+		call 2 find_sections '{"query":"install Liz, the Rancher AI assistant","collection":"rancher-ai-1.2"}'
+		call 3 find_sections '{"query":"troubleshooting","collection":"rancher-ai-1.2"}'
+		call 4 read_section '{"doc":"rancher-ai-1.2/quick-start.md#_install_the_ui_extension"}'
+	}
+	answers='rancher-ai-1.2/quick-start.md
+rancher-ai-1.2/reference/troubleshooting.md
 Install the UI extension'
 	;;
 suse-docs-mcp-suse-virtualization-1.8)
