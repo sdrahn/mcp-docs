@@ -200,6 +200,11 @@ func findSections(s *Server, ctx context.Context, args json.RawMessage) (*result
 		if s.prefers(d.Coll) {
 			p.Boost = preferBoost
 		}
+		// A question that names a collection's product is asked of it
+		// first ("... in RKE2", where K3s's documentation says the same).
+		if s.named(d.Coll, a.Query) {
+			p.Boost = max(p.Boost, 1) * namedBoost
+		}
 		parts = append(parts, p)
 	}
 	// The system's collections first: of a section that several hold

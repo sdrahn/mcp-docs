@@ -1863,3 +1863,109 @@ One inotify instance for all collections. Not for a server of one
 session (stdin/stdout): a user has few instances (128 by default), a
 session is over after a few calls, and many run at once. A collection
 with documents elsewhere (`also`) is walked, not watched.
+
+## 18. SUSE's cloud-native products: AsciiDoc and Antora
+
+SUSE's documentation of Rancher and what belongs to it
+(documentation.suse.com/cloudnative) is not DocBook: it is AsciiDoc,
+a repository per product under github.com/rancher (`*-product-docs`),
+built into the site with Antora. `mcp-docs-convert --antora` reads
+those sources (`internal/asciidoc`), and makes of them what §14 makes
+of DocBook: a collection of Markdown documents under the site's ids,
+each linked to its page.
+
+### 18.1 The products
+
+The latest released version of each, at pinned revisions
+(`tools/suse-docs/convert-antora`):
+
+| Collection | Product | Sources (github.com/rancher) | Documents | Markdown |
+|---|---|---|---|---|
+| `rancher-2.15` | SUSE Rancher Prime 2.15 | `rancher-product-docs`, `versions/v2.15` | 394 | 2.5 MiB |
+| `rke2` | SUSE Rancher Prime: RKE2 | `rke2-product-docs`, `versions/latest` | 74 | 2.6 MiB |
+| `k3s` | SUSE Rancher Prime: K3s | `k3s-product-docs`, `docs/latest` | 70 | 2.4 MiB |
+| `suse-virtualization-1.8` | SUSE Virtualization (Harvester) 1.8 | `harvester-product-docs`, `versions/v1.8` | 129 | 1.3 MiB |
+| `rancher-ai-1.1` | Rancher AI 1.1 | `rancher-ai-product-docs`, `docs/version-1.1.0` | 12 | 87 KiB |
+
+The first four are packaged (`packaging/suse-docs`); their
+repositories carry the Apache License 2.0. `rancher-ai-product-docs`
+states no license: its collection can be made, and no package of it is
+in this repository. SUSE Storage (Longhorn, `longhorn-product-docs`)
+is left out for the same reason. RKE2 and K3s have one version, the
+latest; their packages' versions are the sources' date and revision.
+
+### 18.2 What is read
+
+A page is a document; the navigation (`nav.adoc`) is the index, its
+upper two levels with what is below counted. The reader is a
+preprocessor, then blocks, then inline text:
+
+- **The preprocessor**: `ifdef`, `ifndef`, `ifeval` (Rancher's sources
+  hold the community's, the product's and another build's text between
+  `ifeval::["{build-type}" == "product"]`: the product's is read),
+  `include::` with tags and `leveloffset`, also of another component's
+  partials (`shared:ROOT:partial$…`), attribute entries and references.
+  The attributes are the site's: the component's descriptor
+  (`antora.yml`) and `global-attributes.yml` of
+  rancher/product-docs-common, which the playbook sets.
+- **Blocks**: sections (also written `## ` as in Markdown, which the
+  sources do), paragraphs, listings and literals as fenced code with
+  their language, lists with their continuations, description lists,
+  tables with spans and cells of blocks, admonitions (`> **Note**`),
+  quotes, tabs (a heading per tab), collapsible blocks, images as
+  their alternative text. Passthrough blocks (HTML) are left out.
+- **Inline**: emphasis, code, links, cross-references, keys, buttons
+  and menus, footnotes.
+
+**Ids are Asciidoctor's.** A section without an id has the one
+Asciidoctor gives it (`_install_the_server`), made the same way, so
+`doc#id` is the anchor of the site's page; headings are written
+`## Title {#id}`. Cross-references between pages become links between
+documents (`install/quickstart.md#_server_node_installation`).
+
+**Only what the site publishes.** Rancher's playbook leaves out the
+pages its navigation does not list (`--nav-only`).
+
+**Reading stays below the sources' directory** (an `os.Root`): an
+include that leaves it is a problem reported, not a file read.
+
+### 18.3 What is reported
+
+`--strict` fails a conversion on a block or macro the reader does not
+know and on an include it cannot read: there are none in the five
+products. Cross-references whose target does not exist are reported
+and do not fail it: they are the sources' own (a page moved, an anchor
+renamed), a few per product, and their text is kept without a link.
+Counted in words, the documents hold 93 to 99 percent of the sources'
+text; Rancher's the least, since the other builds' text is left out.
+
+Not verified: the pages' addresses on documentation.suse.com
+(`/cloudnative/COMPONENT/VERSION/en/PAGE.html`) are made as Antora
+makes them and were not fetched, and the packages' `_service` files
+are written to make the tarball `tools/suse-docs/source-tarball-antora`
+makes, and were not run.
+
+### 18.4 Served with the others
+
+Eleven collections together (the seven of §17.3 and the four packaged
+here; 100 questions, none naming a collection): 76 answered by the
+first result. Two changes came of it:
+
+- **A question that names a product is asked of it first**
+  (`namedBoost`, 1.25): "install RKE2 on a server node" among RKE2's
+  and K3s's documentation, which say much the same. A collection is
+  named by a word of its name or title that no other collection has.
+  RKE2's questions: 5 of 8 first, from 2.
+- **A word found only as a spelling variant counts less in a title**
+  (`spellingTitle`, 0.75): "Helm chart" found sections titled
+  "HelmChart" before those about a Helm chart.
+
+What it costs: on their systems (§17.4), the SLE collections answer
+109 of 128 first, from 110, and the first result is the system's 101
+times, from 102. And the pairs of spellings (§17.5, asked on a SLES
+16.1 system with SLE HA) agree on 5 of 12, from 8 with the seven
+collections: "back up the system" has more answers among eleven
+collections than one, and which is first depends on less.
+Kubernetes' own questions ("upload a VM image", "rotate
+certificates of a cluster") are the ones not answered first: several
+products document them.

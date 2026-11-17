@@ -393,3 +393,32 @@ func TestWatchedIndex(t *testing.T) {
 		t.Errorf("after a document in a new directory: %s", got)
 	}
 }
+
+// TestNamedCollectionFirst: a question that names a collection's
+// product is answered from it, where another collection says the same.
+func TestNamedCollectionFirst(t *testing.T) {
+	s, dirs := newServer(t, 16<<10, "alpha-1.0", "beta-1.0")
+	for _, c := range []string{"alpha-1.0", "beta-1.0"} {
+		write(t, filepath.Join(dirs[c], "topics/install.md"), "# Installing a server node\n\nInstall the server node first.\n")
+	}
+	first := func(q string) string {
+		t.Helper()
+		r := call(t, s, "find_sections", map[string]any{"query": q, "read": false})
+		mustOK(t, r)
+		ss := r.Structured["sections"].([]any)
+		if len(ss) == 0 {
+			t.Fatalf("%q: nothing", q)
+		}
+		return ss[0].(map[string]any)["doc"].(string)
+	}
+	if got := first("install a server node of beta"); !strings.HasPrefix(got, "beta-1.0/") {
+		t.Errorf("a question naming beta is answered from %s", got)
+	}
+	if got := first("install a server node of alpha"); !strings.HasPrefix(got, "alpha-1.0/") {
+		t.Errorf("a question naming alpha is answered from %s", got)
+	}
+	// A version is no name: both collections have it.
+	if s.named(s.Cat.Collection("beta-1.0"), "version 1.0") {
+		t.Error("a version names no collection")
+	}
+}

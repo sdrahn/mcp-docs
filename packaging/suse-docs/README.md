@@ -15,6 +15,19 @@ air-gapped, updated with the package.
 | `suse-docs-mcp-sle-ha-16.1` ([sle-ha-16.1](sle-ha-16.1)) | SUSE Linux Enterprise High Availability 16.1, its 19 articles (`tools/suse-docs/sle-ha-16.1`) | SUSE/doc-modular, `maintenance/SLE16.1` (the same tarball as SLES 16.1's) |
 | `suse-docs-mcp-sles-sap-16.1` ([sles-sap-16.1](sles-sap-16.1)) | SUSE Linux Enterprise Server for SAP applications 16.1, its 71 articles (`tools/suse-docs/sles-sap-16.1`) | SUSE/doc-modular, `maintenance/SLE16.1` (the same tarball as SLES 16.1's) |
 | `suse-docs-mcp-sle-micro` ([sle-micro](sle-micro)) | SUSE Linux Micro 6.0, 6.1 and 6.2, their 29, 35 and 38 articles (`tools/suse-docs/sle-micro-V`), one collection, a directory per version | SUSE/doc-modular, `maintenance/SLE_Micro_6.0`, `maintenance/SLE_Micro_6.1`, `maintenance/SLE16.0` (6.2) |
+| `suse-docs-mcp-rancher-2.15` ([rancher-2.15](rancher-2.15)) | SUSE Rancher Prime 2.15, the 394 pages of its site | rancher/rancher-product-docs (AsciiDoc; §18) |
+| `suse-docs-mcp-rke2` ([rke2](rke2)) | SUSE Rancher Prime: RKE2, latest, 74 pages | rancher/rke2-product-docs |
+| `suse-docs-mcp-k3s` ([k3s](k3s)) | SUSE Rancher Prime: K3s, latest, 70 pages | rancher/k3s-product-docs |
+| `suse-docs-mcp-suse-virtualization-1.8` ([suse-virtualization-1.8](suse-virtualization-1.8)) | SUSE Virtualization (Harvester) 1.8, 129 pages | rancher/harvester-product-docs |
+
+The last four are converted from AsciiDoc
+(`tools/suse-docs/convert-antora`), a document per page; their license
+is the Apache License 2.0, and their source tarball is made by
+`tools/suse-docs/source-tarball-antora` (`PRODUCT=rke2
+tools/suse-docs/source-tarball-antora DIR`). Their `_service` files are
+written to make the same tarball and have not been run on OBS. To
+update one: `rev` and `common` in `convert-antora`, then the revision
+in `_service` and `rev`, `shortrev`, `revdate` in the spec.
 
 CI builds them in the openSUSE Tumbleweed and Leap 16.0 containers after
 mcp-docs (job `opensuse`), with the `mcp-docs-convert` package just

@@ -122,6 +122,17 @@ jobs:
             packaging/suse-docs/smoke-test.sh suse-docs-mcp-$p-16.1
             packaging/suse-docs/smoke-test.sh suse-docs-mcp-$p-16.0
           done
+      # The cloud-native products: a source tarball each, of the product's
+      # documentation repository (AsciiDoc, converted by the same package).
+      - name: Documentation packages (suse-docs-mcp-rancher-2.15, -rke2, -k3s, -suse-virtualization-1.8)
+        run: |
+          for p in rancher-2.15 rke2 k3s suse-virtualization-1.8; do
+            cp "$(PRODUCT=$p tools/suse-docs/source-tarball-antora)" ~/rpmbuild/SOURCES/
+            rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/suse-docs/$p/suse-docs-mcp-$p.spec
+            rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-$p-[0-9]*.rpm
+            rpm -ivh ~/rpmbuild/RPMS/noarch/suse-docs-mcp-$p-[0-9]*.rpm
+            packaging/suse-docs/smoke-test.sh suse-docs-mcp-$p
+          done
       # All the collections are installed now: their questions asked of
       # them together, no collection named (docs/architecture.md §17).
       - name: Collections served together

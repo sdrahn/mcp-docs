@@ -109,6 +109,38 @@ tools/suse-docs/convert-sle-micro          # build/sle-micro
 MCP_DOCS_SLE_MICRO=$PWD/build/sle-micro go test -run TestSLEMicro -v ./internal/docbook/
 ```
 
+## Rancher, RKE2, K3s, SUSE Virtualization, Rancher AI
+
+The cloud-native products' documentation is AsciiDoc, a repository per
+product under github.com/rancher, built with Antora
+([docs/architecture.md](../../docs/architecture.md), §18).
+`convert-antora` converts the latest released version of one, at a
+pinned revision, with `mcp-docs-convert --antora --strict`:
+
+```sh
+PRODUCT=rancher-2.15 tools/suse-docs/convert-antora            # build/rancher-2.15
+PRODUCT=rke2 tools/suse-docs/convert-antora
+PRODUCT=k3s tools/suse-docs/convert-antora
+PRODUCT=suse-virtualization-1.8 tools/suse-docs/convert-antora
+PRODUCT=rancher-ai-1.1 tools/suse-docs/convert-antora
+```
+
+It fetches the repository into `build/`, and the site's attributes
+(`global-attributes.yml` of rancher/product-docs-common, at the
+revision the repository has it as a submodule); with `SRC` set it reads
+that tree as it is, as a package build does.
+`source-tarball-antora` makes that tree a tarball
+(`REPO-SHORTREV.tar.xz`) for the package.
+
+The report names cross-references whose target the sources do not
+have: they are the sources' errors and do not fail the conversion.
+`rancher-ai-product-docs` states no license; its collection says so,
+and it has no package here.
+
+To update one: set `rev` (and `common`, the submodule's revision at
+it) in `convert-antora`, run it, read the report; then the package
+([packaging/suse-docs](../../packaging/suse-docs/README.md)).
+
 ## Updating SLES 16.0
 
 `sles-16.0` lists the build definitions of the articles the site

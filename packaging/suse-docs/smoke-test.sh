@@ -6,7 +6,9 @@
 #   packaging/suse-docs/smoke-test.sh [PACKAGE]
 #
 # PACKAGE: suse-docs-mcp-sles-16.0 (the default), suse-docs-mcp-sle-ha-16.0,
-# suse-docs-mcp-sles-sap-16.0, the same for 16.1, or suse-docs-mcp-sle-micro.
+# suse-docs-mcp-sles-sap-16.0, the same for 16.1, suse-docs-mcp-sle-micro,
+# or one of the cloud-native products': suse-docs-mcp-rancher-2.15,
+# -rke2, -k3s, -suse-virtualization-1.8.
 set -eu
 
 pkg=${1:-suse-docs-mcp-sles-16.0}
@@ -72,6 +74,58 @@ suse-docs-mcp-sle-micro)
 sle-micro/6.0/topics/keylime-remote-attestation.md
 Changing the SELinux mode permanently
 /etc/selinux/config'
+	;;
+suse-docs-mcp-rancher-2.15)
+	coll=rancher-2.15
+	title='SUSE Rancher Prime 2.15'
+	owned=installation-and-upgrade/install-rancher.md
+	calls() {
+		call 2 find_sections '{"query":"install cert-manager before installing Rancher","collection":"rancher-2.15"}'
+		call 3 find_sections '{"query":"restore a cluster from an etcd snapshot","collection":"rancher-2.15"}'
+		call 4 read_section '{"doc":"rancher-2.15/installation-and-upgrade/install-rancher.md#_install_the_rancher_helm_chart"}'
+	}
+	answers='rancher-2.15/installation-and-upgrade/install-rancher.md
+rancher-2.15/cluster-admin/backups-and-restore/restore.md
+helm install rancher'
+	;;
+suse-docs-mcp-rke2)
+	coll=rke2
+	title='SUSE Rancher Prime: RKE2'
+	owned=install/quickstart.md
+	calls() {
+		call 2 find_sections '{"query":"install RKE2 with the quick start","collection":"rke2"}'
+		call 3 find_sections '{"query":"restore a snapshot to existing nodes","collection":"rke2"}'
+		call 4 read_section '{"doc":"rke2/install/quickstart.md#_server_node_installation"}'
+	}
+	answers='rke2/install/quickstart.md
+rke2/datastore/backup_restore.md
+systemctl enable rke2-server.service'
+	;;
+suse-docs-mcp-k3s)
+	coll=k3s
+	title='SUSE Rancher Prime: K3s'
+	owned=quick-start.md
+	calls() {
+		call 2 find_sections '{"query":"install K3s with the install script","collection":"k3s"}'
+		call 3 find_sections '{"query":"embedded registry mirror","collection":"k3s"}'
+		call 4 read_section '{"doc":"k3s/quick-start.md#_install_script"}'
+	}
+	answers='k3s/quick-start.md
+k3s/installation/registry-mirror.md
+get.k3s.io'
+	;;
+suse-docs-mcp-suse-virtualization-1.8)
+	coll=suse-virtualization-1.8
+	title='SUSE Virtualization 1.8'
+	owned=virtual-machines/live-migration.md
+	calls() {
+		call 2 find_sections '{"query":"start a live migration of a virtual machine","collection":"suse-virtualization-1.8"}'
+		call 3 find_sections '{"query":"create a VLAN network for virtual machines","collection":"suse-virtualization-1.8"}'
+		call 4 read_section '{"doc":"suse-virtualization-1.8/virtual-machines/live-migration.md#_starting_migration"}'
+	}
+	answers='suse-virtualization-1.8/virtual-machines/live-migration.md
+suse-virtualization-1.8/networking/vm-network.md
+Starting a migration'
 	;;
 *)
 	fail "unknown package $pkg"
