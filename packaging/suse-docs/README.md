@@ -33,6 +33,28 @@ written to make the same tarball and have not been run on OBS. To
 update one: `rev` and `common` in `convert-antora`, then the revision
 in `_service` and `rev`, `shortrev`, `revdate` in the spec.
 
+**A new product or version** is known to `convert-antora` only from the
+mcp-docs-convert that has it, which a project may not have yet. Its
+package does not have to wait for one: the spec gives the settings
+itself, which `convert-antora` takes from the environment over its own
+(they are listed at the top of the script), with any name as `PRODUCT`:
+
+```
+%build
+PRODUCT=%{coll} SRC=$PWD REV=%{rev} \
+ANTORA_REPO=%{repo} ANTORA_START=docs/version-1.3.0 ANTORA_SHARED=shared \
+ANTORA_COMPONENT=rancher-ai ANTORA_SITE=1.3.0 \
+ANTORA_PRODUCT='Rancher AI' ANTORA_VERSION=1.3 ANTORA_TITLE='Rancher AI 1.3' \
+ANTORA_ABOUT='Liz, the Rancher AI assistant: installing and configuring it' \
+	%{_datadir}/mcp-docs-convert/suse-docs/convert-antora \
+	build/%{coll} %{_datadir}/mcp-docs/docs/suse/%{coll}
+```
+
+That needs mcp-docs-convert 0.4.1 or later (`BuildRequires:
+mcp-docs-convert >= 0.4.1`). Add the product to the script as well, so
+that CI builds the package and `source-tarball-antora` makes its
+tarball.
+
 CI builds them in the openSUSE Tumbleweed and Leap 16.0 containers after
 mcp-docs (job `opensuse`), with the `mcp-docs-convert` package just
 built, runs rpmlint, installs them and runs `smoke-test.sh PACKAGE`:
