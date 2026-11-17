@@ -3,9 +3,9 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.4.0 — 2026-11-17
 
-SUSE's cloud-native products
+SUSE's cloud-native products (docs/architecture.md §18)
 
 - `mcp-docs-convert --antora` converts the pages of an Antora
   component, written in AsciiDoc, into a collection: conditionals,
