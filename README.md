@@ -17,7 +17,7 @@ SLES 16 ([packaging/suse](packaging/suse/README.md)), ranked search
 image. `mcp-docs-convert` converts SUSE's documentation
 (documentation.suse.com) from its DocBook sources: all of SLES, SLE HA
 and SLES for SAP 16.0 and 16.1, and SUSE Linux Micro 6.0, 6.1 and 6.2 ([tools/suse-docs](tools/suse-docs/README.md)), packaged as
-`suse-docs-mcp-sles-16.0`, `suse-docs-mcp-sle-ha-16.0`, `suse-docs-mcp-sles-sap-16.0`, the same for 16.1, and `suse-docs-mcp-sle-micro`; and, from their AsciiDoc (Antora) sources, SUSE Rancher Prime 2.15, RKE2, K3s, SUSE Virtualization 1.8 and Rancher AI 1.1 (`suse-docs-mcp-rancher-2.15`, `-rke2`, `-k3s`, `-suse-virtualization-1.8`, `-rancher-ai-1.1`) ([packaging/suse-docs](packaging/suse-docs/README.md)); other formats than
+`suse-docs-mcp-sles-16.0`, `suse-docs-mcp-sle-ha-16.0`, `suse-docs-mcp-sles-sap-16.0`, the same for 16.1, and `suse-docs-mcp-sle-micro`; and, from their AsciiDoc (Antora) sources, SUSE Rancher Prime 2.15, RKE2, K3s, SUSE Virtualization 1.8 and Rancher AI 1.1 and 1.2 (`suse-docs-mcp-rancher-2.15`, `-rke2`, `-k3s`, `-suse-virtualization-1.8`, `-rancher-ai-1.1`, `-rancher-ai-1.2`) ([packaging/suse-docs](packaging/suse-docs/README.md)); other formats than
 Markdown are designed, not built. See [docs/architecture.md](docs/architecture.md).
 
 How to write documentation that agents read cheaply, through mcp-docs

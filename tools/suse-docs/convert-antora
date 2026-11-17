@@ -10,6 +10,7 @@
 #   k3s                      SUSE Rancher Prime: K3s (the same)
 #   suse-virtualization-1.8  SUSE Virtualization 1.8 (Harvester)
 #   rancher-ai-1.1           Rancher AI 1.1
+#   rancher-ai-1.2           Rancher AI 1.2 (not released yet: its sources are a prerelease)
 #
 #   PRODUCT=... tools/suse-docs/convert-antora [OUT [ROOT]]
 #   PRODUCT=... tools/suse-docs/convert-antora --sources DIR
@@ -28,7 +29,7 @@
 # pinned one).
 set -eu
 
-name=${PRODUCT:?convert-antora: set PRODUCT (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1)}
+name=${PRODUCT:?convert-antora: set PRODUCT (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1, rancher-ai-1.2)}
 shared=
 navonly=
 case $name in
@@ -58,6 +59,12 @@ suse-virtualization-1.8)
 	product='SUSE Virtualization' version=1.8 title='SUSE Virtualization 1.8'
 	about='installing and upgrading SUSE Virtualization (Harvester), hosts, virtual machines and images, networking, storage, the integration with Rancher, add-ons, troubleshooting'
 	;;
+rancher-ai-1.2)
+	repo=rancher-ai-product-docs rev=6c872577a6db7b3da64af6d15809f4c1b4651231 common=a703771967f0ea1155d2f3ead98ab92d1520ccce
+	start=docs/version-1.2.0 shared=shared component=rancher-ai site=1.2.0
+	product='Rancher AI' version=1.2 title='Rancher AI 1.2 (prerelease)'
+	about='Liz, the Rancher AI assistant, in the version in development: installing and configuring it, models, how-tos for administrators and users'
+	;;
 rancher-ai-1.1)
 	repo=rancher-ai-product-docs rev=6c872577a6db7b3da64af6d15809f4c1b4651231 common=a703771967f0ea1155d2f3ead98ab92d1520ccce
 	start=docs/version-1.1.0 shared=shared component=rancher-ai site=1.1.0
@@ -65,7 +72,7 @@ rancher-ai-1.1)
 	about='Liz, the Rancher AI assistant: installing and configuring it, models, how-tos for administrators and users'
 	;;
 *)
-	echo "convert-antora: unknown PRODUCT $name (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1)" >&2
+	echo "convert-antora: unknown PRODUCT $name (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1, rancher-ai-1.2)" >&2
 	exit 2
 	;;
 esac
@@ -126,7 +133,7 @@ if [ -d "$repodir/cmd/mcp-docs-convert" ]; then
 fi
 
 license='Copyright SUSE LLC and contributors; licensed under the Apache License 2.0.'
-if [ ! -f "$src/LICENSE" ] && [ "$name" != rancher-ai-1.1 ]; then
+if [ ! -f "$src/LICENSE" ] && [ "$repo" != rancher-ai-product-docs ]; then
 	# Rancher AI's documentation is under the Apache License 2.0; its
 	# repository has no LICENSE file yet at the pinned revision.
 	license="The sources' repository states no license."
