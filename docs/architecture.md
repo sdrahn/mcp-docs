@@ -1887,11 +1887,12 @@ The latest released version of each, at pinned revisions
 | `suse-virtualization-1.8` | SUSE Virtualization (Harvester) 1.8 | `harvester-product-docs`, `versions/v1.8` | 129 | 1.3 MiB |
 | `rancher-ai-1.1` | Rancher AI 1.1 | `rancher-ai-product-docs`, `docs/version-1.1.0` | 12 | 87 KiB |
 
-The first four are packaged (`packaging/suse-docs`); their
-repositories carry the Apache License 2.0. `rancher-ai-product-docs`
-states no license: its collection can be made, and no package of it is
-in this repository. SUSE Storage (Longhorn, `longhorn-product-docs`)
-is left out for the same reason. RKE2 and K3s have one version, the
+All five are packaged (`packaging/suse-docs`), under the Apache
+License 2.0. The first four repositories carry it; for
+`rancher-ai-product-docs` it is SUSE's word, and a pull request adds
+the file: until the package's revision has it, the package states the
+license and does not install its text. SUSE Storage (Longhorn,
+`longhorn-product-docs`) states no license and is left out. RKE2 and K3s have one version, the
 latest; their packages' versions are the sources' date and revision.
 
 ### 18.2 What is read
@@ -1947,9 +1948,9 @@ makes, and were not run.
 
 ### 18.4 Served with the others
 
-Eleven collections together (the seven of §17.3 and the four packaged
-here; 100 questions, none naming a collection): 76 answered by the
-first result. Two changes came of it:
+Twelve collections together (the seven of §17.3 and the five packaged
+here; 100 questions, none of Rancher AI's and none naming a
+collection): 76 answered by the first result. Two changes came of it:
 
 - **A question that names a product is asked of it first**
   (`namedBoost`, 1.25): "install RKE2 on a server node" among RKE2's
@@ -1964,7 +1965,7 @@ What it costs: on their systems (§17.4), the SLE collections answer
 109 of 128 first, from 110, and the first result is the system's 101
 times, from 102. And the pairs of spellings (§17.5, asked on a SLES
 16.1 system with SLE HA) agree on 5 of 12, from 8 with the seven
-collections: "back up the system" has more answers among eleven
+collections: "back up the system" has more answers among twelve
 collections than one, and which is first depends on less.
 Kubernetes' own questions ("upload a VM image", "rotate
 certificates of a cluster") are the ones not answered first: several

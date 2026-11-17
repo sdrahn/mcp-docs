@@ -124,9 +124,9 @@ jobs:
           done
       # The cloud-native products: a source tarball each, of the product's
       # documentation repository (AsciiDoc, converted by the same package).
-      - name: Documentation packages (suse-docs-mcp-rancher-2.15, -rke2, -k3s, -suse-virtualization-1.8)
+      - name: Documentation packages (suse-docs-mcp-rancher-2.15, -rke2, -k3s, -suse-virtualization-1.8, -rancher-ai-1.1)
         run: |
-          for p in rancher-2.15 rke2 k3s suse-virtualization-1.8; do
+          for p in rancher-2.15 rke2 k3s suse-virtualization-1.8 rancher-ai-1.1; do
             cp "$(PRODUCT=$p tools/suse-docs/source-tarball-antora)" ~/rpmbuild/SOURCES/
             rpmbuild -bb --define "_topdir $HOME/rpmbuild" packaging/suse-docs/$p/suse-docs-mcp-$p.spec
             rpmlint -r /tmp/rpmlintrc ~/rpmbuild/RPMS/noarch/suse-docs-mcp-$p-[0-9]*.rpm

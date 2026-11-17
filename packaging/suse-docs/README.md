@@ -19,10 +19,13 @@ air-gapped, updated with the package.
 | `suse-docs-mcp-rke2` ([rke2](rke2)) | SUSE Rancher Prime: RKE2, latest, 74 pages | rancher/rke2-product-docs |
 | `suse-docs-mcp-k3s` ([k3s](k3s)) | SUSE Rancher Prime: K3s, latest, 70 pages | rancher/k3s-product-docs |
 | `suse-docs-mcp-suse-virtualization-1.8` ([suse-virtualization-1.8](suse-virtualization-1.8)) | SUSE Virtualization (Harvester) 1.8, 129 pages | rancher/harvester-product-docs |
+| `suse-docs-mcp-rancher-ai-1.1` ([rancher-ai-1.1](rancher-ai-1.1)) | Rancher AI 1.1, 12 pages | rancher/rancher-ai-product-docs |
 
-The last four are converted from AsciiDoc
+The last five are converted from AsciiDoc
 (`tools/suse-docs/convert-antora`), a document per page; their license
-is the Apache License 2.0, and their source tarball is made by
+is the Apache License 2.0 (Rancher AI's repository has no LICENSE file
+yet at the package's revision, so that package does not install one;
+see its spec), and their source tarball is made by
 `tools/suse-docs/source-tarball-antora` (`PRODUCT=rke2
 tools/suse-docs/source-tarball-antora DIR`). Their `_service` files are
 written to make the same tarball and have not been run on OBS. To

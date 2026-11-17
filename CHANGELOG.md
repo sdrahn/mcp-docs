@@ -16,10 +16,9 @@ SUSE's cloud-native products
   `--antora-module`, `--attributes`, `--attribute`, `--nav-only`,
   `--license`.
 - New packages: `suse-docs-mcp-rancher-2.15`, `suse-docs-mcp-rke2`,
-  `suse-docs-mcp-k3s` and `suse-docs-mcp-suse-virtualization-1.8`,
-  converted from github.com/rancher's `*-product-docs`
-  (`tools/suse-docs/convert-antora`, which also converts Rancher AI
-  1.1).
+  `suse-docs-mcp-k3s`, `suse-docs-mcp-suse-virtualization-1.8` and
+  `suse-docs-mcp-rancher-ai-1.1`, converted from github.com/rancher's
+  `*-product-docs` (`tools/suse-docs/convert-antora`).
 - `find_sections`: a question that names a product ("… in RKE2") is
   answered from that product's collection first, where several are
   served.

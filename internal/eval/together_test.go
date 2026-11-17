@@ -47,7 +47,7 @@ func familyOf(collection string) string { return versionSuffix.ReplaceAllString(
 
 // togetherAll are the collections the floors are of: those of the
 // packages in packaging/suse-docs, at their pinned revisions.
-var togetherAll = []string{"k3s", "rancher-2.15", "rke2", "sle-ha-16.0", "sle-ha-16.1", "sle-micro", "sles-16.0", "sles-16.1",
+var togetherAll = []string{"k3s", "rancher-2.15", "rancher-ai-1.1", "rke2", "sle-ha-16.0", "sle-ha-16.1", "sle-micro", "sles-16.0", "sles-16.1",
 	"sles-sap-16.0", "sles-sap-16.1", "suse-virtualization-1.8"}
 
 // tally is what a run of questions came to.
