@@ -126,7 +126,9 @@ if [ -d "$repodir/cmd/mcp-docs-convert" ]; then
 fi
 
 license='Copyright SUSE LLC and contributors; licensed under the Apache License 2.0.'
-if [ ! -f "$src/LICENSE" ]; then
+if [ ! -f "$src/LICENSE" ] && [ "$name" != rancher-ai-1.1 ]; then
+	# Rancher AI's documentation is under the Apache License 2.0; its
+	# repository has no LICENSE file yet at the pinned revision.
 	license="The sources' repository states no license."
 fi
 sharedopt=

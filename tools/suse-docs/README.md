@@ -134,8 +134,8 @@ that tree as it is, as a package build does.
 
 The report names cross-references whose target the sources do not
 have: they are the sources' errors and do not fail the conversion.
-`rancher-ai-product-docs` states no license; its collection says so,
-and it has no package here.
+`rancher-ai-product-docs` has no LICENSE file at its pinned revision
+(the Apache License 2.0, which a pull request there adds).
 
 To update one: set `rev` (and `common`, the submodule's revision at
 it) in `convert-antora`, run it, read the report; then the package
