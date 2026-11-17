@@ -3,11 +3,16 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.4.1 — 2026-11-17
 
 - New package: `suse-docs-mcp-rancher-ai-1.2`, the documentation of
   Rancher AI 1.2 as its sources have it before the release (a
-  prerelease).
+  prerelease). It needs this release's mcp-docs-convert: 0.4.0's
+  `convert-antora` does not know the product.
+- `convert-antora` takes a product's settings from the environment
+  (`ANTORA_REPO`, `ANTORA_START`, … and `REV`), each over its own: the
+  package of a product or version it does not know sets them in its
+  spec, and builds with the mcp-docs-convert there is.
 
 ## v0.4.0 — 2026-11-17
 

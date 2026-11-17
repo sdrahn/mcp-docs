@@ -27,9 +27,39 @@
 # only writes that tree, the English pages and what they include, below
 # DIR, and prints its path. REV names the revision of SRC (default: the
 # pinned one).
+#
+# A product this script does not know, or one of the above differently:
+# the settings are taken from the environment, each over the product's
+# own, so that a package of a new product or version builds with the
+# mcp-docs-convert there is (its spec sets them) and needs no new one.
+# With ANTORA_REPO and ANTORA_START set, PRODUCT may be any name:
+#
+#   ANTORA_REPO       the repository under github.com/rancher (rke2-product-docs)
+#   ANTORA_START      the component version's directory in it (versions/latest)
+#   ANTORA_SHARED     a directory its pages include from (shared), or empty
+#   ANTORA_COMPONENT  the component's name in the site's addresses (rke2)
+#   ANTORA_SITE       the version in the site's addresses (latest, v2.15)
+#   ANTORA_NAV_ONLY   1: only the pages the navigation lists; 0: all
+#   ANTORA_PRODUCT    the product's name; ANTORA_VERSION its version, or empty
+#   ANTORA_TITLE      the collection's title
+#   ANTORA_ABOUT      what the documentation is about, for the description
+#   ANTORA_LICENSE    the sentence on the license, where the sources have no
+#                     LICENSE file
+#   ANTORA_COMMON     the revision of rancher/product-docs-common (only to
+#                     fetch the sources; with SRC it is not used)
+#
+# and REV, the sources' revision, which a product not known here needs.
 set -eu
 
-name=${PRODUCT:?convert-antora: set PRODUCT (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1, rancher-ai-1.2)}
+known='rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1, rancher-ai-1.2'
+name=${PRODUCT:?convert-antora: set PRODUCT ($known)}
+case $name in
+*[!A-Za-z0-9._-]* | .* | '')
+	echo "convert-antora: PRODUCT $name is not a collection's name" >&2
+	exit 2
+	;;
+esac
+repo= rev= common= start= component= site= product= version= title= about=
 shared=
 navonly=
 case $name in
@@ -72,10 +102,30 @@ rancher-ai-1.1)
 	about='Liz, the Rancher AI assistant: installing and configuring it, models, how-tos for administrators and users'
 	;;
 *)
-	echo "convert-antora: unknown PRODUCT $name (rancher-2.15, rke2, k3s, suse-virtualization-1.8, rancher-ai-1.1, rancher-ai-1.2)" >&2
-	exit 2
+	if [ -z "${ANTORA_REPO:-}" ] || [ -z "${ANTORA_START:-}" ]; then
+		echo "convert-antora: unknown PRODUCT $name ($known); for another, set ANTORA_REPO, ANTORA_START and the other settings" >&2
+		exit 2
+	fi
 	;;
 esac
+# The environment's settings, over the product's.
+repo=${ANTORA_REPO:-$repo} start=${ANTORA_START:-$start} common=${ANTORA_COMMON:-$common}
+shared=${ANTORA_SHARED-$shared}
+component=${ANTORA_COMPONENT:-$component} site=${ANTORA_SITE:-$site}
+product=${ANTORA_PRODUCT:-$product} version=${ANTORA_VERSION-$version}
+title=${ANTORA_TITLE:-$title} about=${ANTORA_ABOUT:-$about}
+case ${ANTORA_NAV_ONLY:-} in
+1) navonly=--nav-only ;;
+0) navonly= ;;
+esac
+rev=${REV:-$rev}
+for v in repo start component site product title about rev; do
+	eval "x=\$$v"
+	if [ -z "$x" ]; then
+		echo "convert-antora: PRODUCT $name: no $v (see the settings at the top of this script)" >&2
+		exit 2
+	fi
+done
 here=$(cd "$(dirname "$0")" && pwd)
 short=$(echo "$rev" | cut -c1-7)
 
@@ -101,6 +151,10 @@ sources() {
 	# shellcheck disable=SC2086
 	git -C "$clone" archive --format=tar "$rev" -- $paths ":!$start/modules/en/images" ":!$start/modules/en/attachments" |
 		tar -x -C "$tree"
+	if [ -z "$common" ]; then
+		echo "convert-antora: PRODUCT $name: set ANTORA_COMMON, the revision of rancher/product-docs-common" >&2
+		exit 2
+	fi
 	cclone=build/product-docs-common
 	if [ ! -d "$cclone/.git" ]; then
 		git clone -q --filter=blob:none --no-checkout https://github.com/rancher/product-docs-common "$cclone"
@@ -119,8 +173,6 @@ out=${1:-build/$name}
 
 if [ -n "${SRC:-}" ]; then
 	src=$SRC
-	rev=${REV:-$rev}
-	short=$(echo "$rev" | cut -c1-7)
 else
 	src=$(sources build)
 fi
@@ -137,6 +189,9 @@ if [ ! -f "$src/LICENSE" ] && [ "$repo" != rancher-ai-product-docs ]; then
 	# Rancher AI's documentation is under the Apache License 2.0; its
 	# repository has no LICENSE file yet at the pinned revision.
 	license="The sources' repository states no license."
+fi
+if [ ! -f "$src/LICENSE" ] && [ -n "${ANTORA_LICENSE:-}" ]; then
+	license=$ANTORA_LICENSE
 fi
 sharedopt=
 if [ -n "$shared" ]; then
