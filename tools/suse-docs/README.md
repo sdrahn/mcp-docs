@@ -138,6 +138,11 @@ have: they are the sources' errors and do not fail the conversion.
 `rancher-ai-product-docs` has no LICENSE file at its pinned revision
 (the Apache License 2.0, which a pull request there adds).
 
+A product or version the script does not know is converted with its
+settings in the environment (`ANTORA_REPO`, `ANTORA_START`, …, listed
+at the top of the script), each over the script's own; a package's
+spec can set them, and so does not need a newer mcp-docs-convert.
+
 To update one: set `rev` (and `common`, the submodule's revision at
 it) in `convert-antora`, run it, read the report; then the package
 ([packaging/suse-docs](../../packaging/suse-docs/README.md)).
