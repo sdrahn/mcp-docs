@@ -3,6 +3,12 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- New package: `suse-docs-mcp-rancher-ai-1.2`, the documentation of
+  Rancher AI 1.2 as its sources have it before the release (a
+  prerelease).
+
 ## v0.4.0 — 2026-11-17
 
 SUSE's cloud-native products (docs/architecture.md §18)

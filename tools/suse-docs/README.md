@@ -123,6 +123,7 @@ PRODUCT=rke2 tools/suse-docs/convert-antora
 PRODUCT=k3s tools/suse-docs/convert-antora
 PRODUCT=suse-virtualization-1.8 tools/suse-docs/convert-antora
 PRODUCT=rancher-ai-1.1 tools/suse-docs/convert-antora
+PRODUCT=rancher-ai-1.2 tools/suse-docs/convert-antora            # not released yet: a prerelease
 ```
 
 It fetches the repository into `build/`, and the site's attributes

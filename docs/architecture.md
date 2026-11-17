@@ -1886,8 +1886,9 @@ The latest released version of each, at pinned revisions
 | `k3s` | SUSE Rancher Prime: K3s | `k3s-product-docs`, `docs/latest` | 70 | 2.4 MiB |
 | `suse-virtualization-1.8` | SUSE Virtualization (Harvester) 1.8 | `harvester-product-docs`, `versions/v1.8` | 129 | 1.3 MiB |
 | `rancher-ai-1.1` | Rancher AI 1.1 | `rancher-ai-product-docs`, `docs/version-1.1.0` | 12 | 87 KiB |
+| `rancher-ai-1.2` | Rancher AI 1.2, not released yet (the sources mark it a prerelease) | `rancher-ai-product-docs`, `docs/version-1.2.0` | 12 | 83 KiB |
 
-All five are packaged (`packaging/suse-docs`), under the Apache
+All six are packaged (`packaging/suse-docs`), under the Apache
 License 2.0. The first four repositories carry it; for
 `rancher-ai-product-docs` it is SUSE's word, and a pull request adds
 the file: until the package's revision has it, the package states the
@@ -1948,7 +1949,7 @@ makes, and were not run.
 
 ### 18.4 Served with the others
 
-Twelve collections together (the seven of §17.3 and the five packaged
+Thirteen collections together (the seven of §17.3 and the six packaged
 here; 100 questions, none of Rancher AI's and none naming a
 collection): 76 answered by the first result. Two changes came of it:
 
@@ -1965,7 +1966,7 @@ What it costs: on their systems (§17.4), the SLE collections answer
 109 of 128 first, from 110, and the first result is the system's 101
 times, from 102. And the pairs of spellings (§17.5, asked on a SLES
 16.1 system with SLE HA) agree on 5 of 12, from 8 with the seven
-collections: "back up the system" has more answers among twelve
+collections: "back up the system" has more answers among thirteen
 collections than one, and which is first depends on less.
 Kubernetes' own questions ("upload a VM image", "rotate
 certificates of a cluster") are the ones not answered first: several
