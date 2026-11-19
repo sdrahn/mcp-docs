@@ -1864,6 +1864,41 @@ session (stdin/stdout): a user has few instances (128 by default), a
 session is over after a few calls, and many run at once. A collection
 with documents elsewhere (`also`) is walked, not watched.
 
+### 17.8 The tools say what is documented
+
+Not every client gives its model the server's `instructions`. Kit
+(0.143) keeps the `initialize` result only to see whether the server
+offers tasks; its model sees the tools, prefixed with the server's key
+(`suse-docs__find_sections`), under Kit's own prompt of a coding
+assistant. The instructions are where the collections were named, so
+such a model saw tools that read "documentation" without knowing which:
+it answered questions about SLES from memory or with its shell, and
+guessed collection names (`suse-16.1`).
+
+So the tools name the collections too:
+
+- **`find_sections`' description opens with what is documented**: "The
+  documentation on this system: SUSE Linux Enterprise Server 16.1;
+  SUSE Rancher Prime: RKE2; …", by the collections' titles (their names
+  where they have none), at most 600 bytes, then "and N more". Without
+  `find_sections` (`--tools`), `search` says it.
+- **`find_sections`' and `search`'s `collection` parameter lists the
+  names** (`enum`): a model picks one there is. `list_docs` does not
+  repeat them; called without a collection, it lists them. A name that
+  is not one is answered, as before, with the names there are.
+
+It costs every session, cached or not: 101 bytes with one collection,
+875 bytes (~220 tokens) with the thirteen SUSE collections, against a
+tool list of 5.1 KB. The instructions keep the list as well, with the
+descriptions, for clients that pass them. `TestSessionCost`'s budget for
+the tool definitions is 5.25 KiB, from 5 KiB.
+
+A client can steer its model further with its own configuration: in
+Kit, a user skill (`~/.config/kit/skills/NAME/SKILL.md`, whose
+description is in every prompt), `system-prompt` (which replaces Kit's
+prompt), or `AGENTS.md` (read only in the directory Kit starts in).
+mcp-docs no longer depends on them to be found.
+
 ## 18. SUSE's cloud-native products: AsciiDoc and Antora
 
 SUSE's documentation of Rancher and what belongs to it

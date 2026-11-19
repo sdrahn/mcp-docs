@@ -3,6 +3,16 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
+## Unreleased
+
+- The tools say what is documented, for clients that do not pass the
+  server's instructions to their model (Kit): `find_sections`'
+  description opens with the collections' titles, and `find_sections`'
+  and `search`'s `collection` parameter lists the collections' names, so
+  that a model neither answers from memory nor guesses a name
+  (docs/architecture.md §17.8). About 220 tokens more per session with
+  the thirteen SUSE collections.
+
 ## v0.4.1 — 2026-11-17
 
 - New package: `suse-docs-mcp-rancher-ai-1.2`, the documentation of

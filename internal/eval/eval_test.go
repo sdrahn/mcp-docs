@@ -394,7 +394,10 @@ func TestSessionCost(t *testing.T) {
 		instructions int
 		tools        int
 	}{
-		{false, nil, 2 << 10, 5 << 10},
+		// The tool definitions name the collections (find_sections'
+		// description, find_sections' and search's collection enum,
+		// §17.8): 101 B for this one, more for each further collection.
+		{false, nil, 2 << 10, 5<<10 + 256},
 		{true, nil, 2 << 10, 8 << 10},
 		{false, []string{"find_sections", "read_section", "outline"}, 2 << 10, 5 << 9},
 	} {
