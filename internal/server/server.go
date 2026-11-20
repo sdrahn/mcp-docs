@@ -264,10 +264,73 @@ func allToolNames() []string {
 	return out
 }
 
+// maxDocumented bounds the list of what the collections document in a
+// tool's description (documented): it is sent in every session.
+const maxDocumented = 600
+
+// documented is what the collections document, by their titles (their
+// names where they have none), for the description of the tool a
+// question starts with: a client that does not give its model the
+// server's instructions (Kit) sends it only the tools, and a model that
+// does not know what they cover answers from memory instead.
+func (s *Server) documented() string {
+	var titles []string
+	for _, k := range s.Cat.Collections {
+		t := k.Title
+		if t == "" {
+			t = k.Name
+		}
+		if !slices.Contains(titles, t) {
+			titles = append(titles, t)
+		}
+	}
+	out := ""
+	for i, t := range titles {
+		next := out
+		if i > 0 {
+			next += "; "
+		}
+		next += t
+		if len(next) > maxDocumented {
+			return fmt.Sprintf("%s; and %d more", out, len(titles)-i)
+		}
+		out = next
+	}
+	return out
+}
+
+// entryTool is the tool a question starts with, whose description says
+// what the documentation covers: find_sections, else search.
+func (s *Server) entryTool() string {
+	for _, n := range []string{"find_sections", "search"} {
+		if s.has(n) {
+			return n
+		}
+	}
+	return ""
+}
+
 func (s *Server) toolList() []map[string]any {
 	var out []map[string]any
+	entry := s.entryTool()
+	var names []string
+	for _, k := range s.Cat.Collections {
+		names = append(names, k.Name)
+	}
 	for _, t := range s.tools() {
-		m := map[string]any{"name": t.name, "title": t.title, "description": t.description, "inputSchema": t.input,
+		desc := t.description
+		if t.name == entry && len(s.Cat.Collections) > 0 {
+			desc = "The documentation on this system: " + s.documented() + ". " + desc
+		}
+		// The collections' names, so that a model asks for one there is
+		// rather than one it guessed ("no such collection"); list_docs
+		// lists them itself, called without one.
+		if props, ok := t.input["properties"].(map[string]any); ok && len(names) > 0 && t.name != "list_docs" {
+			if c, ok := props["collection"].(map[string]any); ok {
+				c["enum"] = names
+			}
+		}
+		m := map[string]any{"name": t.name, "title": t.title, "description": desc, "inputSchema": t.input,
 			"annotations": map[string]any{"readOnlyHint": true, "destructiveHint": false,
 				"idempotentHint": true, "openWorldHint": false}}
 		if t.output != nil && s.Structured {

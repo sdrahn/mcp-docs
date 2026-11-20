@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -762,5 +763,51 @@ func TestFixedTextIsStable(t *testing.T) {
 		if strings.Contains(want, d) {
 			t.Errorf("the fixed text holds a path: %s", d)
 		}
+	}
+}
+
+// TestToolsNameTheCollections: the tool a question starts with says what
+// the collections document, and the collection parameters list their
+// names, for clients that do not pass the instructions to their model.
+func TestToolsNameTheCollections(t *testing.T) {
+	s, _ := newServer(t, 16<<10, "app", "other")
+	s.Cat.Collection("app").Title = "The App Manual"
+	desc := func(s *Server, name string) (string, map[string]any) {
+		t.Helper()
+		for _, m := range s.toolList() {
+			if m["name"] == name {
+				props := m["inputSchema"].(map[string]any)["properties"].(map[string]any)
+				c, _ := props["collection"].(map[string]any)
+				return m["description"].(string), c
+			}
+		}
+		t.Fatalf("no tool %s", name)
+		return "", nil
+	}
+	d, c := desc(s, "find_sections")
+	if !strings.HasPrefix(d, "The documentation on this system: The App Manual; other. ") {
+		t.Errorf("find_sections: %q", d)
+	}
+	if !slices.Equal(c["enum"].([]string), []string{"app", "other"}) {
+		t.Errorf("find_sections' collection: %v", c)
+	}
+	if d, c := desc(s, "search"); strings.Contains(d, "The App Manual") || c["enum"] == nil {
+		t.Errorf("search: %q, %v: the list once, the names in each", d, c)
+	}
+	if _, c := desc(s, "list_docs"); c["enum"] != nil {
+		t.Errorf("list_docs' collection: %v: it lists the collections itself", c)
+	}
+	// Without find_sections, search says it.
+	s.Tools = []string{"search", "read_section"}
+	if d, _ := desc(s, "search"); !strings.HasPrefix(d, "The documentation on this system: ") {
+		t.Errorf("search without find_sections: %q", d)
+	}
+	// Bounded: many long titles end in "and N more".
+	s.Tools = nil
+	for _, k := range s.Cat.Collections {
+		k.Title = strings.Repeat(k.Name+" ", 80)
+	}
+	if d, _ := desc(s, "find_sections"); !strings.Contains(d, "; and 1 more. ") || len(d) > maxDocumented+300 {
+		t.Errorf("unbounded: %d B: %.120q", len(d), d)
 	}
 }
