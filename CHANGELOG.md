@@ -3,7 +3,7 @@
 Newest first. Each release's section is its GitHub release notes and its
 OBS changelog entry (packaging/suse/README.md).
 
-## Unreleased
+## v0.4.2 — 2026-11-20
 
 - The tools say what is documented, for clients that do not pass the
   server's instructions to their model (Kit): `find_sections`'
