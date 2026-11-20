@@ -5,7 +5,7 @@
   modules; OBS builds have no network access), then commit.
 
   Release branch: fetches release-0.4 and takes the version from its
-  latest tag (v0.4.1 -> 0.4.1); it needs that tag before the first build.
+  latest tag (v0.4.2 -> 0.4.2); it needs that tag before the first build.
 -->
 <services>
   <service name="tar_scm" mode="manual">
